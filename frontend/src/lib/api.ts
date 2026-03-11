@@ -1,0 +1,57 @@
+/**
+ * api.ts - Shared API client for Tax-Agent backend
+ *
+ * Auto-injects Firebase ID token into every request.
+ * Falls back to "test-token" in development bypass mode.
+ */
+import { auth } from '@/lib/firebase/config';
+
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+
+async function getAuthToken(): Promise<string> {
+    // Dev bypass mode
+    if (localStorage.getItem('DEV_BYPASS_AUTH') === 'true') {
+        return 'test-token';
+    }
+    const user = auth.currentUser;
+    if (user) {
+        return await user.getIdToken();
+    }
+    return 'test-token';
+}
+
+async function request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+): Promise<T> {
+    const token = await getAuthToken();
+    const res = await fetch(`${API_BASE}${path}`, {
+        method,
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+
+    if (!res.ok) {
+        let detail = res.statusText;
+        try {
+            const err = await res.json();
+            detail = err.detail || JSON.stringify(err);
+        } catch (_) {}
+        throw new Error(`API ${method} ${path} failed (${res.status}): ${detail}`);
+    }
+
+    // 204 No Content
+    if (res.status === 204) return undefined as T;
+    return res.json() as Promise<T>;
+}
+
+export const api = {
+    get: <T>(path: string) => request<T>('GET', path),
+    post: <T>(path: string, body: unknown) => request<T>('POST', path, body),
+    patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
+    delete: <T>(path: string) => request<T>('DELETE', path),
+};

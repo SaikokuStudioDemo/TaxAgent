@@ -1,0 +1,54 @@
+export const PLANS = [
+    {
+        id: 'plan-basic',
+        name: 'ベーシックプラン',
+        price: 15000,
+        features: ['基本機能', '月間500件までのデータ処理', 'メールサポート'],
+    },
+    {
+        id: 'plan-standard',
+        name: 'スタンダードプラン',
+        price: 30000,
+        features: ['全機能アクセス', '無制限のデータ処理', 'チャット・電話サポート', '優先処理'],
+    },
+    {
+        id: 'plan-premium',
+        name: 'プレミアムプラン',
+        price: 50000,
+        features: ['AIによる自動仕訳', '専任サポート担当', 'カスタムレポート作成', 'SLA保証'],
+    }
+];
+
+export const OPTIONS = [
+    {
+        id: 'opt-data-storage',
+        name: '拡張データストレージ (500GB)',
+        price: 5000,
+    },
+    {
+        id: 'opt-api-access',
+        name: '外部API連携オプション',
+        price: 10000,
+    }
+];
+
+export const APPROVAL_LEVELS = [
+    { value: 'staff', label: '一般担当者' },
+    { value: 'group_leader', label: '係長 / グループリーダー' },
+    { value: 'manager', label: '部長 / マネージャー' },
+    { value: 'director', label: '役員' },
+    { value: 'president', label: '社長 / 代表取締役' },
+];
+
+export const INITIAL_USERS = [
+    {
+        id: 'user-1',
+        name: '山田 太郎',
+        email: 'yamada@example.com',
+        role: 'president',
+        permissions: {
+            dataProcessing: true,
+            reportExtraction: true,
+        }
+    },
+];

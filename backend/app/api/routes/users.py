@@ -1,0 +1,690 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from app.models.user import CorporateUserCreate, CorporateUserInDB
+from app.api.deps import get_current_user
+from app.db.mongodb import get_database
+from typing import List
+
+router = APIRouter()
+
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register_corporate_user(
+    payload: CorporateUserCreate,
+    # In a real app, the frontend sends the Firebase Token in the Authorization header
+    # and this dependency validates it and extracts the Firebase UID.
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint to save a newly registered Corporate or Tax Firm entity.
+    """
+    db = get_database()
+    firebase_uid = current_user.get("uid")
+    
+    if not firebase_uid:
+        raise HTTPException(status_code=400, detail="Invalid auth token format")
+
+    # Check if a corporate record with this Firebase UID already exists
+    existing = await db["corporates"].find_one({"firebase_uid": firebase_uid})
+    if existing:
+        raise HTTPException(status_code=400, detail="User profile already exists in DB")
+
+    # Construct the DB record matching the Pydantic schema
+    db_record = CorporateUserInDB(
+        firebase_uid=firebase_uid,
+        corporateType=payload.corporateType,
+        companyUrl=payload.companyUrl,
+        maIntent=payload.maIntent,
+        planId=payload.planId,
+        selectedOptions=payload.selectedOptions,
+        monthlyFee=payload.monthlyFee,
+        sales_agent_id=payload.sales_agent_id,
+        referrer_id=payload.referrer_id,
+        advising_tax_firm_id=payload.advising_tax_firm_id
+    )
+
+    # Insert into MongoDB
+    await db["corporates"].insert_one(db_record.model_dump())
+    print(f">>> REGISTERED CORPORATE: UID={firebase_uid}, TYPE={payload.corporateType}")
+
+    return {"message": "Corporate profile successfully linked to Firebase Auth.", "data": db_record.model_dump()}
+
+@router.post("/employees", status_code=status.HTTP_201_CREATED)
+async def register_employee(
+    payload: list[dict], # Receive a list of employees for batch registration
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint to save employee records for a parent corporate/tax firm entity.
+    """
+    db = get_database()
+    parent_uid = current_user.get("uid")
+    
+    if not parent_uid:
+        raise HTTPException(status_code=400, detail="Invalid auth token format")
+
+    # Use the shared internal sync function
+    return await _sync_employees_internal(parent_uid, payload)
+
+async def _sync_employees_internal(parent_uid: str, payload: list[dict]):
+    """
+    Shared logic to create or update an employee in Firebase Auth, Firestore, and MongoDB.
+    Checks if the user exists first. If new, creates them and sends a password reset email.
+    """
+    db = get_database()
+    from app.models.user import EmployeeUserInDB
+    from firebase_admin import auth, firestore
+    from app.core.config import settings
+    import httpx
+    
+    fs_db = firestore.client()
+    processed = []
+
+    for emp_data in payload:
+        emp_email = emp_data["email"]
+        
+        try:
+            # Check if user already exists
+            try:
+                firebase_user = auth.get_user_by_email(emp_email)
+                emp_uid = firebase_user.uid
+                is_new_user = False
+            except auth.UserNotFoundError:
+                # Create NEW USER
+                firebase_user = auth.create_user(
+                    email=emp_email,
+                    display_name=emp_data["name"]
+                )
+                emp_uid = firebase_user.uid
+                is_new_user = True
+
+            # Save/Update PII in Firestore
+            fs_db.collection("employees").document(emp_uid).set({
+                "name": emp_data["name"],
+                "email": emp_email,
+                "parent_corporate_id": parent_uid,
+                "updatedAt": firestore.SERVER_TIMESTAMP
+            }, merge=True)
+
+            # Save/Update operational data in MongoDB
+            permissions = emp_data.get("permissions", {})
+            if isinstance(permissions, str):
+                import json
+                try:
+                    permissions = json.loads(permissions)
+                except:
+                    permissions = {}
+                    
+            await db["employees"].update_one(
+                {"firebase_uid": emp_uid},
+                {"$set": {
+                    "parent_corporate_id": parent_uid,
+                    "role": emp_data.get("role", "staff"),
+                    "permissions": permissions,
+                    "usageFee": emp_data.get("usageFee", 0)
+                }},
+                upsert=True
+            )
+
+            if is_new_user:
+                # Trigger reset email natively
+                api_key = settings.FIREBASE_API_KEY
+                if api_key:
+                    reset_url = f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={api_key}"
+                    reset_payload = {
+                        "requestType": "PASSWORD_RESET",
+                        "email": emp_email
+                    }
+                    async with httpx.AsyncClient() as client:
+                        res = await client.post(reset_url, json=reset_payload)
+                        if res.status_code == 200:
+                            print(f">>> INVITATION EMAIL successfully triggered for {emp_email}")
+            
+            processed.append({"email": emp_email, "uid": emp_uid, "status": "synced" if not is_new_user else "invited"})
+
+        except Exception as e:
+            print(f"Failed to process employee {emp_email}: {e}")
+            processed.append({"email": emp_email, "status": "failed", "error": str(e)})
+
+    print(f">>> SYNC EMPLOYEES: PARENT={parent_uid}, COUNT={len(processed)}")
+    return {"message": f"Processed {len(processed)} employees.", "data": processed}
+
+@router.get("/employees", status_code=status.HTTP_200_OK)
+async def get_employees(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint to retrieve the list of employees for a corporate/tax firm entity.
+    """
+    db = get_database()
+    firebase_uid = current_user.get("uid")
+    
+    if not firebase_uid:
+        raise HTTPException(status_code=400, detail="Invalid auth token format")
+
+    # Resolve effective UID (for employees, use parent ID so they can see colleagues)
+    effective_uid = firebase_uid
+    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    if employee and employee.get("parent_corporate_id"):
+        effective_uid = employee.get("parent_corporate_id")
+
+    # Fetch employees from MongoDB matching the effective parent ID
+    cursor = db["employees"].find({"parent_corporate_id": effective_uid})
+    employees = await cursor.to_list(length=1000)
+    
+    emp_data = []
+    if employees:
+        from firebase_admin import firestore
+        fs_db = firestore.client()
+        emp_uids = [e["firebase_uid"] for e in employees]
+        refs = [fs_db.collection("employees").document(uid) for uid in emp_uids]
+        emp_docs = fs_db.get_all(refs)
+        
+        emp_pii_map = {}
+        for doc in emp_docs:
+            if doc.exists:
+                emp_pii_map[doc.id] = doc.to_dict()
+                
+        for e in employees:
+            e["_id"] = str(e["_id"])
+            pii = emp_pii_map.get(e["firebase_uid"], {})
+            e["name"] = pii.get("name", "")
+            e["email"] = pii.get("email", "")
+            emp_data.append(e)
+
+    return emp_data
+
+@router.delete("/employees/{employee_id}", status_code=status.HTTP_200_OK)
+async def delete_employee(
+    employee_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint to completely remove an employee from Firebase Auth, Firestore, and MongoDB.
+    Only the parent entity (or authorized proxy) should be able to do this.
+    """
+    db = get_database()
+    parent_firebase_uid = current_user.get("uid")
+    
+    if not parent_firebase_uid:
+        raise HTTPException(status_code=400, detail="Invalid auth token format")
+
+    # Resolve effective UID (for employees, use parent ID so they can manage colleagues)
+    effective_uid = parent_firebase_uid
+    current_employee = await db["employees"].find_one({"firebase_uid": parent_firebase_uid})
+    if current_employee and current_employee.get("parent_corporate_id"):
+        effective_uid = current_employee.get("parent_corporate_id")
+
+    # 1. Verify the employee belongs to this parent
+    # Note: frontend passes the email/id as the ID for existing users, but our true ID is firebase_uid
+    # We'll check both email and firebase_uid
+    target_emp = await db["employees"].find_one({
+        "$or": [{"firebase_uid": employee_id}, {"email": employee_id}],
+        "parent_corporate_id": effective_uid
+    })
+    
+    if not target_emp:
+        raise HTTPException(status_code=404, detail="Employee not found or access denied")
+
+    target_uid = target_emp["firebase_uid"]
+
+    # 2. Delete from Firebase Auth
+    from firebase_admin import auth, firestore
+    try:
+        auth.delete_user(target_uid)
+    except auth.UserNotFoundError:
+        pass # Already gone from Auth, proceed with DB cleanup
+    except Exception as e:
+        print(f"Failed to delete Firebase Auth user: {e}")
+        raise HTTPException(status_code=500, detail="Failed to remove user authentication")
+
+    # 3. Delete from Firestore PII
+    fs_db = firestore.client()
+    try:
+        fs_db.collection("employees").document(target_uid).delete()
+    except Exception as e:
+        print(f"Failed to delete Firestore PII: {e}")
+
+    # 4. Delete from MongoDB
+    await db["employees"].delete_one({"firebase_uid": target_uid})
+
+    return {"message": "User successfully deleted"}
+
+@router.get("/me", status_code=status.HTTP_200_OK)
+async def get_my_profile(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint to retrieve the current user's profile from MongoDB using their Firebase UID.
+    This is useful for the frontend to determine where to redirect the user after login.
+    """
+    db = get_database()
+    firebase_uid = current_user.get("uid")
+    
+    if not firebase_uid:
+        raise HTTPException(status_code=400, detail="Invalid auth token format")
+
+    # Check corporates collection (for Founders / Admins)
+    corporate = await db["corporates"].find_one({"firebase_uid": firebase_uid})
+    if corporate:
+        corporate["_id"] = str(corporate["_id"]) # Serialize ObjectId
+        
+        from firebase_admin import firestore
+        fs_db = firestore.client()
+        doc = fs_db.collection("corporates").document(firebase_uid).get()
+        if doc.exists:
+            pii_data = doc.to_dict()
+            corporate["companyName"] = pii_data.get("companyName", "Unknown Company")
+            corporate["address"] = pii_data.get("address", "")
+            corporate["loginEmail"] = pii_data.get("loginEmail", "")
+            
+        print(f">>> GET /ME: FOUND ADMIN UID={firebase_uid}, TYPE={corporate.get('corporateType')}")
+        return {"type": corporate.get("corporateType"), "data": corporate}
+
+    # Check employees collection (for Staff)
+    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    if employee:
+        employee["_id"] = str(employee["_id"])
+        
+        # We might need to know parent's corporateType to route correctly too
+        parent = await db["corporates"].find_one({"firebase_uid": employee.get("parent_corporate_id")})
+        parent_type = parent.get("corporateType") if parent else "corporate"
+        
+        from firebase_admin import firestore
+        fs_db = firestore.client()
+        doc = fs_db.collection("employees").document(firebase_uid).get()
+        if doc.exists:
+            pii_data = doc.to_dict()
+            employee["name"] = pii_data.get("name", "Unknown User")
+            employee["email"] = pii_data.get("email", "")
+
+        # Inject parent data for dashboards to read directly
+        if parent:
+            employee["planId"] = parent.get("planId")
+            employee["monthlyFee"] = parent.get("monthlyFee")
+            parent_doc = fs_db.collection("corporates").document(parent.get("firebase_uid")).get()
+            if parent_doc.exists:
+                employee["companyName"] = parent_doc.to_dict().get("companyName", "")
+            
+        print(f">>> GET /ME: FOUND EMPLOYEE UID={firebase_uid}, PARENT_TYPE={parent_type}")
+        return {"type": "employee", "parent_type": parent_type, "data": employee}
+
+    print(f">>> GET /ME: USER NOT FOUND IN DB UID={firebase_uid}")
+    raise HTTPException(status_code=404, detail="User profile not found in database")
+
+@router.get("/clients", status_code=status.HTTP_200_OK)
+async def get_clients(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint for Tax Firms to list all their affiliated corporates.
+    It queries MongoDB for operational data (plan, status) and Firestore for PII (CompanyName).
+    """
+    db = get_database()
+    firebase_uid = current_user.get("uid")
+
+    if not firebase_uid:
+        raise HTTPException(status_code=400, detail="Invalid auth token format")
+
+    # Resolve effective UID (for employees, use parent ID)
+    effective_uid = firebase_uid
+    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    if employee and employee.get("parent_corporate_id"):
+        effective_uid = employee.get("parent_corporate_id")
+
+    # 1. Fetch matching clients from MongoDB
+    clients_cursor = db["corporates"].find({
+        "corporateType": "corporate",
+        "advising_tax_firm_id": effective_uid
+    })
+    
+    clients = await clients_cursor.to_list(length=1000)
+    
+    if not clients:
+        return {"data": []}
+
+    # Extract all client UIDs to fetch names from Firestore
+    client_uids = [c["firebase_uid"] for c in clients]
+
+    # 2. Fetch PII (companyName) from Firestore
+    from firebase_admin import firestore
+    fs_db = firestore.client()
+    
+    name_map = {}
+    
+    chunk_size = 100
+    for i in range(0, len(client_uids), chunk_size):
+        chunk = client_uids[i:i + chunk_size]
+        refs = [fs_db.collection("corporates").document(uid) for uid in chunk]
+        
+        # get_all handles batch fetching efficiently
+        docs = fs_db.get_all(refs)
+        for doc in docs:
+            if doc.exists:
+                data = doc.to_dict()
+                name_map[doc.id] = data.get("companyName", "Unknown Company")
+            
+    # 3. Combine MongoDB data with Firestore names and aggregate usage fees
+    enriched_clients = []
+    
+    # 3.1 Fetch all employees for these clients to aggregate usage fees
+    employees_cursor = db["employees"].find({"parent_corporate_id": {"$in": client_uids}})
+    all_employees = await employees_cursor.to_list(length=10000)
+    
+    fee_map = {uid: 0 for uid in client_uids}
+    user_count_map = {uid: 0 for uid in client_uids}
+    
+    for emp in all_employees:
+        p_uid = emp.get("parent_corporate_id")
+        if p_uid in fee_map:
+            fee_map[p_uid] += emp.get("usageFee", 0)
+            user_count_map[p_uid] += 1
+
+    for c in clients:
+        c["_id"] = str(c["_id"])
+        uid = c["firebase_uid"]
+        c["companyName"] = name_map.get(uid, "Unknown Company")
+        
+        # Add real aggregated stats
+        c["totalUsageFee"] = fee_map.get(uid, 0)
+        c["employeeCount"] = user_count_map.get(uid, 0)
+        
+        # Add some mock stats for the UI until real tables exist
+        c["approvalRate"] = 100
+        c["appCount"] = 0
+        c["approvalCount"] = 0
+        c["status"] = "Onboarding"
+        c["maStatus"] = c.get("maIntent", "none")
+        c["assignee"] = "未設定"
+        c["monthlyFee"] = c.get("monthlyFee", 0)
+
+        enriched_clients.append(c)
+
+    return {"data": enriched_clients}
+
+@router.put("/clients/{client_id}", status_code=status.HTTP_200_OK)
+async def update_client(
+    client_id: str,
+    payload: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint for Tax Firms to update affiliated corporate info.
+    Updates MongoDB and Firestore.
+    """
+    from bson import ObjectId
+    db = get_database()
+    firebase_uid = current_user.get("uid")
+    
+    # Resolve effective UID
+    effective_uid = firebase_uid
+    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    if employee and employee.get("parent_corporate_id"):
+        effective_uid = employee.get("parent_corporate_id")
+
+    try:
+        obj_id = ObjectId(client_id)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid client ID format")
+
+    # Verify ownership
+    target_corporate = await db["corporates"].find_one({
+        "_id": obj_id, 
+        "corporateType": "corporate", 
+        "advising_tax_firm_id": effective_uid
+    })
+
+    if not target_corporate:
+        raise HTTPException(status_code=404, detail="Client not found or access denied")
+
+    target_uid = target_corporate["firebase_uid"]
+
+    # Update MongoDB
+    update_data = {}
+    if "companyUrl" in payload: update_data["companyUrl"] = payload["companyUrl"]
+    if "maIntent" in payload: update_data["maIntent"] = payload["maIntent"]
+    
+    if update_data:
+        await db["corporates"].update_one(
+            {"_id": obj_id},
+            {"$set": update_data}
+        )
+
+    # Update Firestore
+    fs_update = {}
+    if "companyName" in payload: fs_update["companyName"] = payload["companyName"]
+    if "companyUrl" in payload: fs_update["companyUrl"] = payload["companyUrl"]
+    if "address" in payload: fs_update["address"] = payload["address"]
+    if "maIntent" in payload: fs_update["maIntent"] = payload["maIntent"]
+
+    if fs_update:
+        from firebase_admin import firestore
+        fs_db = firestore.client()
+        try:
+            fs_db.collection("corporates").document(target_uid).update(fs_update)
+        except Exception as e:
+            print(f"Failed to update Firestore for client {client_id}: {e}")
+
+    return {"message": "Client updated successfully"}
+
+@router.put("/clients/{client_id}/employees", status_code=status.HTTP_200_OK)
+async def update_client_employees(
+    client_id: str,
+    payload: List[dict],
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint for Tax Firms to completely replace/sync the employee list of a client.
+    """
+    from bson import ObjectId
+    db = get_database()
+    firebase_uid = current_user.get("uid")
+    
+    # Resolve effective UID
+    effective_uid = firebase_uid
+    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    if employee and employee.get("parent_corporate_id"):
+        effective_uid = employee.get("parent_corporate_id")
+
+    try:
+        obj_id = ObjectId(client_id)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid client ID format")
+
+    # Verify ownership
+    target_corporate = await db["corporates"].find_one({
+        "_id": obj_id, 
+        "corporateType": "corporate", 
+        "advising_tax_firm_id": effective_uid
+    })
+
+    if not target_corporate:
+        raise HTTPException(status_code=404, detail="Client not found or access denied")
+
+    client_firebase_uid = target_corporate["firebase_uid"]
+
+    # Since we are overriding the employee list, we just pass this exact payload
+    # to our internal sync function, pretending the client themselves did it.
+    result = await _sync_employees_internal(client_firebase_uid, payload)
+    return result
+
+@router.get("/clients/{client_id}", status_code=status.HTTP_200_OK)
+async def get_client_detail(
+    client_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint for Tax Firms to get the details of a specific client, including their employees.
+    """
+    db = get_database()
+    firebase_uid = current_user.get("uid")
+
+    if not firebase_uid:
+        raise HTTPException(status_code=400, detail="Invalid auth token format")
+
+    from bson import ObjectId
+    try:
+        obj_id = ObjectId(client_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid client ID format")
+
+    # Resolve effective UID
+    effective_uid = firebase_uid
+    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    if employee and employee.get("parent_corporate_id"):
+        effective_uid = employee.get("parent_corporate_id")
+
+    # 1. Fetch matching client from MongoDB by ObjectID
+    client_doc = await db["corporates"].find_one({
+        "_id": obj_id,
+        "corporateType": "corporate",
+        "advising_tax_firm_id": effective_uid
+    })
+
+    if not client_doc:
+        raise HTTPException(status_code=404, detail="Client not found or access denied")
+
+    client_uid = client_doc["firebase_uid"]
+    client_doc["_id"] = str(client_doc["_id"])
+
+    # 2. Fetch PII from Firestore
+    from firebase_admin import firestore
+    fs_db = firestore.client()
+    
+    fs_doc = fs_db.collection("corporates").document(client_uid).get()
+    if fs_doc.exists:
+        pii = fs_doc.to_dict()
+        client_doc["companyName"] = pii.get("companyName", "")
+        # fallback to mongo if firestore is missing the url/intent
+        client_doc["companyUrl"] = pii.get("companyUrl", client_doc.get("companyUrl", ""))
+        client_doc["address"] = pii.get("address", "")
+        client_doc["maIntent"] = pii.get("maIntent", client_doc.get("maIntent", ""))
+        client_doc["loginEmail"] = pii.get("loginEmail", "")
+        
+    # 3. Fetch Employees for this client
+    employees_cursor = db["employees"].find({"parent_corporate_id": client_uid})
+    employees = await employees_cursor.to_list(length=100)
+    emp_data = []
+    
+    if employees:
+        emp_uids = [e["firebase_uid"] for e in employees]
+        refs = [fs_db.collection("employees").document(uid) for uid in emp_uids]
+        emp_docs = fs_db.get_all(refs)
+        
+        emp_pii_map = {}
+        for doc in emp_docs:
+            if doc.exists:
+                emp_pii_map[doc.id] = doc.to_dict()
+                
+        for e in employees:
+            e["_id"] = str(e["_id"])
+            pii = emp_pii_map.get(e["firebase_uid"], {})
+            e["name"] = pii.get("name", "")
+            e["email"] = pii.get("email", "")
+            emp_data.append(e)
+
+    return {
+        "data": {
+            "client": client_doc,
+            "employees": emp_data
+        }
+    }
+
+@router.put("/clients/{client_id}", status_code=status.HTTP_200_OK)
+async def update_client_detail(
+    client_id: str,
+    payload: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint for Tax Firms to update an existing client's info.
+    """
+    db = get_database()
+    firebase_uid = current_user.get("uid")
+
+    if not firebase_uid:
+        raise HTTPException(status_code=400, detail="Invalid auth token format")
+
+    from bson import ObjectId
+    try:
+        obj_id = ObjectId(client_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid client ID format")
+
+    client_doc = await db["corporates"].find_one({
+        "_id": obj_id,
+        "advising_tax_firm_id": firebase_uid
+    })
+    
+    if not client_doc:
+        raise HTTPException(status_code=404, detail="Client not found or access denied")
+
+    client_uid = client_doc["firebase_uid"]
+
+    # Update MongoDB operational data
+    mongo_update = {}
+    if "maIntent" in payload:
+        mongo_update["maIntent"] = payload["maIntent"]
+    if "companyUrl" in payload:
+        mongo_update["companyUrl"] = payload["companyUrl"]
+        
+    if mongo_update:
+        await db["corporates"].update_one(
+            {"_id": obj_id},
+            {"$set": mongo_update}
+        )
+
+    # Update Firestore PII
+    from firebase_admin import firestore
+    fs_db = firestore.client()
+    fs_update = {}
+    if "companyName" in payload:
+        fs_update["companyName"] = payload["companyName"]
+    if "address" in payload:
+        fs_update["address"] = payload["address"]
+    if "maIntent" in payload:
+        fs_update["maIntent"] = payload["maIntent"]
+    if "companyUrl" in payload:
+        fs_update["companyUrl"] = payload["companyUrl"]
+        
+    if fs_update:
+        fs_db.collection("corporates").document(client_uid).update(fs_update)
+
+    return {"message": "Client updated successfully"}
+
+@router.put("/clients/{client_id}/employees", status_code=status.HTTP_200_OK)
+async def sync_client_employees(
+    client_id: str,
+    payload: list[dict],
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Endpoint for Tax Firms to sync (create/update) employees for a client during edit mode.
+    """
+    try:
+        from bson import ObjectId
+        db = get_database()
+        firebase_uid = current_user.get("uid")
+
+        if not firebase_uid:
+            raise HTTPException(status_code=400, detail="Invalid auth token format")
+
+        try:
+            obj_id = ObjectId(client_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid client ID format")
+
+        client_doc = await db["corporates"].find_one({
+            "_id": obj_id,
+            "advising_tax_firm_id": firebase_uid
+        })
+        
+        if not client_doc:
+            raise HTTPException(status_code=404, detail="Client not found or access denied")
+
+        parent_uid = client_doc["firebase_uid"]
+
+        return await _sync_employees_internal(parent_uid, payload)
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"DEBUG SYNC EXCEPTION: {error_trace}")
+        raise HTTPException(status_code=500, detail=str(error_trace))

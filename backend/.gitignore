@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# environments
+venv/
+env/
+.env
+
+# Firebase key (NEVER COMMIT)
+firebase-admin-key.json
+*firebase*.json
+
+# IDE
+.vscode/
+.idea/
