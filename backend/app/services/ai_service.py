@@ -15,8 +15,8 @@ else:
 
 # Model aliases
 MODELS = {
-    "pro": "gemini-2.0-flash",
-    "flash": "gemini-2.0-flash",
+    "pro": "gemini-2.5-pro",
+    "flash": "gemini-2.5-flash",
 }
 
 class AIService:

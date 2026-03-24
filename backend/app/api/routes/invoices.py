@@ -13,6 +13,9 @@ from app.services.rule_evaluation_service import evaluate_approval_rules
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+from app.api.routes.templates import router as templates_router
+router.include_router(templates_router, prefix="/templates", tags=["invoice-templates"])
+
 
 def _serialize(doc: dict) -> dict:
     """Convert ObjectId to string for JSON serialization."""

@@ -14,7 +14,7 @@ class InvoiceService:
         Saves the resulting extraction rule (JSON/Template) to the database.
         """
         # 1. Initialize Gemini
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
         
         # 2. In a real scenario, we use genai.upload_file(sample_path)
         # For this implementation, we simulate the 'multimodal' instruction.
