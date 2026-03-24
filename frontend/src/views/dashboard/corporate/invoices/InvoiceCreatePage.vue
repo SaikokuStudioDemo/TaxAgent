@@ -325,6 +325,7 @@ const applyTemplate = async (e: Event) => {
             latestExtractedName.value = result.template_name || file.name.replace(/\.[^/.]+$/, '');
             latestExtractedHtml.value = result.html;
             isExtracting.value = false;
+            isTemplateEditorOpen.value = true;
         } catch (error: any) {
             console.error('AI Template Generation Error:', error);
             isExtracting.value = false;
