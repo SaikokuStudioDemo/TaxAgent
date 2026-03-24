@@ -15,7 +15,7 @@ else:
 
 # Model aliases
 MODELS = {
-    "pro": "gemini-2.0-pro-exp",
+    "pro": "gemini-2.0-flash",
     "flash": "gemini-2.0-flash",
 }
 

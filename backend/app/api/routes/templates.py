@@ -10,6 +10,20 @@ from app.models.template import TemplateCreate, TemplateResponse, TemplateInDB
 
 router = APIRouter()
 
+
+@router.post("/generate", summary="AIを使ってHTMLテンプレートを生成する")
+async def generate_template(
+    payload: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    from app.services.ai_service import AIService
+
+    filename = payload.get("filename")
+    result = await AIService.generate_invoice_html_template(filename or "")
+    if not result:
+        raise HTTPException(status_code=500, detail="AI Template generation failed")
+    return result
+
 def _serialize(doc: dict) -> dict:
     """Convert ObjectId to string for JSON serialization."""
     doc["id"] = str(doc.pop("_id"))

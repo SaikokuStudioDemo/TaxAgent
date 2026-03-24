@@ -79,13 +79,7 @@ const router = createRouter({
                 { path: 'settings/clients', name: 'dashboard-corporate-settings-clients', component: () => import('@/views/dashboard/corporate/clients/ClientDirectoryPage.vue') },
                 { path: 'settings/matching-rules', name: 'dashboard-corporate-settings-matching-rules', component: () => import('@/views/dashboard/corporate/settings/MatchingRulesPage.vue') },
                 { path: 'settings/journal-rules', name: 'dashboard-corporate-settings-journal-rules', component: () => import('@/views/dashboard/corporate/settings/JournalRulesPage.vue') },
-                { path: 'users', name: 'dashboard-corporate-users', component: () => import('@/views/dashboard/shared/UserManagementPage.vue') },
-                { 
-                    path: 'ai/training', 
-                    name: 'dashboard-corporate-ai-training', 
-                    component: () => import('@/views/dashboard/corporate/ai/InvoiceTrainingPage.vue'),
-                    meta: { title: 'AIトレーニング' }
-                }
+                { path: 'users', name: 'dashboard-corporate-users', component: () => import('@/views/dashboard/shared/UserManagementPage.vue') }
             ]
         },
         {

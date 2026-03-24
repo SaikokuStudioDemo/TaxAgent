@@ -254,7 +254,7 @@ const removeItem = (id: number) => {
 
 const fetchTemplates = async () => {
     try {
-        const dbTemplates = await api.get('/templates');
+        const dbTemplates = await api.get('/invoices/templates');
         if (dbTemplates && Array.isArray(dbTemplates)) {
             const builtInIds = ['T-001', 'T-002', 'T-003', 'T-004'];
             const filteredDb = dbTemplates.filter((t: any) => !builtInIds.includes(t.id));
@@ -319,7 +319,7 @@ const applyTemplate = async (e: Event) => {
         isExtracting.value = true;
         try {
             const result = await api.post<{ template_name: string; html: string; variables: string[] }>(
-                '/ai-training/generate',
+                '/invoices/templates/generate',
                 { filename: file.name }
             );
             latestExtractedName.value = result.template_name || file.name.replace(/\.[^/.]+$/, '');
@@ -337,7 +337,7 @@ const applyTemplate = async (e: Event) => {
 
 const handleTemplateSave = async (payload: { name: string, html: string }) => {
     try {
-        const savedTemplate = await api.post<any>('/templates', {
+        const savedTemplate = await api.post<any>('/invoices/templates', {
             name: payload.name,
             description: 'AI生成テンプレート',
             html: payload.html,
