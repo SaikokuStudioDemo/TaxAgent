@@ -3,9 +3,12 @@ from typing import List, Optional
 from datetime import datetime
 from bson import ObjectId
 
-from app.api.deps import get_current_user
-from app.api.helpers import resolve_corporate_id
-from app.db.mongodb import get_database
+from app.api.helpers import (
+    serialize_doc as _serialize,
+    get_corporate_context,
+    CorporateContext,
+    parse_oid,
+)
 from app.models.approval import ApprovalRuleCreate, ApprovalEventCreate, ApprovalPreviewRequest
 import logging
 
@@ -13,27 +16,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _serialize(doc: dict) -> dict:
-    doc["id"] = str(doc.pop("_id"))
-    return doc
-
-
 # ─────────────── Approval Rules ───────────────
 
 @router.get("/rules", summary="承認ルール一覧を取得する")
 async def list_approval_rules(
     applies_to: Optional[str] = None,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
-    query: dict = {"corporate_id": corporate_id}
+    query: dict = {"corporate_id": ctx.corporate_id}
     if applies_to:
         query["applies_to"] = applies_to
 
-    cursor = db["approval_rules"].find(query).sort("created_at", -1)
+    cursor = ctx.db["approval_rules"].find(query).sort("created_at", -1)
     docs = await cursor.to_list(length=200)
     return [_serialize(doc) for doc in docs]
 
@@ -41,19 +35,15 @@ async def list_approval_rules(
 @router.post("/rules", summary="承認ルールを作成する")
 async def create_approval_rule(
     payload: ApprovalRuleCreate,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
     doc = {
         **payload.model_dump(),
-        "corporate_id": corporate_id,
+        "corporate_id": ctx.corporate_id,
         "created_at": datetime.utcnow(),
     }
-    result = await db["approval_rules"].insert_one(doc)
-    created = await db["approval_rules"].find_one({"_id": result.inserted_id})
+    result = await ctx.db["approval_rules"].insert_one(doc)
+    created = await ctx.db["approval_rules"].find_one({"_id": result.inserted_id})
     return _serialize(created)
 
 
@@ -61,46 +51,32 @@ async def create_approval_rule(
 async def update_approval_rule(
     rule_id: str,
     payload: dict,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
-    try:
-        oid = ObjectId(rule_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid rule ID")
+    oid = parse_oid(rule_id, "rule")
 
     forbidden = {"corporate_id", "created_at", "_id"}
     update_data = {k: v for k, v in payload.items() if k not in forbidden}
 
-    result = await db["approval_rules"].update_one(
-        {"_id": oid, "corporate_id": corporate_id},
+    result = await ctx.db["approval_rules"].update_one(
+        {"_id": oid, "corporate_id": ctx.corporate_id},
         {"$set": update_data},
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Approval rule not found")
 
-    updated = await db["approval_rules"].find_one({"_id": oid})
+    updated = await ctx.db["approval_rules"].find_one({"_id": oid})
     return _serialize(updated)
 
 
 @router.delete("/rules/{rule_id}", summary="承認ルールを削除する")
 async def delete_approval_rule(
     rule_id: str,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
+    oid = parse_oid(rule_id, "rule")
 
-    try:
-        oid = ObjectId(rule_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid rule ID")
-
-    result = await db["approval_rules"].delete_one({"_id": oid, "corporate_id": corporate_id})
+    result = await ctx.db["approval_rules"].delete_one({"_id": oid, "corporate_id": ctx.corporate_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Approval rule not found")
     return {"status": "deleted", "rule_id": rule_id}
@@ -109,22 +85,19 @@ async def delete_approval_rule(
 @router.post("/rules/preview", summary="適用される承認ルールをプレビューする")
 async def preview_approval_rule(
     payload: ApprovalPreviewRequest,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
     from app.services.rule_evaluation_service import evaluate_approval_rules
-    
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    
+
     # Simple document shim for evaluation
     doc_shim = {
         "amount": payload.amount,
         "total_amount": payload.amount,
         **(payload.payload or {})
     }
-    
-    rule_id, steps = await evaluate_approval_rules(corporate_id, payload.document_type, doc_shim)
-    
+
+    rule_id, steps = await evaluate_approval_rules(ctx.corporate_id, payload.document_type, doc_shim)
+
     return {
         "rule_id": rule_id,
         "steps": steps,
@@ -137,13 +110,9 @@ async def preview_approval_rule(
 @router.post("/actions", summary="承認アクション（承認・却下・差戻し）を記録する")
 async def record_approval_action(
     payload: ApprovalEventCreate,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
     from app.services.notification_service import notify_next_approver, notify_submitter
-
-    firebase_uid = current_user.get("uid")
-    corporate_id, user_id = await resolve_corporate_id(firebase_uid)
-    db = get_database()
 
     if payload.action == "rejected" and not payload.comment:
         raise HTTPException(status_code=400, detail="差戻しの場合はコメントが必要です。")
@@ -151,20 +120,17 @@ async def record_approval_action(
     # Persist the event
     event_doc = {
         **payload.model_dump(),
-        "corporate_id": corporate_id,
-        "approver_id": user_id,
+        "corporate_id": ctx.corporate_id,
+        "approver_id": ctx.user_id,
         "timestamp": datetime.utcnow(),
     }
-    await db["approval_events"].insert_one(event_doc)
+    await ctx.db["approval_events"].insert_one(event_doc)
 
     # Update the parent document's review_status
     collection = "receipts" if payload.document_type == "receipt" else "invoices"
-    try:
-        doc_oid = ObjectId(payload.document_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid document ID")
+    doc_oid = parse_oid(payload.document_id, "document")
 
-    doc = await db[collection].find_one({"_id": doc_oid})
+    doc = await ctx.db[collection].find_one({"_id": doc_oid})
     rule_id = doc.get("approval_rule_id") if doc else None
     current_step = doc.get("current_step", 1) if doc else 1
     next_step = current_step + 1
@@ -173,11 +139,11 @@ async def record_approval_action(
 
     if payload.action == "approved":
         all_approved = False
-        
+
         # Persist manually added extra steps if provided
         if payload.added_steps:
             added_steps_dicts = [s.model_dump() for s in payload.added_steps]
-            await db[collection].update_one(
+            await ctx.db[collection].update_one(
                 {"_id": doc_oid},
                 {"$set": {"extra_approval_steps": added_steps_dicts}}
             )
@@ -186,17 +152,17 @@ async def record_approval_action(
                 doc["extra_approval_steps"] = added_steps_dicts
 
         # Calculate standard steps from the rule
-        total_steps = 1 # Minimum implicit step
+        total_steps = 1  # Minimum implicit step
         if rule_id:
             try:
-                rule = await db["approval_rules"].find_one({"_id": ObjectId(rule_id)})
+                rule = await ctx.db["approval_rules"].find_one({"_id": ObjectId(rule_id)})
                 if rule:
                     required_steps = [s["step"] for s in rule.get("steps", []) if s.get("required")]
                     if required_steps:
                         total_steps = max(total_steps, max(required_steps))
             except Exception as e:
                 logger.error(f"Error fetching/parsing rule {rule_id}: {e}")
-        
+
         # Add extra steps to the total count
         extra_steps = doc.get("extra_approval_steps", []) if doc else []
         total_steps += len(extra_steps)
@@ -211,7 +177,7 @@ async def record_approval_action(
         # Logic check: Are there more steps?
         if next_step <= total_steps:
             # Not finished yet -> increment current_step and notify next
-            update_result = await db[collection].update_one(
+            update_result = await ctx.db[collection].update_one(
                 db_query,
                 {"$set": {"current_step": next_step}},
             )
@@ -221,7 +187,7 @@ async def record_approval_action(
             # Notify the next approver
             if rule_id:
                 await notify_next_approver(
-                    corporate_id=corporate_id,
+                    corporate_id=ctx.corporate_id,
                     document_type=payload.document_type,
                     document_id=payload.document_id,
                     current_step=next_step,
@@ -231,24 +197,23 @@ async def record_approval_action(
         else:
             # All steps completed -> mark as approved
             all_approved = True
-            update_result = await db[collection].update_one(
+            update_result = await ctx.db[collection].update_one(
                 db_query,
                 {"$set": {"review_status": "approved", "status": "approved"}},
             )
             if update_result.matched_count == 0:
                 raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
-                
+
             # Notify the submitter that it's fully approved
             if submitter_id:
                 await notify_submitter(
-                    corporate_id=corporate_id,
+                    corporate_id=ctx.corporate_id,
                     document_type=payload.document_type,
                     document_id=payload.document_id,
                     submitter_id=submitter_id,
                     action="approved",
                     document_summary=doc_summary,
                 )
-
 
     elif payload.action in ("rejected", "returned"):
         db_query = {"_id": doc_oid}
@@ -257,7 +222,7 @@ async def record_approval_action(
         else:
             db_query["current_step"] = {"$exists": False}
 
-        update_result = await db[collection].update_one(
+        update_result = await ctx.db[collection].update_one(
             db_query,
             {"$set": {"review_status": "rejected"}},
         )
@@ -267,7 +232,7 @@ async def record_approval_action(
         # Notify the submitter that it was rejected
         if submitter_id:
             await notify_submitter(
-                corporate_id=corporate_id,
+                corporate_id=ctx.corporate_id,
                 document_type=payload.document_type,
                 document_id=payload.document_id,
                 submitter_id=submitter_id,

@@ -8,6 +8,7 @@ import {
   FileSpreadsheet
 } from 'lucide-vue-next';
 import { useBankTransactions } from '@/composables/useBankTransactions';
+import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
 // --- TYPES ---
 interface StagedTransaction {
@@ -44,8 +45,6 @@ const filteredTransactions = computed(() =>
 const totalAmount = computed(() => stagedTransactions.value.reduce((sum, t) => sum + t.amount, 0));
 
 // --- ACTIONS ---
-const formatAmount = (num: number) => new Intl.NumberFormat('ja-JP').format(num);
-
 // Parse a basic CSV string into transaction rows
 const parseCsv = (text: string, type: 'bank' | 'card'): StagedTransaction[] => {
   const lines = text.trim().split('\n').slice(1); // skip header

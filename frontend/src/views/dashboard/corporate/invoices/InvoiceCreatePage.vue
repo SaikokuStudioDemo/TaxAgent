@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { ChevronLeft, Plus, CheckCircle, Save, Send, FileText, Loader2, Building2, AlertCircle as AlertCircleIcon, Trash2, FileImage, X, AlertCircle, GripHorizontal, Pencil } from 'lucide-vue-next';
+import { ChevronLeft, Plus, CheckCircle, Save, Send, FileText, Loader2, Building2, AlertCircle as AlertCircleIcon, Trash2, FileImage, X, AlertCircle, GripHorizontal, Pencil, Mail, ShieldCheck } from 'lucide-vue-next';
 import { useRouter, useRoute } from 'vue-router';
 import ClientFormModal from '@/components/invoices/ClientFormModal.vue';
 import TemplateEditorModal from '@/components/invoices/TemplateEditorModal.vue';
 import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
 import { useCompanyProfiles } from '@/composables/useCompanyProfiles';
 import { api } from '@/lib/api';
+import { formatNumber as formatCurrency } from '@/lib/utils/formatters';
 
 const router = useRouter();
 const route = useRoute();
@@ -136,10 +137,10 @@ const items = ref<LineItem[]>([
 ]);
 const note = ref('');
 const activeClientId = ref('');
-const availableClients = ref<{id: string, name: string, contactPerson: string, details?: string}[]>([
-    { id: 'C-1001', name: '株式会社Aoyama Systems', contactPerson: '田中 健太', details: '株式会社Aoyama Systems 御中\n担当：田中 健太 様\n東京都港区北青山...\n03-0000-0000' },
-    { id: 'C-1002', name: 'BlueOcean Inc.', contactPerson: 'David Smith', details: 'BlueOcean Inc.\nAttn: David Smith\n1-2-3 Minato-ku, Tokyo\n03-1234-5678' },
-    { id: 'C-1003', name: '山口会計事務所', contactPerson: '山口 太郎', details: '山口会計事務所 御中\n代表：山口 太郎 様\n東京都千代田区麹町...\n03-9999-9999' }
+const availableClients = ref<{id: string, name: string, contactPerson: string, email?: string, details?: string}[]>([
+    { id: 'C-1001', name: '株式会社Aoyama Systems', contactPerson: '田中 健太', email: 'alpha@aoyama.co.jp', details: '株式会社Aoyama Systems 御中\n担当：田中 健太 様\n東京都港区北青山...\n03-0000-0000' },
+    { id: 'C-1002', name: 'BlueOcean Inc.', contactPerson: 'David Smith', email: 'billing@blueocean.co.jp', details: 'BlueOcean Inc.\nAttn: David Smith\n1-2-3 Minato-ku, Tokyo\n03-1234-5678' },
+    { id: 'C-1003', name: '山口会計事務所', contactPerson: '山口 太郎', email: 'billing@yamaguchi-cpa.jp', details: '山口会計事務所 御中\n代表：山口 太郎 様\n東京都千代田区麹町...\n03-9999-9999' }
 ]);
 const templateToDelete = ref<InvoiceTemplate | null>(null);
 
@@ -152,6 +153,15 @@ const activeSenderProfile = ref(defaultProfile ? defaultProfile.id : '');
 const subtotal = computed(() => items.value.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0));
 const taxAmount = computed(() => items.value.reduce((sum, item) => sum + (item.quantity * item.unitPrice * item.taxRate), 0));
 const totalAmount = computed(() => subtotal.value + taxAmount.value);
+
+const recipientEmail = ref('');
+
+const canSubmit = computed(() =>
+  totalAmount.value > 0 &&
+  activeClientId.value !== '' &&
+  recipientEmail.value.includes('@')
+);
+
 const senderInfo = computed(() => {
     const profile = senderProfiles.value.find(p => p.id === activeSenderProfile.value);
     return profile ? formatProfileForTextarea(profile) : '';
@@ -161,10 +171,6 @@ const clientDisplayName = computed(() => {
     const text = templateVariables.value[0]?.value || '';
     return text.split('\n')[0] || '未入力';
 });
-
-const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('ja-JP').format(amount);
-};
 
 // Variable Extraction logic for dynamic form
 const detectedVariables = computed(() => {
@@ -538,7 +544,7 @@ const buildPayload = () => {
         invoice_number: invoiceNumber.value,
         client_id: activeClientId.value || undefined,
         client_name: clientName,
-        recipient_email: '',
+        recipient_email: recipientEmail.value,
         issue_date: issueDate.value,
         due_date: dueDate.value,
         subtotal: subtotal.value,
@@ -588,7 +594,7 @@ const submitInvoice = async () => {
     try {
         const payload = { 
             ...buildPayload(), 
-            status: isApprovalRequired.value ? 'draft' : 'sent', 
+            status: isApprovalRequired.value ? 'pending_approval' : 'sent',
             // if approval is required, the backend will auto-set review_status
         };
         if (editingInvoiceId.value) {
@@ -626,12 +632,16 @@ const handleClientSave = (newClient: any) => {
 function handleClientSelection() {
     if (!activeClientId.value) {
         if (templateVariables.value.length > 0) templateVariables.value[0].value = '';
+        recipientEmail.value = '';
         return;
     }
     const selected = availableClients.value.find(c => c.id === activeClientId.value);
-    if (selected && selected.details) {
-        if (templateVariables.value.length > 0) {
+    if (selected) {
+        if (selected.details && templateVariables.value.length > 0) {
             templateVariables.value[0].value = selected.details;
+        }
+        if (selected.email) {
+            recipientEmail.value = selected.email;
         }
     }
 }
@@ -786,6 +796,33 @@ function handleClientSelection() {
                                        </button>
                                    </div>
                                </div>
+                               <!-- 送付先メールアドレス -->
+                               <div v-if="detectedVariables.includes('client_name')" class="mt-4 border-t border-gray-100 pt-4">
+                                 <label class="block text-xs font-bold text-gray-700 mb-2 flex items-center gap-1.5">
+                                   <Mail class="w-3.5 h-3.5 text-gray-400" />
+                                   送付先メールアドレス
+                                   <span class="text-red-500">*</span>
+                                 </label>
+                                 <div class="relative">
+                                   <input
+                                     type="email"
+                                     v-model="recipientEmail"
+                                     :placeholder="activeClientId ? 'メールアドレスを入力' : '取引先を選択するとメールアドレスが自動入力されます'"
+                                     :disabled="!activeClientId"
+                                     class="w-full border rounded-lg px-3 py-2 text-sm transition-all"
+                                     :class="activeClientId
+                                       ? 'border-gray-300 bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500'
+                                       : 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'"
+                                   />
+                                   <span v-if="recipientEmail && recipientEmail.includes('@')" class="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500">
+                                     <CheckCircle class="w-4 h-4" />
+                                   </span>
+                                 </div>
+                                 <p v-if="activeClientId && !recipientEmail" class="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                                   <AlertCircle class="w-3 h-3" />
+                                   送付先メールアドレスを入力してください
+                                 </p>
+                               </div>
                            </div>
                            <div v-if="detectedVariables.includes('sender_name') || detectedVariables.includes('sender_details')">
                                <label class="block text-xs font-bold text-gray-700 mb-2">請求元情報</label>
@@ -823,7 +860,7 @@ function handleClientSelection() {
                        <div class="space-y-0 text-sm bg-white border-b border-gray-200">
                            <div v-for="item in items" :key="item.id" class="grid grid-cols-12 gap-4 items-center group py-4 px-6 border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
                                <div class="col-span-5">
-                                   <input v-model="item.description" type="text" class="w-full bg-transparent border-0 p-0 text-sm font-medium text-gray-900 focus:ring-0 placeholder-gray-300">
+                                   <input v-model="item.description" type="text" placeholder="品目名を入力" class="w-full bg-transparent border-0 border-b border-transparent hover:border-gray-300 focus:border-blue-400 pb-0.5 p-0 text-sm font-medium text-gray-900 focus:ring-0 placeholder-gray-400 transition-colors outline-none">
                                </div>
                                <div class="col-span-2">
                                    <input v-model="item.quantity" type="number" class="w-full bg-transparent border-0 p-0 text-sm text-right focus:ring-0">
@@ -907,7 +944,7 @@ function handleClientSelection() {
           </div>
           <div class="flex items-center gap-1">
               <AlertCircleIcon class="w-3 h-3" />
-              発行ボタンを押すと承認ステップまたは送信が開始されます
+              <span>{{ isApprovalRequired ? '承認フローが完了後に自動送付されます' : '金額・取引先・送付先が揃ったら送付できます' }}</span>
           </div>
       </div>
 
@@ -932,10 +969,38 @@ function handleClientSelection() {
                       <span class="hidden sm:inline">{{ editingInvoiceId ? '修正を保存' : '下書き保存' }}</span>
                       <span class="sm:hidden">下書き</span>
                   </button>
-                  <button @click="submitInvoice" :disabled="isSaving" class="px-5 lg:px-8 py-3 rounded-xl font-bold text-sm text-white bg-blue-600 hover:bg-blue-700 transition-all shadow-md flex items-center gap-2 whitespace-nowrap">
-                      <Send v-if="!isSaving" class="w-4 h-4" />
-                      <Loader2 v-else class="w-4 h-4 animate-spin" />
-                      <span>{{ isApprovalRequired ? '承認申請' : 'この内容で発行' }}</span>
+                  <!-- 承認不要 かつ 送付可能 -->
+                  <button
+                    v-if="canSubmit && !isApprovalRequired"
+                    @click="submitInvoice"
+                    :disabled="isSaving"
+                    class="px-5 lg:px-8 py-3 rounded-xl font-bold text-sm text-white bg-blue-600 hover:bg-blue-700 transition-all shadow-md flex items-center gap-2 whitespace-nowrap"
+                  >
+                    <Send v-if="!isSaving" class="w-4 h-4" />
+                    <Loader2 v-else class="w-4 h-4 animate-spin" />
+                    この内容で送付する
+                  </button>
+
+                  <!-- 承認必要 かつ 送付可能 -->
+                  <button
+                    v-else-if="canSubmit && isApprovalRequired"
+                    @click="submitInvoice"
+                    :disabled="isSaving"
+                    class="px-5 lg:px-8 py-3 rounded-xl font-bold text-sm text-white bg-purple-600 hover:bg-purple-700 transition-all shadow-md flex items-center gap-2 whitespace-nowrap"
+                  >
+                    <ShieldCheck v-if="!isSaving" class="w-4 h-4" />
+                    <Loader2 v-else class="w-4 h-4 animate-spin" />
+                    承認申請する
+                  </button>
+
+                  <!-- 未入力（グレーアウト） -->
+                  <button
+                    v-else
+                    disabled
+                    class="px-5 lg:px-8 py-3 rounded-xl font-bold text-sm text-white bg-gray-300 cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
+                  >
+                    <Send class="w-4 h-4" />
+                    <span>{{ !activeClientId ? '取引先を選択してください' : !recipientEmail ? '送付先を入力してください' : '金額を入力してください' }}</span>
                   </button>
               </div>
           </div>

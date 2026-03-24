@@ -14,6 +14,7 @@ import {
 } from 'lucide-vue-next';
 import { useInvoices } from '@/composables/useInvoices';
 import { useBankTransactions } from '@/composables/useBankTransactions';
+import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
 // --- TYPES (template-compatible) ---
 interface InvoiceDisplay {
@@ -190,7 +191,6 @@ const selectTransaction = (id: string) => {
     else selectedTransactionIds.value.push(id);
 };
 
-const formatAmount = (amount: number) => new Intl.NumberFormat('ja-JP').format(amount);
 
 const handleMatch = async () => {
     if (selectedInvoiceIds.value.length === 0 || selectedTransactionIds.value.length === 0) return;

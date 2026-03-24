@@ -13,19 +13,8 @@ import {
 } from 'lucide-vue-next';
 import { useInvoices } from '@/composables/useInvoices';
 import InvoiceDetailModal from '@/components/invoices/InvoiceDetailModal.vue';
-
-// --- MOCK DATA ---
-interface ApprovalHistory {
-  id: string;
-  step: number;
-  roleId: string;
-  roleName: string;
-  approverId?: string;
-  approverName?: string;
-  status: 'pending' | 'approved' | 'rejected' | 'skipped';
-  actionDate?: string;
-  comment?: string;
-}
+import { buildApprovalHistory, roleLabel, type ApprovalHistory } from '@/composables/useApprovalHistory';
+import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
 interface InvoiceItem {
   id: string;
@@ -38,44 +27,18 @@ interface InvoiceItem {
   paymentMethod: string;
   memo: string;
   status: 'pending' | 'approved' | 'rejected';
-  currentStepIndex: number; 
+  isAutoApproved: boolean;
+  currentStepIndex: number;
   approvalHistory: ApprovalHistory[];
   imageUrl: string;
 }
 
-const formatAmount = (num: number) => new Intl.NumberFormat('ja-JP').format(num);
-
 // --- STATE ---
 const { invoices: apiInvoices, fetchInvoices } = useInvoices();
-const activeDirection = ref<'received' | 'issued'>('received');
+const activeDirection = ref<'received' | 'issued'>('issued');
 const mockInvoices = ref<InvoiceItem[]>([]);
 
 const mapApiInvoice = (inv: any): InvoiceItem => {
-  const history = (inv.approval_history && inv.approval_history.length > 0)
-    ? inv.approval_history.map((h: any, i: number) => ({
-        id: h.id ?? `h_${i}`,
-        step: h.step ?? i + 1,
-        roleId: h.role_id ?? 'accounting',
-        roleName: h.role_name ?? '経理担当',
-        approverId: h.approver_id,
-        approverName: h.approver_name,
-        status: h.status ?? 'pending',
-        actionDate: h.action_date,
-        comment: h.comment,
-      }))
-    : [];
-
-  const extraSteps = (inv.extra_approval_steps || []).map((s: any, i: number) => ({
-      id: `h_ext_${Date.now()}_${i}`,
-      step: history.length + i + 1,
-      roleId: s.roleId,
-      roleName: s.roleName,
-      approverName: s.approverName,
-      status: 'pending' as const,
-  }));
-
-  const combinedHistory = [...history, ...extraSteps];
-
   return {
     id: inv.id ?? inv._id,
     vendorName: inv.vendor_name ?? inv.client_name ?? '不明',
@@ -86,11 +49,10 @@ const mapApiInvoice = (inv: any): InvoiceItem => {
     category: inv.category ?? '未分類',
     paymentMethod: inv.payment_method ?? '請求書払い',
     memo: inv.memo ?? '',
-    status: inv.status === 'approved' ? 'approved' : inv.status === 'rejected' ? 'rejected' : 'pending',
+    status: inv.review_status === 'approved' ? 'approved' : inv.review_status === 'rejected' ? 'rejected' : 'pending',
+    isAutoApproved: inv.is_auto_approved === true,
     currentStepIndex: inv.current_step ? inv.current_step - 1 : 0,
-    approvalHistory: combinedHistory.length > 0
-      ? combinedHistory
-      : [{ id: 'h_default', step: 1, roleId: 'accounting', roleName: '承認担当', status: (inv.status === 'approved' ? 'approved' : inv.status === 'rejected' ? 'rejected' : 'pending') as any }],
+    approvalHistory: buildApprovalHistory(inv.approval_steps, inv.approval_history, inv.review_status),
     imageUrl: (inv.attachments && inv.attachments.length > 0) ? inv.attachments[0] : (inv.image_url ?? ''),
   };
 };
@@ -99,9 +61,16 @@ const loadData = async () => {
     const requestedDirection = activeDirection.value;
     await fetchInvoices({ direction: requestedDirection });
     // Prevent race condition if user rapid-clicked tabs
-    if (activeDirection.value !== requestedDirection) return; 
-    
-    mockInvoices.value = (apiInvoices.value as any[]).map(mapApiInvoice);
+    if (activeDirection.value !== requestedDirection) return;
+
+    // 承認フロー対象のみ：pending_approval / 承認済（手動・自動） / 差戻し
+    const approvalRelevant = (apiInvoices.value as any[]).filter(inv =>
+        inv.status === 'pending_approval' ||
+        inv.review_status === 'approved' ||
+        inv.review_status === 'rejected' ||
+        inv.is_auto_approved === true
+    );
+    mockInvoices.value = approvalRelevant.map(mapApiInvoice);
 };
 
 onMounted(loadData);
@@ -116,7 +85,7 @@ const selectedInvoice = ref<InvoiceItem | null>(null);
 const isDetailModalOpen = ref(false);
 
 // Computed Filters
-const pendingInvoices = computed(() => mockInvoices.value.filter(i => i.status === 'pending' && i.approvalHistory[i.currentStepIndex]?.roleId === 'accounting'));
+const pendingInvoices = computed(() => mockInvoices.value.filter(i => i.status === 'pending'));
 const pendingAllInvoices = computed(() => mockInvoices.value.filter(i => i.status === 'pending')); 
 const approvedInvoices = computed(() => mockInvoices.value.filter(i => i.status === 'approved'));
 const rejectedInvoices = computed(() => mockInvoices.value.filter(i => i.status === 'rejected'));
@@ -347,6 +316,10 @@ const handleActionCompleted = async () => {
                             <span v-if="invoice.status === 'pending'" class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-800 border border-blue-200">
                                 <Clock class="w-3.5 h-3.5 mr-1" />
                                 承認待ち ({{ invoice.currentStepIndex + 1 }}/{{ invoice.approvalHistory.length }})
+                            </span>
+                            <span v-else-if="invoice.status === 'approved' && invoice.isAutoApproved" class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                                <CheckCircle class="w-3.5 h-3.5 mr-1" />
+                                自動承認済
                             </span>
                             <span v-else-if="invoice.status === 'approved'" class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
                                 <CheckCircle class="w-3.5 h-3.5 mr-1" />

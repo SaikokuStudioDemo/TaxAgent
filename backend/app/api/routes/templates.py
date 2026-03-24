@@ -1,11 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 from datetime import datetime
-from bson import ObjectId
 
 from app.api.deps import get_current_user
-from app.api.helpers import resolve_corporate_id
-from app.db.mongodb import get_database
+from app.api.helpers import (
+    serialize_doc as _serialize,
+    get_corporate_context,
+    CorporateContext,
+    parse_oid,
+)
 from app.models.template import TemplateCreate, TemplateResponse, TemplateInDB
 
 router = APIRouter()
@@ -24,40 +27,27 @@ async def generate_template(
         raise HTTPException(status_code=500, detail="AI Template generation failed")
     return result
 
-def _serialize(doc: dict) -> dict:
-    """Convert ObjectId to string for JSON serialization."""
-    doc["id"] = str(doc.pop("_id"))
-    return doc
-
 @router.post("", response_model=TemplateResponse, summary="新しいテンプレートを保存する")
 async def create_template(
     payload: TemplateCreate,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, user_id = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
     doc = {
         **payload.model_dump(),
-        "corporate_id": corporate_id,
-        "created_by": user_id,
+        "corporate_id": ctx.corporate_id,
+        "created_by": ctx.user_id,
         "created_at": datetime.utcnow(),
     }
 
-    result = await db["templates"].insert_one(doc)
-    created = await db["templates"].find_one({"_id": result.inserted_id})
+    result = await ctx.db["templates"].insert_one(doc)
+    created = await ctx.db["templates"].find_one({"_id": result.inserted_id})
     return _serialize(created)
 
 @router.get("", response_model=List[TemplateResponse], summary="テンプレート一覧を取得する")
 async def list_templates(
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
-    cursor = db["templates"].find({"corporate_id": corporate_id}).sort("created_at", -1)
+    cursor = ctx.db["templates"].find({"corporate_id": ctx.corporate_id}).sort("created_at", -1)
     docs = await cursor.to_list(length=100)
     return [_serialize(doc) for doc in docs]
 
@@ -65,16 +55,9 @@ async def list_templates(
 async def update_template(
     template_id: str,
     payload: dict,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
-    try:
-        oid = ObjectId(template_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid template ID")
+    oid = parse_oid(template_id, "template")
 
     allowed_updates = {"name", "description", "html", "is_active", "thumbnail"}
     update_data = {k: v for k, v in payload.items() if k in allowed_updates}
@@ -82,34 +65,27 @@ async def update_template(
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid update fields provided")
 
-    result = await db["templates"].update_one(
-        {"_id": oid, "corporate_id": corporate_id},
+    result = await ctx.db["templates"].update_one(
+        {"_id": oid, "corporate_id": ctx.corporate_id},
         {"$set": update_data}
     )
-    
+
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    updated = await db["templates"].find_one({"_id": oid})
+    updated = await ctx.db["templates"].find_one({"_id": oid})
     return _serialize(updated)
 
 
 @router.delete("/{template_id}", summary="テンプレートを削除する")
 async def delete_template(
     template_id: str,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
+    oid = parse_oid(template_id, "template")
 
-    try:
-        oid = ObjectId(template_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid template ID")
-
-    result = await db["templates"].delete_one({"_id": oid, "corporate_id": corporate_id})
+    result = await ctx.db["templates"].delete_one({"_id": oid, "corporate_id": ctx.corporate_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Template not found")
-    
+
     return {"status": "success"}

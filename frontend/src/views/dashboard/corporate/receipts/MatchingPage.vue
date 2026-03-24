@@ -12,6 +12,7 @@ import {
 } from 'lucide-vue-next';
 import { useBankTransactions } from '@/composables/useBankTransactions';
 import { useReceipts } from '@/composables/useReceipts';
+import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
 // --- TYPES (keep for template compatibility) ---
 interface Transaction {
@@ -196,7 +197,6 @@ const matchedPairs = computed(() =>
 const matchedCount = computed(() => transactions.value.filter(t => t.status === 'matched').length);
 
 // --- ACTIONS ---
-const formatAmount = (num: number) => new Intl.NumberFormat('ja-JP').format(num);
 
 const toggleCandidate = (id: string) => {
   const idx = selectedCandidateIds.value.indexOf(id);

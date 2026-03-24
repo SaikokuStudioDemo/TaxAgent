@@ -20,8 +20,12 @@ __pycache__/
 firebase-admin-key.json
 *.pem
 
+# Logs
+*.log
+
 # Project specific
 backend_architecture.md
 InvoiceSample/
 UIImage/
 frontend-nextjs-archive/
+refactoring_audit.md

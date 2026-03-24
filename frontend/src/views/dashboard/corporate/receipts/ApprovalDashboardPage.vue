@@ -13,6 +13,7 @@ import {
 } from 'lucide-vue-next';
 import { useReceipts } from '@/composables/useReceipts';
 import ReceiptDetailModal from '@/components/receipts/ReceiptDetailModal.vue';
+import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
 // --- MOCK DATA ---
 interface ApprovalHistory {
@@ -45,9 +46,6 @@ interface ReceiptItem {
   approvalHistory: ApprovalHistory[];
   imageUrl: string;
 }
-
-// Simulated data to represent realistic approval states based on Phase 11.5 hierarchical models
-const formatAmount = (num: number) => new Intl.NumberFormat('ja-JP').format(num);
 
 // Fetch real receipts and map to ReceiptItem shape for the template
 const { receipts: apiReceipts, fetchReceipts } = useReceipts();

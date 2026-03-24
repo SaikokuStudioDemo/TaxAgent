@@ -3,24 +3,23 @@ from typing import Optional
 from datetime import datetime
 from bson import ObjectId
 
-from app.api.deps import get_current_user
-from app.api.helpers import resolve_corporate_id
-from app.db.mongodb import get_database
+from app.api.helpers import (
+    serialize_doc as _serialize,
+    get_corporate_context,
+    CorporateContext,
+    parse_oid,
+    get_doc_or_404,
+)
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _serialize(doc: dict) -> dict:
-    doc["id"] = str(doc.pop("_id"))
-    return doc
-
-
 @router.post("", summary="マッチング（消込）を作成する")
 async def create_match(
     payload: dict,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
     """
     Create a match linking bank transactions to receipts or invoices.
@@ -44,10 +43,6 @@ async def create_match(
     AUTO_MATCH_THRESHOLD = 1000  # ¥1,000未満は自動処理
     # ────────────────────────────────────────────────
 
-    firebase_uid = current_user.get("uid")
-    corporate_id, user_id = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
     transaction_ids = payload.get("transaction_ids", [])
     document_ids = payload.get("document_ids", [])
     match_type = payload.get("match_type", "receipt")
@@ -57,7 +52,7 @@ async def create_match(
     t_total = 0
     for tid in transaction_ids:
         try:
-            t = await db["bank_transactions"].find_one({"_id": ObjectId(tid)})
+            t = await ctx.db["bank_transactions"].find_one({"_id": ObjectId(tid)})
             if t:
                 t_total += t.get("amount", 0)
         except Exception:
@@ -67,7 +62,7 @@ async def create_match(
     collection = "receipts" if match_type == "receipt" else "invoices"
     for did in document_ids:
         try:
-            d = await db[collection].find_one({"_id": ObjectId(did)})
+            d = await ctx.db[collection].find_one({"_id": ObjectId(did)})
             if d:
                 d_total += d.get("amount" if match_type == "receipt" else "total_amount", 0)
         except Exception:
@@ -114,7 +109,7 @@ async def create_match(
         journal_entries = payload.get("journal_entries", [])
 
     match_doc = {
-        "corporate_id": corporate_id,
+        "corporate_id": ctx.corporate_id,
         "match_type": match_type,
         "transaction_ids": transaction_ids,
         "document_ids": document_ids,
@@ -130,12 +125,12 @@ async def create_match(
         "matched_at": datetime.utcnow(),
     }
 
-    result = await db["matches"].insert_one(match_doc)
+    result = await ctx.db["matches"].insert_one(match_doc)
 
     # ── ステータス更新 ─────────────────────────────────
     for tid in transaction_ids:
         try:
-            await db["bank_transactions"].update_one(
+            await ctx.db["bank_transactions"].update_one(
                 {"_id": ObjectId(tid)}, {"$set": {"status": "matched"}}
             )
         except Exception:
@@ -143,13 +138,13 @@ async def create_match(
 
     for did in document_ids:
         try:
-            await db[collection].update_one(
+            await ctx.db[collection].update_one(
                 {"_id": ObjectId(did)}, {"$set": {"status": "matched"}}
             )
         except Exception:
             pass
 
-    created = await db["matches"].find_one({"_id": result.inserted_id})
+    created = await ctx.db["matches"].find_one({"_id": result.inserted_id})
     return _serialize(created)
 
 
@@ -157,19 +152,15 @@ async def create_match(
 async def list_matches(
     match_type: Optional[str] = None,
     fiscal_period: Optional[str] = None,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
-    query: dict = {"corporate_id": corporate_id}
+    query: dict = {"corporate_id": ctx.corporate_id}
     if match_type:
         query["match_type"] = match_type
     if fiscal_period:
         query["fiscal_period"] = fiscal_period
 
-    cursor = db["matches"].find(query).sort("matched_at", -1)
+    cursor = ctx.db["matches"].find(query).sort("matched_at", -1)
     docs = await cursor.to_list(length=500)
     return [_serialize(doc) for doc in docs]
 
@@ -177,60 +168,38 @@ async def list_matches(
 @router.get("/{match_id}", summary="マッチング詳細を取得する")
 async def get_match(
     match_id: str,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
-    try:
-        oid = ObjectId(match_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid match ID")
-
-    doc = await db["matches"].find_one({"_id": oid, "corporate_id": corporate_id})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Match not found")
+    doc = await get_doc_or_404(ctx.db, "matches", match_id, ctx.corporate_id, "match")
     return _serialize(doc)
 
 
 @router.delete("/{match_id}", summary="マッチングを解除する")
 async def delete_match(
     match_id: str,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
     """
     Unmatch: delete the match record and reset linked documents/transactions to unmatched.
     """
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
-    try:
-        oid = ObjectId(match_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid match ID")
-
-    match = await db["matches"].find_one({"_id": oid, "corporate_id": corporate_id})
-    if not match:
-        raise HTTPException(status_code=404, detail="Match not found")
+    match = await get_doc_or_404(ctx.db, "matches", match_id, ctx.corporate_id, "match")
 
     # Restore statuses
     collection = "receipts" if match.get("match_type") == "receipt" else "invoices"
     for tid in match.get("transaction_ids", []):
         try:
-            await db["bank_transactions"].update_one(
+            await ctx.db["bank_transactions"].update_one(
                 {"_id": ObjectId(tid)}, {"$set": {"status": "unmatched"}}
             )
         except Exception:
             pass
     for did in match.get("document_ids", []):
         try:
-            await db[collection].update_one(
+            await ctx.db[collection].update_one(
                 {"_id": ObjectId(did)}, {"$set": {"status": "approved"}}  # revert to pre-match
             )
         except Exception:
             pass
 
-    await db["matches"].delete_one({"_id": oid})
+    await ctx.db["matches"].delete_one({"_id": match["_id"]})
     return {"status": "unmatched", "match_id": match_id}

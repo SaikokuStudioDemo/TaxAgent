@@ -10,6 +10,7 @@ import {
 import { useApprovals, type AddedStep } from '@/composables/useApprovals';
 import { MASTER_APPROVERS, getRankFromRoleId } from '@/lib/constants/mockData';
 import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
+import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
 // --- TYPES ---
 interface ApprovalHistory {
@@ -58,8 +59,6 @@ const { submitApprovalAction, isSubmitting, error } = useApprovals();
 const actionComment = ref('');
 const isAddingApprover = ref(false);
 const selectedExtraApproverId = ref('');
-
-const formatAmount = (num: number) => new Intl.NumberFormat('ja-JP').format(num);
 
 const availableApproversToAdd = computed(() => {
   if (!props.receipt || props.receipt.approvalHistory.length === 0) return [];

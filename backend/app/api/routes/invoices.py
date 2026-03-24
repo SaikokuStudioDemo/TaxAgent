@@ -3,9 +3,13 @@ from typing import List, Optional
 from datetime import datetime
 from bson import ObjectId
 
-from app.api.deps import get_current_user
-from app.api.helpers import resolve_corporate_id
-from app.db.mongodb import get_database
+from app.api.helpers import (
+    serialize_doc as _serialize,
+    get_corporate_context,
+    CorporateContext,
+    parse_oid,
+    get_doc_or_404,
+)
 from app.models.invoice import InvoiceCreate, InvoiceInDB
 import logging
 from app.services.rule_evaluation_service import evaluate_approval_rules
@@ -17,35 +21,31 @@ from app.api.routes.templates import router as templates_router
 router.include_router(templates_router, prefix="/templates", tags=["invoice-templates"])
 
 
-def _serialize(doc: dict) -> dict:
-    """Convert ObjectId to string for JSON serialization."""
-    doc["id"] = str(doc.pop("_id"))
-    return doc
-
-
 @router.post("", summary="請求書を作成する")
 async def create_invoice(
     payload: InvoiceCreate,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, user_id = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
     # Determine fiscal period from issue_date (YYYY-MM-DD → YYYY-MM)
     fiscal_period = payload.issue_date[:7] if payload.issue_date else datetime.utcnow().strftime("%Y-%m")
 
     # Match approval rules
-    rule_id, _ = await evaluate_approval_rules(corporate_id, f"{payload.direction}_invoice", payload.model_dump())
+    rule_id, rule_steps = await evaluate_approval_rules(ctx.corporate_id, f"{payload.direction}_invoice", payload.model_dump())
+
+    final_status = payload.status or "draft"
+    # 承認ルールなしで即送付 → 自動承認扱い
+    is_auto_approved = final_status == "sent" and rule_id is None
 
     doc = {
         **payload.model_dump(),
-        "corporate_id": corporate_id,
-        "created_by": user_id,
-        "status": payload.status or "draft",
-        "review_status": "unreviewed",
+        "corporate_id": ctx.corporate_id,
+        "created_by": ctx.user_id,
+        "status": final_status,
+        "review_status": "approved" if is_auto_approved else "unreviewed",
+        "is_auto_approved": is_auto_approved,
         "current_step": 1,
         "approval_rule_id": rule_id,
+        "approval_steps": rule_steps if rule_id else [],
         "attachments": payload.attachments or [],
         "fiscal_period": fiscal_period,
         "ai_extracted": False,
@@ -53,8 +53,8 @@ async def create_invoice(
         "paid_at": None,
     }
 
-    result = await db["invoices"].insert_one(doc)
-    created = await db["invoices"].find_one({"_id": result.inserted_id})
+    result = await ctx.db["invoices"].insert_one(doc)
+    created = await ctx.db["invoices"].find_one({"_id": result.inserted_id})
     return _serialize(created)
 
 
@@ -63,13 +63,9 @@ async def list_invoices(
     direction: Optional[str] = None,
     review_status: Optional[str] = None,
     fiscal_period: Optional[str] = None,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
-    query: dict = {"corporate_id": corporate_id, "is_deleted": {"$ne": True}}
+    query: dict = {"corporate_id": ctx.corporate_id, "is_deleted": {"$ne": True}}
     if direction:
         query["direction"] = direction
     if review_status:
@@ -77,7 +73,7 @@ async def list_invoices(
     if fiscal_period:
         query["fiscal_period"] = fiscal_period
 
-    cursor = db["invoices"].find(query).sort("created_at", -1)
+    cursor = ctx.db["invoices"].find(query).sort("created_at", -1)
     docs = await cursor.to_list(length=500)
     return [_serialize(doc) for doc in docs]
 
@@ -85,25 +81,14 @@ async def list_invoices(
 @router.get("/{invoice_id}", summary="請求書詳細を取得する")
 async def get_invoice(
     invoice_id: str,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
-    try:
-        oid = ObjectId(invoice_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid invoice ID")
-
-    doc = await db["invoices"].find_one({"_id": oid, "corporate_id": corporate_id})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+    doc = await get_doc_or_404(ctx.db, "invoices", invoice_id, ctx.corporate_id, "invoice")
 
     # Fetch approval events for this invoice
-    events_cursor = db["approval_events"].find(
+    events_cursor = ctx.db["approval_events"].find(
         {
-            "document_id": invoice_id, 
+            "document_id": invoice_id,
             "document_type": {"$in": ["invoice", "received_invoice", "issued_invoice"]}
         }
     ).sort("timestamp", 1)
@@ -119,48 +104,50 @@ async def get_invoice(
 async def update_invoice(
     invoice_id: str,
     payload: dict,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
-    try:
-        oid = ObjectId(invoice_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid invoice ID")
+    oid = parse_oid(invoice_id, "invoice")
 
     # Disallow updating protected fields
     forbidden = {"corporate_id", "created_by", "created_at", "_id"}
     update_data = {k: v for k, v in payload.items() if k not in forbidden}
 
-    result = await db["invoices"].update_one(
-        {"_id": oid, "corporate_id": corporate_id},
+    existing = await ctx.db["invoices"].find_one({"_id": oid, "corporate_id": ctx.corporate_id}, {"approval_rule_id": 1, "status": 1})
+
+    # pending_approval に遷移する場合はルールのステップを保存
+    if update_data.get("status") == "pending_approval" and existing:
+        rule_id = existing.get("approval_rule_id")
+        if rule_id:
+            from app.services.rule_evaluation_service import get_rule_steps
+            steps = await get_rule_steps(rule_id)
+            update_data["approval_steps"] = steps
+
+    # 承認ルールなしで sent に遷移する場合は自動承認フラグをセット
+    if update_data.get("status") == "sent":
+        if existing and not existing.get("approval_rule_id"):
+            update_data["is_auto_approved"] = True
+            update_data["review_status"] = "approved"
+
+    result = await ctx.db["invoices"].update_one(
+        {"_id": oid, "corporate_id": ctx.corporate_id},
         {"$set": update_data},
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
-    updated = await db["invoices"].find_one({"_id": oid})
+    updated = await ctx.db["invoices"].find_one({"_id": oid})
     return _serialize(updated)
 
 
 @router.delete("/{invoice_id}", summary="請求書を削除する")
 async def delete_invoice(
     invoice_id: str,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
+    oid = parse_oid(invoice_id, "invoice")
 
-    try:
-        oid = ObjectId(invoice_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid invoice ID")
-
-    result = await db["invoices"].update_one(
-        {"_id": oid, "corporate_id": corporate_id},
+    result = await ctx.db["invoices"].update_one(
+        {"_id": oid, "corporate_id": ctx.corporate_id},
         {"$set": {"is_deleted": True}}
     )
     if result.matched_count == 0:
@@ -172,27 +159,16 @@ async def delete_invoice(
 @router.post("/{invoice_id}/send", summary="請求書を送付する")
 async def send_invoice(
     invoice_id: str,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
     """Mark invoice as sent. Actual email sending will be handled by the notification service."""
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
-    try:
-        oid = ObjectId(invoice_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid invoice ID")
-
-    invoice = await db["invoices"].find_one({"_id": oid, "corporate_id": corporate_id})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+    invoice = await get_doc_or_404(ctx.db, "invoices", invoice_id, ctx.corporate_id, "invoice")
 
     if invoice.get("direction") != "issued":
         raise HTTPException(status_code=400, detail="Only issued invoices can be sent.")
 
-    await db["invoices"].update_one(
-        {"_id": oid},
+    await ctx.db["invoices"].update_one(
+        {"_id": invoice["_id"]},
         {"$set": {"status": "sent"}},
     )
     return {"status": "sent", "invoice_id": invoice_id}
@@ -201,16 +177,12 @@ async def send_invoice(
 @router.post("/bulk-action", summary="複数の請求書に対して一括操作を行う")
 async def bulk_action(
     payload: dict,
-    current_user: dict = Depends(get_current_user),
+    ctx: CorporateContext = Depends(get_corporate_context),
 ):
     """
     Perform bulk actions (delete, send) on multiple invoices.
     Payload: { "action": "delete" | "send", "ids": ["id1", "id2", ...] }
     """
-    firebase_uid = current_user.get("uid")
-    corporate_id, _ = await resolve_corporate_id(firebase_uid)
-    db = get_database()
-
     ids = payload.get("ids", [])
     action = payload.get("action")
 
@@ -223,13 +195,13 @@ async def bulk_action(
         raise HTTPException(status_code=400, detail="Invalid ID format in list")
 
     if action == "delete":
-        await db["invoices"].update_many(
-            {"_id": {"$in": oids}, "corporate_id": corporate_id},
+        await ctx.db["invoices"].update_many(
+            {"_id": {"$in": oids}, "corporate_id": ctx.corporate_id},
             {"$set": {"is_deleted": True}}
         )
     elif action == "send":
-        await db["invoices"].update_many(
-            {"_id": {"$in": oids}, "corporate_id": corporate_id, "direction": "issued", "status": "draft"},
+        await ctx.db["invoices"].update_many(
+            {"_id": {"$in": oids}, "corporate_id": ctx.corporate_id, "direction": "issued", "status": "draft"},
             {"$set": {"status": "sent"}}
         )
     else:

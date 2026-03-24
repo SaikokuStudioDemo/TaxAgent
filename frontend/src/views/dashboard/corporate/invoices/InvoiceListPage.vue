@@ -18,20 +18,10 @@ import {
 import { useRouter } from 'vue-router';
 import { useInvoices } from '@/composables/useInvoices';
 import InvoiceDetailModal from '@/components/invoices/InvoiceDetailModal.vue';
+import { buildApprovalHistory, type ApprovalHistory } from '@/composables/useApprovalHistory';
+import { formatNumber as formatCurrency } from '@/lib/utils/formatters';
 
 // --- Types for Modal compatibility ---
-interface ApprovalHistory {
-  id: string;
-  step: number;
-  roleId: string;
-  roleName: string;
-  approverId?: string;
-  approverName?: string;
-  status: 'pending' | 'approved' | 'rejected' | 'skipped';
-  actionDate?: string;
-  comment?: string;
-}
-
 interface InvoiceItem {
   id: string;
   vendorName: string;
@@ -49,31 +39,6 @@ interface InvoiceItem {
 }
 
 const mapToModalData = (inv: any): InvoiceItem => {
-  const history = (inv.approval_history && inv.approval_history.length > 0)
-    ? inv.approval_history.map((h: any, i: number) => ({
-        id: h.id ?? `h_${i}`,
-        step: h.step ?? i + 1,
-        roleId: h.role_id ?? 'accounting',
-        roleName: h.role_name ?? '経理担当',
-        approverId: h.approver_id,
-        approverName: h.approver_name,
-        status: h.status ?? 'pending',
-        actionDate: h.action_date,
-        comment: h.comment,
-      }))
-    : [];
-
-  const extraSteps = (inv.extra_approval_steps || []).map((s: any, i: number) => ({
-      id: `h_ext_${Date.now()}_${i}`,
-      step: history.length + i + 1,
-      roleId: s.roleId,
-      roleName: s.roleName,
-      approverName: s.approverName,
-      status: 'pending' as const,
-  }));
-
-  const combinedHistory = [...history, ...extraSteps];
-
   return {
     id: inv.id,
     vendorName: inv.clientName || '不明',
@@ -85,18 +50,16 @@ const mapToModalData = (inv: any): InvoiceItem => {
     paymentMethod: inv.paymentMethod || '請求書払い',
     memo: inv.memo || '',
     status: inv.reviewStatus === 'approved' ? 'approved' : inv.reviewStatus === 'rejected' ? 'rejected' : 'pending',
-    currentStepIndex: inv.current_step_index || 0,
-    approvalHistory: combinedHistory.length > 0
-      ? combinedHistory
-      : [{ id: 'h_default', step: 1, roleId: 'accounting', roleName: '承認担当', status: (inv.reviewStatus === 'approved' ? 'approved' : inv.reviewStatus === 'rejected' ? 'rejected' : 'pending') as any }],
+    currentStepIndex: inv.current_step ? inv.current_step - 1 : 0,
+    approvalHistory: buildApprovalHistory(inv.approval_steps, inv.approval_history, inv.reviewStatus),
     imageUrl: inv.image_url || ((inv.attachments && inv.attachments.length > 0) ? inv.attachments[0] : ''),
   };
 };
 
 const router = useRouter();
 
-// Tabs: 'issued' (発行), 'received' (受領), 'drafts' (下書き)
-const activeTab = ref<'issued' | 'received' | 'drafts'>('issued');
+// Tabs: 'issued' (発行), 'received' (受領), 'pending_approval' (承認待ち), 'drafts' (下書き)
+const activeTab = ref<'issued' | 'received' | 'pending_approval' | 'drafts'>('issued');
 const searchQuery = ref('');
 
 const { invoices, fetchInvoices, bulkAction, deleteInvoice } = useInvoices();
@@ -213,10 +176,11 @@ onMounted(loadInvoices);
 // No need to watch activeTab if we fetch all once, but we can keep it if we want to refresh
 
 // Map API invoice to display format
-type InvoiceStatus = 'draft' | 'pending_send' | 'sent_unmatched' | 'matched' | 'overdue_unmatched' | 'received_unmatched' | 'received_matched';
+type InvoiceStatus = 'draft' | 'pending_approval' | 'pending_send' | 'sent_unmatched' | 'matched' | 'overdue_unmatched' | 'received_unmatched' | 'received_matched';
 
 const mapStatus = (inv: any): InvoiceStatus => {
     if (inv.status === 'draft') return 'draft';
+    if (inv.status === 'pending_approval') return 'pending_approval';
     if (inv.status === 'matched') return inv.direction === 'received' ? 'received_matched' : 'matched';
     if (inv.direction === 'received') return 'received_unmatched';
     if (inv.status === 'sent') return 'sent_unmatched';
@@ -247,9 +211,11 @@ const filteredInvoices = computed(() => {
     }));
 
     if (activeTab.value === 'issued') {
-        list = list.filter(i => i.direction === 'issued' && i.status !== 'draft');
+        list = list.filter(i => i.direction === 'issued' && i.status !== 'draft' && i.status !== 'pending_approval');
     } else if (activeTab.value === 'received') {
         list = list.filter(i => i.direction === 'received');
+    } else if (activeTab.value === 'pending_approval') {
+        list = list.filter(i => i.status === 'pending_approval');
     } else if (activeTab.value === 'drafts') {
         list = list.filter(i => i.status === 'draft');
     }
@@ -265,8 +231,9 @@ const filteredInvoices = computed(() => {
     return list;
 });
 
-const issuedCount = computed(() => invoices.value.filter(i => i.direction === 'issued' && i.status !== 'draft').length);
+const issuedCount = computed(() => invoices.value.filter(i => i.direction === 'issued' && i.status !== 'draft' && i.status !== 'pending_approval').length);
 const receivedCount = computed(() => invoices.value.filter(i => i.direction === 'received').length);
+const pendingApprovalCount = computed(() => invoices.value.filter(i => i.status === 'pending_approval').length);
 const draftsCount = computed(() => invoices.value.filter(i => i.status === 'draft').length);
 
 const toggleExpansion = (id: string) => {
@@ -277,8 +244,6 @@ const toggleExpansion = (id: string) => {
         expandedInvoiceIds.value.push(id);
     }
 };
-
-const formatCurrency = (amount: number) => new Intl.NumberFormat('ja-JP').format(amount || 0);
 
 const currentMonth = new Date().toISOString().slice(0, 7);
 const issuedSummary = computed(() => {
@@ -319,6 +284,7 @@ const getStatusBadge = (status: InvoiceStatus) => {
         case 'pending_send': return { label: '未消込 (未送付)', classes: 'bg-amber-50 text-amber-700 border-amber-200', icon: FileText };
         case 'overdue_unmatched': return { label: '未消込 (期限超過)', classes: 'bg-red-50 text-red-700 border-red-200', icon: Clock };
         case 'draft': return { label: '下書き', classes: 'bg-gray-100 text-gray-700 border-gray-200', icon: FileText };
+        case 'pending_approval': return { label: '承認待ち', classes: 'bg-orange-100 text-orange-700 border-orange-200', icon: Clock };
         case 'received_unmatched': return { label: '未消込 (支払待ち)', classes: 'bg-amber-50 text-amber-700 border-amber-200', icon: Clock };
         case 'received_matched': return { label: '消込済 (支払完了)', classes: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle };
         default: return { label: '不明', classes: 'bg-gray-100 text-gray-700 border-gray-200', icon: FileText };
@@ -343,7 +309,7 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
       <header class="bg-white border-b border-gray-200 px-8 py-6 shrink-0 z-10">
       <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 class="text-2xl font-bold text-gray-900 tracking-tight">請求書一覧</h1>
+          <h1 class="text-2xl font-bold text-gray-900 tracking-tight">請求書リスト</h1>
           <p class="text-sm text-gray-500 mt-1">作成した請求書データと、受領した請求書データを一元管理します</p>
         </div>
         <div class="flex items-center gap-3">
@@ -379,8 +345,16 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
           <Upload class="w-4 h-4" />
           受領 <span class="bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded-full ml-1">{{ receivedCount }}</span>
         </button>
-        <button 
-          @click="activeTab = 'drafts'" 
+        <button
+          @click="activeTab = 'pending_approval'"
+          class="flex-1 px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
+          :class="activeTab === 'pending_approval' ? 'bg-white text-orange-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
+        >
+          <AlertCircle class="w-4 h-4" />
+          承認待ち <span class="bg-orange-100 text-orange-700 text-[10px] px-1.5 py-0.5 rounded-full ml-1">{{ pendingApprovalCount }}</span>
+        </button>
+        <button
+          @click="activeTab = 'drafts'"
           class="flex-1 px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
           :class="activeTab === 'drafts' ? 'bg-white text-slate-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
         >
