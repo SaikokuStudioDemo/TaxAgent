@@ -13,7 +13,7 @@ class TemplateCreate(TemplateBase):
     pass
 
 class TemplateInDB(TemplateBase):
-    id: Optional[str] = Field(None, alias="_id")
+    id: Optional[str] = None
     corporate_id: str
     created_by: str
     created_at: datetime = Field(default_factory=datetime.utcnow)

@@ -345,16 +345,8 @@ const handleTemplateSave = async (payload: { name: string, html: string }) => {
             thumbnail: 'bg-emerald-50 border-emerald-200',
             is_active: true
         });
+        await fetchTemplates();
         if (savedTemplate && savedTemplate.id) {
-            const newTemplate: InvoiceTemplate = {
-                id: savedTemplate.id,
-                name: savedTemplate.name,
-                description: savedTemplate.description,
-                thumbnail: savedTemplate.thumbnail,
-                isActive: true,
-                html: savedTemplate.html
-            };
-            templates.value.unshift(newTemplate);
             selectedTemplateId.value = savedTemplate.id;
             templateHtml.value = payload.html;
         }
