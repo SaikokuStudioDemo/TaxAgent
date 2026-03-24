@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, computed, onMounted } from 'vue';
 import {
   AlertCircle,
   CreditCard,
@@ -9,8 +10,37 @@ import {
 } from 'lucide-vue-next';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { Doughnut } from 'vue-chartjs';
+import { useInvoices } from '@/composables/useInvoices';
+import { useReceipts } from '@/composables/useReceipts';
+import { useBankTransactions } from '@/composables/useBankTransactions';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
+
+// --- KPI DATA ---
+const { invoices, fetchInvoices } = useInvoices();
+const { receipts, fetchReceipts } = useReceipts();
+const { transactions, matches, fetchTransactions, fetchMatches } = useBankTransactions();
+
+onMounted(() => {
+    Promise.all([
+        fetchInvoices(),
+        fetchReceipts(),
+        fetchTransactions(),
+        fetchMatches(),
+    ]);
+});
+
+const kpi = computed(() => {
+    const totalDocs = invoices.value.length + receipts.value.length;
+    const matchCount = matches.value.length;
+    const rate = totalDocs > 0 ? Math.round((matchCount / totalDocs) * 1000) / 10 : 0;
+    return {
+        bankCount: transactions.value.length,
+        docCount: totalDocs,
+        matchCount,
+        matchRate: rate,
+    };
+});
 
 const chartData = {
   labels: ['請求書', '領収書'],
@@ -77,7 +107,7 @@ const chartOptions = {
           <div class="px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-50 text-emerald-700">+12%</div>
         </div>
         <h3 class="text-gray-500 text-sm font-medium mb-1">登録された銀行/カード</h3>
-        <p class="text-3xl font-extrabold text-gray-900">122</p>
+        <p class="text-3xl font-extrabold text-gray-900">{{ kpi.bankCount }}</p>
       </div>
       <!-- Card 2 -->
       <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
@@ -86,7 +116,7 @@ const chartOptions = {
           <div class="px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-50 text-emerald-700">+5%</div>
         </div>
         <h3 class="text-gray-500 text-sm font-medium mb-1">登録された請求書/領収書</h3>
-        <p class="text-3xl font-extrabold text-gray-900">89</p>
+        <p class="text-3xl font-extrabold text-gray-900">{{ kpi.docCount }}</p>
       </div>
       <!-- Card 3 -->
       <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
@@ -95,7 +125,7 @@ const chartOptions = {
           <div class="px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-50 text-emerald-700">+18%</div>
         </div>
         <h3 class="text-gray-500 text-sm font-medium mb-1">完了したマッチング</h3>
-        <p class="text-3xl font-extrabold text-gray-900">64</p>
+        <p class="text-3xl font-extrabold text-gray-900">{{ kpi.matchCount }}</p>
       </div>
       <!-- Card 4 -->
       <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
@@ -104,7 +134,7 @@ const chartOptions = {
           <div class="px-2.5 py-1 text-xs font-bold rounded-full bg-red-50 text-red-600">-2.1%</div>
         </div>
         <h3 class="text-gray-500 text-sm font-medium mb-1">マッチング完了率</h3>
-        <p class="text-3xl font-extrabold text-gray-900">71.9%</p>
+        <p class="text-3xl font-extrabold text-gray-900">{{ kpi.matchRate }}%</p>
       </div>
     </div>
 

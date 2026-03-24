@@ -10,10 +10,10 @@ import {
   Filter,
   AlertCircle,
   Building2,
-  FolderKanban,
-  MessageSquareWarning
+  FolderKanban
 } from 'lucide-vue-next';
 import { useReceipts } from '@/composables/useReceipts';
+import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
 
 // --- MOCK DATA ---
 interface ApprovalHistory {
@@ -51,7 +51,7 @@ interface ReceiptItem {
 const formatAmount = (num: number) => new Intl.NumberFormat('ja-JP').format(num);
 
 // Fetch real receipts and map to ReceiptItem shape for the template
-const { receipts: apiReceipts, fetchReceipts, approveReceipt } = useReceipts();
+const { receipts: apiReceipts, fetchReceipts, submitApprovalAction, approveReceipt } = useReceipts();
 
 const mockReceipts = ref<ReceiptItem[]>([]);
 
@@ -178,28 +178,30 @@ const handleAddApprover = () => {
   selectedExtraApproverId.value = '';
 };
 
-const handleRemoveApprover = (historyId: string) => {
-  if (!selectedReceipt.value) return;
-  const idx = selectedReceipt.value.approvalHistory.findIndex(h => h.id === historyId);
-  if (idx > -1 && historyId.startsWith('h_ext_')) {
-    selectedReceipt.value.approvalHistory.splice(idx, 1);
-    selectedReceipt.value.approvalHistory.forEach((h, i) => {
-      h.step = i + 1;
-    });
-  }
-};
-
 const handleApprove = async () => {
   if (!selectedReceipt.value) return;
   isSubmittingAction.value = true;
-  const receiptId = selectedReceipt.value.id;
-  const result = await approveReceipt(receiptId, 'approve', actionComment.value || undefined);
+  const invId = selectedReceipt.value.id;
+  
+  // Extract extra dynamically added steps
+  const extSteps = selectedReceipt.value.approvalHistory
+    .filter(h => h.id.startsWith('h_ext_'))
+    .map(h => ({
+      roleId: h.roleId,
+      roleName: h.roleName,
+      approverName: h.approverName
+    }));
+
+  const result = await submitApprovalAction(invId, 'approved', selectedReceipt.value.currentStepIndex + 1, actionComment.value || undefined, extSteps);
   if (result) {
-    // Update local state immediately
-    const receiptRef = mockReceipts.value.find(r => r.id === receiptId);
-    if (receiptRef) {
-      receiptRef.status = 'approved';
-      const step = receiptRef.approvalHistory[receiptRef.currentStepIndex];
+    const invRef = mockReceipts.value.find(i => i.id === invId);
+    if (invRef) {
+      // Re-evaluate if fully approved based on the new steps
+      const newTotal = selectedReceipt.value.approvalHistory.length;
+      if (selectedReceipt.value.currentStepIndex + 1 >= newTotal) {
+          invRef.status = 'approved';
+      }
+      const step = invRef.approvalHistory[invRef.currentStepIndex];
       if (step) { step.status = 'approved'; step.approverName = 'あなた'; step.actionDate = new Date().toLocaleString('ja-JP'); }
     }
   }
@@ -422,12 +424,12 @@ const handleReject = async () => {
     </div>
 
 
-    <!-- Detail Modal / Side Panel -->
-    <div v-if="isDetailModalOpen && selectedReceipt" class="fixed inset-0 z-50 overflow-hidden" aria-labelledby="slide-over-title" role="dialog" aria-modal="true">
+    <!-- Detail Modal -->
+    <div v-if="isDetailModalOpen && selectedReceipt" class="fixed inset-0 z-[120] flex items-center justify-center p-4 sm:p-6 overflow-hidden" aria-labelledby="slide-over-title" role="dialog" aria-modal="true">
         <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] transition-opacity" @click="closeDetail"></div>
 
-        <div class="fixed inset-y-0 right-0 max-w-full flex w-full lg:w-[900px] xl:w-[1000px] bg-white shadow-2xl transition-transform transform duration-300 ease-in-out">
-            <div class="h-full flex flex-col w-full shadow-xl overflow-y-scroll bg-slate-50 relative">
+        <div class="relative w-full max-w-6xl h-[95vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div class="h-full flex flex-col w-full overflow-y-auto bg-slate-50 relative">
                 <!-- Header -->
                 <div class="px-6 py-4 pr-20 bg-white border-b border-gray-200 flex items-center justify-between sticky top-0 z-10 shadow-sm">
                     <div>
@@ -490,88 +492,37 @@ const handleReject = async () => {
                                 </dl>
                             </div>
 
-                            <!-- Approval Progress Tree -->
+                            <!-- Approval Progress Tree (Unified) -->
                             <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm flex-1">
-                                <h3 class="text-sm font-bold text-gray-900 border-b border-gray-100 pb-3 mb-4">承認フロー</h3>
-                                <div class="flow-root mt-4">
-                                    <ul role="list" class="-mb-8">
-                                        <li v-for="(step, index) in selectedReceipt.approvalHistory" :key="step.id">
-                                            <div class="relative pb-8">
-                                                <span v-if="index !== selectedReceipt.approvalHistory.length - 1" class="absolute top-4 left-4 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
-                                                <div class="relative flex space-x-3">
-                                                    <div>
-                                                        <span 
-                                                            class="h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white shadow-sm"
-                                                            :class="{
-                                                                'bg-emerald-500 text-white': step.status === 'approved',
-                                                                'bg-rose-500 text-white': step.status === 'rejected',
-                                                                'bg-blue-100 border-2 border-blue-500 text-blue-700': step.status === 'pending' && index <= selectedReceipt.currentStepIndex,
-                                                                'bg-gray-100 text-gray-400 border border-gray-200': step.status === 'pending' && index > selectedReceipt.currentStepIndex
-                                                            }"
-                                                        >
-                                                            <CheckCircle v-if="step.status === 'approved'" class="h-4 w-4" aria-hidden="true" />
-                                                            <XCircle v-else-if="step.status === 'rejected'" class="h-4 w-4" aria-hidden="true" />
-                                                            <span v-else class="text-xs font-bold">{{ index + 1 }}</span>
-                                                        </span>
-                                                    </div>
-                                                    <div class="flex min-w-0 flex-1 justify-between space-x-4 pt-1.5">
-                                                        <div>
-                                                            <p class="text-sm font-medium text-gray-900 flex items-center gap-2">
-                                                                {{ step.roleName }}
-                                                                <span v-if="step.status === 'pending' && index === selectedReceipt.currentStepIndex" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-800">
-                                                                    順番待ち
-                                                                </span>
-                                                                <!-- Delete button for manually added approvers -->
-                                                                <button 
-                                                                    v-if="step.id.startsWith('h_ext_') && step.status === 'pending'" 
-                                                                    @click="handleRemoveApprover(step.id)" 
-                                                                    class="text-gray-400 hover:text-red-500 transition-colors p-0.5 rounded hover:bg-red-50"
-                                                                    title="このステップを削除"
-                                                                >
-                                                                    <XCircle class="w-4 h-4" />
-                                                                </button>
-                                                            </p>
-                                                            <p v-if="step.approverName" class="text-xs text-gray-500">{{ step.approverName }}</p>
-                                                            
-                                                            <!-- Step Comment -->
-                                                            <div v-if="step.comment" class="mt-2 text-sm text-gray-700 bg-red-50/50 border border-rose-100 rounded-lg p-3 relative shadow-sm">
-                                                                <div class="flex gap-2">
-                                                                    <MessageSquareWarning v-if="step.status === 'rejected'" class="h-4 w-4 text-rose-500 shrink-0" />
-                                                                    <p class="text-xs leading-relaxed" :class="{'text-rose-800': step.status === 'rejected'}">{{ step.comment }}</p>
-                                                                </div>
-                                                            </div>
-                                                            
-                                                            <!-- Ad-Hoc Approver Insertion Button (Only visible on the last step if still pending) -->
-                                                            <div v-if="index === selectedReceipt.approvalHistory.length - 1 && selectedReceipt.status === 'pending'" class="mt-4 pt-4 border-t border-gray-100 border-dashed">
-                                                                <button v-if="!isAddingApprover" @click="isAddingApprover = true" class="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors">
-                                                                    <Plus class="w-3.5 h-3.5 mr-1" />
-                                                                    次の承認者を追加 (個別対応)
-                                                                </button>
-                                                                <div v-else class="bg-gray-50 border border-gray-200 rounded-lg p-3 shadow-inner">
-                                                                    <p class="text-xs font-bold text-gray-700 mb-2">追加する承認者を選択(現在の階層以上)</p>
-                                                                    <div class="flex items-center gap-2">
-                                                                        <select v-model="selectedExtraApproverId" class="block w-full rounded-md border-gray-300 border shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs py-1.5 px-2 bg-white">
-                                                                            <option value="" disabled>選択してください</option>
-                                                                            <option v-for="user in availableApproversToAdd" :key="user.id" :value="user.id">
-                                                                                {{ user.roleName }} - {{ user.name }}
-                                                                            </option>
-                                                                        </select>
-                                                                        <button @click="handleAddApprover" class="bg-blue-600 text-white px-3 py-1.5 rounded-md text-xs font-medium hover:bg-blue-700 whitespace-nowrap disabled:opacity-50" :disabled="!selectedExtraApproverId">追加</button>
-                                                                        <button @click="isAddingApprover = false" class="text-gray-500 hover:text-gray-700 px-2 py-1.5 rounded-md text-xs font-medium whitespace-nowrap bg-white border border-gray-200 shadow-sm">キャンセル</button>
-                                                                    </div>
-                                                                    <p v-if="availableApproversToAdd.length === 0" class="text-[10px] text-rose-500 mt-1">現在の階層より上位の役職者が存在しません。</p>
-                                                                </div>
-                                                            </div>
-
-                                                        </div>
-                                                        <div class="whitespace-nowrap text-right text-xs text-gray-500 flex flex-col items-end">
-                                                            <span v-if="step.actionDate">{{ step.actionDate }}</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
+                                <h3 class="text-sm font-bold text-gray-900 border-b border-gray-100 pb-3 mb-4">承認フロー (進捗状況)</h3>
+                                <div class="mt-4 overflow-hidden relative">
+                                    <ApprovalStepper 
+                                        document-type="receipt"
+                                        mode="status"
+                                        :history="selectedReceipt.approvalHistory"
+                                        :current-step="selectedReceipt.currentStepIndex + 1"
+                                    />
+                                    
+                                    <!-- Additional Manual Actions for Ad-Hoc Approver (kept from original) -->
+                                    <div v-if="selectedReceipt.status === 'pending'" class="mt-8 pt-4 border-t border-gray-100 border-dashed">
+                                        <button v-if="!isAddingApprover" @click="isAddingApprover = true" class="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors">
+                                            <Plus class="w-3.5 h-3.5 mr-1" />
+                                            次の承認者を追加 (個別対応)
+                                        </button>
+                                        <div v-else class="bg-gray-50 border border-gray-200 rounded-lg p-3 shadow-inner">
+                                            <p class="text-xs font-bold text-gray-700 mb-2">追加する承認者を選択(現在の階層以上)</p>
+                                            <div class="flex items-center gap-2">
+                                                <select v-model="selectedExtraApproverId" class="block w-full rounded-md border-gray-300 border shadow-sm focus:border-blue-500 focus:ring-blue-500 text-xs py-1.5 px-2 bg-white">
+                                                    <option value="" disabled>選択してください</option>
+                                                    <option v-for="user in availableApproversToAdd" :key="user.id" :value="user.id">
+                                                        {{ user.roleName }} - {{ user.name }}
+                                                    </option>
+                                                </select>
+                                                <button @click="handleAddApprover" class="bg-blue-600 text-white px-3 py-1.5 rounded-md text-xs font-medium hover:bg-blue-700 whitespace-nowrap disabled:opacity-50" :disabled="!selectedExtraApproverId">追加</button>
+                                                <button @click="isAddingApprover = false" class="text-gray-500 hover:text-gray-700 px-2 py-1.5 rounded-md text-xs font-medium whitespace-nowrap bg-white border border-gray-200 shadow-sm">キャンセル</button>
                                             </div>
-                                        </li>
-                                    </ul>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

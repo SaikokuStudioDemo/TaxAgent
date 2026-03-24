@@ -1,0 +1,203 @@
+INFO:     Will watch for changes in these directories: ['/Users/yohei/Developer/TaxAgent/backend']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [9817] using StatReload
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+INFO:     Started server process [9863]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+Firebase Admin initialized successfully.
+Connecting to MongoDB...
+Connected to MongoDB!
+INFO:     127.0.0.1:50113 - "OPTIONS /api/v1/receipts HTTP/1.1" 200 OK
+DEBUG: Resolving corporate context for UID: seed_corp_a_uid
+DEBUG: Found corporate admin. corporate_id=69b0f2fb0a3726bdb5a62cea
+INFO:     127.0.0.1:50113 - "GET /api/v1/receipts HTTP/1.1" 200 OK
+DEBUG: Resolving corporate context for UID: seed_corp_a_uid
+DEBUG: Found corporate admin. corporate_id=69b0f2fb0a3726bdb5a62cea
+INFO:     127.0.0.1:50113 - "GET /api/v1/receipts HTTP/1.1" 200 OK
+DEBUG: Resolving corporate context for UID: seed_corp_a_uid
+DEBUG: Found corporate admin. corporate_id=69b0f2fb0a3726bdb5a62cea
+INFO:     127.0.0.1:50113 - "GET /api/v1/receipts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50113 - "OPTIONS /api/v1/invoices HTTP/1.1" 200 OK
+DEBUG: Resolving corporate context for UID: seed_corp_a_uid
+DEBUG: Found corporate admin. corporate_id=69b0f2fb0a3726bdb5a62cea
+INFO:     127.0.0.1:50115 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50115 - "OPTIONS /api/v1/approvals/rules/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50113 - "OPTIONS /api/v1/templates HTTP/1.1" 200 OK
+DEBUG: Resolving corporate context for UID: seed_corp_a_uid
+DEBUG: Resolving corporate context for UID: seed_corp_a_uid
+DEBUG: Found corporate admin. corporate_id=69b0f2fb0a3726bdb5a62cea
+DEBUG: Found corporate admin. corporate_id=69b0f2fb0a3726bdb5a62cea
+INFO:     127.0.0.1:50113 - "GET /api/v1/templates HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50115 - "POST /api/v1/approvals/rules/preview HTTP/1.1" 200 OK
+DEBUG: Resolving corporate context for UID: seed_corp_a_uid
+DEBUG: Found corporate admin. corporate_id=69b0f2fb0a3726bdb5a62cea
+INFO:     127.0.0.1:50115 - "POST /api/v1/approvals/rules/preview HTTP/1.1" 200 OK
+DEBUG: Resolving corporate context for UID: seed_corp_a_uid
+DEBUG: Found corporate admin. corporate_id=69b0f2fb0a3726bdb5a62cea
+INFO:     127.0.0.1:50115 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'app/api/helpers.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [9863]
+Closing MongoDB connection...
+MongoDB connection closed.
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+INFO:     Started server process [10060]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+Firebase Admin initialized successfully.
+Connecting to MongoDB...
+Connected to MongoDB!
+INFO:     127.0.0.1:50155 - "GET /api/v1/receipts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50163 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50163 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'app/api/routes/approvals.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [10060]
+Closing MongoDB connection...
+MongoDB connection closed.
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+INFO:     Started server process [10080]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+Firebase Admin initialized successfully.
+Connecting to MongoDB...
+Connected to MongoDB!
+INFO:     127.0.0.1:50256 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50279 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50283 - "GET /api/v1/templates HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50279 - "POST /api/v1/approvals/rules/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50279 - "POST /api/v1/approvals/rules/preview HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50288 - "OPTIONS /api/v1/approvals/rules HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50288 - "GET /api/v1/approvals/rules HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50290 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50315 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50322 - "GET /api/v1/approvals/rules HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'app/models/approval.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [10080]
+Closing MongoDB connection...
+MongoDB connection closed.
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+INFO:     Started server process [12750]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/models/invoice.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [12750]
+Firebase Admin initialized successfully.
+Connecting to MongoDB...
+Connected to MongoDB!
+Closing MongoDB connection...
+MongoDB connection closed.
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+INFO:     Started server process [12759]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/models/transaction.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [12759]
+Firebase Admin initialized successfully.
+Connecting to MongoDB...
+Connected to MongoDB!
+Closing MongoDB connection...
+MongoDB connection closed.
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+INFO:     Started server process [12765]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'scripts/seed_mock_data.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [12765]
+Firebase Admin initialized successfully.
+Connecting to MongoDB...
+Connected to MongoDB!
+Closing MongoDB connection...
+MongoDB connection closed.
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/yohei/Developer/TaxAgent/backend/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+INFO:     Started server process [12773]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+Firebase Admin initialized successfully.
+Connecting to MongoDB...
+Connected to MongoDB!
+INFO:     127.0.0.1:50490 - "GET /api/v1/approvals/rules HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50524 - "OPTIONS /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50524 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50526 - "OPTIONS /api/v1/receipts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50526 - "GET /api/v1/receipts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50529 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50535 - "GET /api/v1/receipts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50535 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50568 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50587 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50617 - "GET /api/v1/receipts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50623 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50636 - "GET /api/v1/receipts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50636 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50639 - "OPTIONS /api/v1/receipts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50639 - "GET /api/v1/receipts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50641 - "OPTIONS /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50641 - "GET /api/v1/invoices HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50649 - "GET /api/v1/receipts HTTP/1.1" 200 OK

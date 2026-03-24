@@ -50,6 +50,10 @@ const router = createRouter({
                     meta: { title: '請求書作成' }
                 },
                 {
+                    path: 'invoices/new',
+                    redirect: { name: 'dashboard-corporate-invoices-create' }
+                },
+                {
                     path: 'invoices/receive',
                     name: 'dashboard-corporate-invoices-receive',
                     component: () => import('@/views/dashboard/corporate/invoices/ReceivedInvoiceUploadPage.vue'),

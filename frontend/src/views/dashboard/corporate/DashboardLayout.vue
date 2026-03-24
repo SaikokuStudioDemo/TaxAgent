@@ -9,10 +9,6 @@ import {
   FileText,
   Settings,
   UserCircle,
-  Paperclip,
-  Image as ImageIcon,
-  Mic,
-  Send,
   CheckCircle,
   LogOut,
   Users,
@@ -22,7 +18,10 @@ import {
   ChevronRight,
   MessageSquareText,
   ArrowRightLeft,
-  BookText
+  BookText,
+  Send as SendIcon,
+  Paperclip as PaperclipIcon,
+  Cpu as CpuIcon
 } from 'lucide-vue-next';
 
 const isLeftSidebarOpen = ref(true);
@@ -151,7 +150,7 @@ onMounted(async () => {
                 <CreditCard :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">データアップロード</span>
               </RouterLink>
               <RouterLink to="/dashboard/corporate/ai/training" class="flex items-center gap-3 px-3 py-2 text-emerald-400 hover:text-emerald-300 hover:bg-white/5 rounded-lg transition-colors" active-class="bg-emerald-600/20 text-emerald-300" :class="{'justify-center': !isLeftSidebarOpen}" title="AIトレーニング">
-                <Cpu :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">AIトレーニング</span>
+                <CpuIcon :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">AIトレーニング</span>
               </RouterLink>
             </div>
           </div>
@@ -269,9 +268,9 @@ onMounted(async () => {
             class="flex-1 bg-transparent border-none focus:ring-0 text-sm min-w-0 py-2 text-gray-700 placeholder-gray-400 outline-none"
           />
           <div class="flex items-center gap-1 text-gray-400 shrink-0">
-            <button type="button" class="hover:text-blue-600 transition-colors p-1.5 rounded-full hover:bg-gray-200"><Paperclip :size="16" /></button>
+            <button type="button" class="hover:text-blue-600 transition-colors p-1.5 rounded-full hover:bg-gray-200"><PaperclipIcon :size="16" /></button>
             <button type="submit" :disabled="!userInput.trim() || isLoading" class="bg-blue-600 text-white p-2 rounded-full hover:bg-blue-700 shadow-md ml-1 hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:translate-y-0">
-              <Send :size="16" class="ml-0.5" />
+              <SendIcon :size="16" class="ml-0.5" />
             </button>
           </div>
         </form>

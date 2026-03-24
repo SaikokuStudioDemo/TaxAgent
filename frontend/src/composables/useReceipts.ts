@@ -19,6 +19,7 @@ export interface Receipt {
     fiscal_period: string;
     submitted_by: string;
     created_at: string;
+    attachments?: string[];
     approval_history?: ApprovalEvent[];
 }
 
@@ -107,6 +108,7 @@ export function useReceipts() {
         action: 'approved' | 'rejected' | 'returned',
         step: number,
         comment?: string,
+        addedSteps?: any[]
     ) => {
         try {
             return await api.post('/approvals/actions', {
@@ -116,6 +118,7 @@ export function useReceipts() {
                 step,
                 approver_id: 'current_user',
                 comment: comment ?? null,
+                added_steps: addedSteps
             });
         } catch (e: any) {
             error.value = e.message;

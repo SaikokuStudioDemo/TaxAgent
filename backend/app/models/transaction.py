@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 from datetime import datetime
+from app.models.approval import ApprovalHistoryItem, AddedApprovalStep
 
 class ReceiptLineItem(BaseModel):
     description: str
@@ -26,6 +27,8 @@ class ReceiptInDB(ReceiptCreate):
     submitted_by: str
     status: str = "pending_approval" # pending_approval / approved / rejected / matched
     approval_rule_id: Optional[str] = None
+    approval_history: List[ApprovalHistoryItem] = []
+    extra_approval_steps: List[AddedApprovalStep] = []
     current_step: int = 1
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

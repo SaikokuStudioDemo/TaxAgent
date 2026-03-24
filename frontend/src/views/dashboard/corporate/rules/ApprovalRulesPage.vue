@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { Plus, Trash2, Save, GripVertical, AlertCircle, ArrowRight, X, Receipt, FileText } from 'lucide-vue-next';
+import { ref, computed, onMounted } from 'vue';
+import { Plus, Trash2, Save, GripVertical, AlertCircle, ArrowRight, X, Receipt, FileText, Send, Loader2 } from 'lucide-vue-next';
+import { useApprovalRules } from '@/composables/useApprovalRules';
 
 interface RuleCondition {
   id: string;
@@ -17,13 +18,13 @@ interface RuleApprover {
 interface ApprovalRule {
   id: string;
   name: string;
-  appliesTo: ('receipt' | 'received_invoice')[];
+  appliesTo: ('receipt' | 'received_invoice' | 'issued_invoice')[];
   conditions: RuleCondition[];
   approvers: RuleApprover[];
 }
 
 // Tab state: which document type to show
-type RuleTab = 'receipt' | 'received_invoice';
+type RuleTab = 'receipt' | 'received_invoice' | 'issued_invoice';
 const activeRuleTab = ref<RuleTab>('receipt');
 
 const allRules = ref<ApprovalRule[]>([
@@ -89,13 +90,38 @@ const allRules = ref<ApprovalRule[]>([
   }
 ]);
 
+const { rules: rulesFromApi, isLoading, fetchRules, createRule, updateRule, deleteRule } = useApprovalRules();
+const isSaving = ref(false);
+
+onMounted(async () => {
+  await fetchRules();
+  if (rulesFromApi.value.length > 0) {
+    allRules.value = rulesFromApi.value.map(r => ({
+      id: r.id,
+      name: r.name,
+      appliesTo: r.applies_to as any,
+      conditions: (r.conditions && r.conditions.length > 0 ? r.conditions : [{ field: 'always', operator: '', value: '' }]).map((c: any, i: number) => ({
+        id: `c-${r.id}-${i}`,
+        field: c.field as any,
+        operator: c.operator as any,
+        value: c.value
+      })),
+      approvers: (r.steps || []).map((s: any) => ({
+        id: `a-${r.id}-${s.step}`,
+        roleId: s.role
+      }))
+    }));
+  }
+});
+
 // Filtered rules by active tab
 const rules = computed(() =>
   allRules.value.filter(r => r.appliesTo.includes(activeRuleTab.value))
 );
 
 const receiptCount = computed(() => allRules.value.filter(r => r.appliesTo.includes('receipt')).length);
-const invoiceCount = computed(() => allRules.value.filter(r => r.appliesTo.includes('received_invoice')).length);
+const receivedInvoiceCount = computed(() => allRules.value.filter(r => r.appliesTo.includes('received_invoice')).length);
+const issuedInvoiceCount = computed(() => allRules.value.filter(r => r.appliesTo.includes('issued_invoice')).length);
 
 const categories = ['消耗品費', '交際費', '会議費', '通信費', '旅費交通費', '新聞図書費'];
 const approverRoles = [
@@ -117,9 +143,52 @@ const addRule = () => {
   });
 };
 
-const removeRule = (ruleId: string) => {
+const removeRule = async (ruleId: string) => {
+  if (!ruleId.startsWith('rule-')) {
+    if (!confirm('このルールを削除してもよろしいですか？')) return;
+    const success = await deleteRule(ruleId);
+    if (!success) {
+      alert('削除に失敗しました。');
+      return;
+    }
+  }
   const idx = allRules.value.findIndex(r => r.id === ruleId);
   if (idx > -1) allRules.value.splice(idx, 1);
+};
+
+const saveRules = async () => {
+  isSaving.value = true;
+  try {
+    for (const rule of allRules.value) {
+      const payload = {
+        name: rule.name,
+        applies_to: rule.appliesTo,
+        conditions: rule.conditions.map(c => ({
+          field: c.field,
+          operator: c.operator,
+          value: c.field === 'amount' ? Number(c.value) : c.value
+        })),
+        steps: rule.approvers.map((a, idx) => ({
+          step: idx + 1,
+          role: a.roleId,
+          required: true
+        })),
+        active: true
+      };
+      
+      if (rule.id.startsWith('rule-')) {
+        const created = await createRule(payload);
+        if (created) rule.id = created.id;
+      } else {
+        await updateRule(rule.id, payload);
+      }
+    }
+    alert('設定を保存しました。');
+  } catch(e) {
+    alert('保存に失敗しました。');
+  } finally {
+    isSaving.value = false;
+  }
 };
 
 const addCondition = (rule: ApprovalRule) => {
@@ -140,16 +209,17 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
 </script>
 
 <template>
-  <div class="h-full flex flex-col">
+  <div class="flex flex-col space-y-6">
     <!-- Header -->
     <div class="flex justify-between items-end mb-6">
       <div>
         <h1 class="text-2xl font-bold text-gray-900">承認ルール作成 (Settings)</h1>
         <p class="text-gray-500 mt-1">AIが判定できない場合や、独自の承認要件がある場合にルールを設定します。金額や勘定科目に応じて承認者を定義します。</p>
       </div>
-      <button class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-medium transition-colors shadow-sm">
-        <Save :size="18" />
-        設定を保存する
+      <button @click="saveRules" :disabled="isSaving" class="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-medium transition-colors shadow-sm">
+        <Loader2 v-if="isSaving" class="animate-spin" :size="18" />
+        <Save v-else :size="18" />
+        {{ isSaving ? '保存中...' : '設定を保存する' }}
       </button>
     </div>
 
@@ -173,10 +243,22 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
         :class="activeRuleTab === 'received_invoice' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
       >
         <FileText :size="16" />
-        受領請求書（支払承認）
+        受領請求書
         <span class="ml-1 inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold rounded-full"
           :class="activeRuleTab === 'received_invoice' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-200 text-gray-600'">
-          {{ invoiceCount }}
+          {{ receivedInvoiceCount }}
+        </span>
+      </button>
+      <button
+        @click="activeRuleTab = 'issued_invoice'"
+        class="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold transition-all"
+        :class="activeRuleTab === 'issued_invoice' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+      >
+        <Send :size="16" />
+        発行請求書
+        <span class="ml-1 inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold rounded-full"
+          :class="activeRuleTab === 'issued_invoice' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'">
+          {{ issuedInvoiceCount }}
         </span>
       </button>
     </div>
@@ -190,14 +272,15 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
         金額に関わらず必ず特定の承認を通したい場合は、リストの一番下に「すべての条件（常に）」のルールを配置してください。</p>
         <p class="mt-1 text-blue-700">
           <span v-if="activeRuleTab === 'receipt'">💡 経費領収書が提出されると、金額・科目に基づきこのルールが自動適用されます。</span>
-          <span v-else>💡 受領請求書がアップロードされると、このルールに基づき支払承認フローが開始されます。</span>
+          <span v-else-if="activeRuleTab === 'received_invoice'">💡 受領請求書がアップロードされると、このルールに基づき支払承認フローが開始されます。</span>
+          <span v-else>💡 請求書を発行する際、金額に基づきこのルールに従った承認が必要になります。</span>
         </p>
       </div>
     </div>
 
     <!-- Rules Container -->
-    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex-1">
-      <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center shrink-0">
         <h2 class="font-bold text-gray-700">
           <span v-if="activeRuleTab === 'receipt'">領収書 承認ルール定義</span>
           <span v-else>受領請求書 支払承認ルール定義</span>
@@ -208,8 +291,11 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
         </button>
       </div>
 
-      <div class="p-6 space-y-4 max-h-[calc(100vh-380px)] overflow-y-auto">
-        
+      <div class="p-6 space-y-4 relative">
+        <div v-if="isLoading" class="flex items-center justify-center py-12">
+            <Loader2 class="w-8 h-8 text-blue-500 animate-spin" />
+        </div>
+        <template v-else>
         <div v-for="(rule) in rules" :key="rule.id" class="flex items-start gap-4 p-4 border border-gray-200 rounded-lg bg-gray-50/50 hover:border-blue-300 transition-colors group">
           <div class="mt-3 text-gray-400 cursor-move">
             <GripVertical :size="20" />
@@ -334,6 +420,7 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
           <p class="mt-1 text-xs">「新規ルール作成」からルールを追加してください。</p>
         </div>
 
+        </template>
       </div>
     </div>
   </div>

@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 from datetime import datetime
+from app.models.approval import ApprovalHistoryItem, AddedApprovalStep
 
 class InvoiceLineItem(BaseModel):
     description: str
@@ -23,6 +24,8 @@ class InvoiceCreate(BaseModel):
     template_id: Optional[str] = None
     is_temporary_approval_needed: bool = False
     is_auto_send_enabled: bool = False
+    attachments: List[str] = []
+    status: Optional[str] = None
 
 class InvoiceInDB(InvoiceCreate):
     id: Optional[str] = Field(None, alias="_id")
@@ -31,12 +34,15 @@ class InvoiceInDB(InvoiceCreate):
     review_status: str = "unreviewed" # unreviewed / approved / rejected / draft
     current_step: int = 1
     approval_rule_id: Optional[str] = None
+    approval_history: List[ApprovalHistoryItem] = []
+    extra_approval_steps: List[AddedApprovalStep] = []
     attachments: List[str] = []
     fiscal_period: str # e.g., "2024-03"
     ai_extracted: bool = False
     created_by: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     paid_at: Optional[datetime] = None
+    is_deleted: bool = False
 
 class InvoiceResponse(InvoiceInDB):
     pass

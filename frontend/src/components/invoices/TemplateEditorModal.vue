@@ -118,30 +118,41 @@ const updateFromCanvas = () => {
         <div class="bg-gray-50 rounded-xl shadow-2xl w-full max-w-[850px] h-full max-h-[90vh] relative z-10 flex flex-col overflow-hidden border border-gray-200">
             
             <!-- Header -->
-            <div class="bg-white px-6 py-4 border-b border-gray-200 flex justify-between items-center shrink-0">
-                <div class="flex items-center gap-4 flex-1">
-                    <div class="bg-blue-100 p-2 rounded-lg text-blue-600">
-                        <LayoutTemplate class="w-5 h-5" />
+            <div class="bg-white border-b border-gray-200 shrink-0">
+                <div class="px-6 py-4 flex justify-between items-center bg-gray-50/50">
+                    <div class="flex items-center gap-4">
+                        <div class="bg-blue-100 p-2 rounded-lg text-blue-600">
+                            <LayoutTemplate class="w-5 h-5" />
+                        </div>
+                        <div>
+                            <h2 class="text-lg font-bold text-gray-900 leading-tight">テンプレート情報の確認・編集</h2>
+                            <p class="text-xs text-gray-500 mt-0.5">AIが抽出したテンプレートのレイアウト微調整と名前変更を行います。</p>
+                        </div>
                     </div>
-                    <div>
-                        <h2 class="text-lg font-bold text-gray-900 leading-tight">テンプレート情報の確認・編集</h2>
-                        <p class="text-xs text-gray-500 mt-0.5">AIが抽出したテンプレートのレイアウト微調整と名前変更を行います。</p>
-                    </div>
-                </div>
 
-                <div class="flex items-center justify-end gap-6 flex-1">
-                    <div class="flex-1 max-w-sm flex items-center gap-2">
-                        <label class="text-xs font-bold text-gray-700 whitespace-nowrap">テンプレート名</label>
-                        <input v-model="templateName" type="text" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-blue-500 focus:border-blue-500 font-medium" />
-                    </div>
-                    
                     <div class="flex items-center gap-3">
-                        <button @click="emit('close')" class="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors border border-transparent">
+                        <button @click="emit('close')" class="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors border border-gray-200">
                             キャンセル
                         </button>
                         <button @click="handleSave" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shadow-sm">
                             <Save class="w-4 h-4" /> ギャラリーに保存
                         </button>
+                    </div>
+                </div>
+                
+                <!-- Template Name Row -->
+                <div class="px-6 py-3 border-t border-gray-100 flex items-center gap-4 bg-white">
+                    <label class="text-sm font-bold text-gray-700 whitespace-nowrap">テンプレート名:</label>
+                    <div class="relative flex-1 max-w-2xl">
+                        <input 
+                            v-model="templateName" 
+                            type="text" 
+                            placeholder="テンプレート名を入力してください"
+                            class="w-full border-2 border-gray-200 rounded-xl px-4 py-2 text-base focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 font-bold transition-all outline-none" 
+                        />
+                        <div class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300">
+                            <FileText class="w-5 h-5" />
+                        </div>
                     </div>
                 </div>
             </div>

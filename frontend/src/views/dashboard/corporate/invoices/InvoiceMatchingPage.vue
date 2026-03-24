@@ -106,7 +106,22 @@ const transactionSearch = ref('');
 const selectedInvoiceIds = ref<string[]>([]);
 const selectedTransactionIds = ref<string[]>([]);
 const expandedInvoiceIds = ref<string[]>([]);
-const matchedItems = ref<{ invoice: InvoiceDisplay, tx: TransactionDisplay, timestamp: string }[]>([]);
+
+const matchedFromDB = computed(() => {
+    return matches.value
+        .map((m: any) => {
+            const inv = rawInvoices.value.find(i => m.document_ids?.includes(i.id));
+            const tx = rawTransactions.value.find(t => m.transaction_ids?.includes(t.id));
+            if (!inv || !tx) return null;
+            return {
+                matchId: m.id as string,
+                invoice: inv,
+                tx,
+                timestamp: new Date(m.matched_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+            };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null);
+});
 const showConfirmMatch = ref(false);
 const confirmMatchResolve = ref<((value: boolean) => void) | null>(null);
 const confirmMatchAmount = ref(0);
@@ -193,11 +208,6 @@ const handleMatch = async () => {
         document_ids: [...selectedInvoiceIds.value],
         fiscal_period: period,
     });
-    const primaryInvoice = rawInvoices.value.find(i => i.id === selectedInvoiceIds.value[0]);
-    const primaryTx = rawTransactions.value.find(t => t.id === selectedTransactionIds.value[0]);
-    if (primaryInvoice && primaryTx) {
-        matchedItems.value.unshift({ invoice: primaryInvoice, tx: primaryTx, timestamp: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) });
-    }
     await fetchMatches({ match_type: 'invoice' });
     applyMatchStatus();
     selectedInvoiceIds.value = [];
@@ -215,7 +225,6 @@ const handleBulkMatch = async () => {
             document_ids: [pair.invoice.id],
             fiscal_period: period,
         });
-        matchedItems.value.push({ invoice: pair.invoice, tx: pair.transaction, timestamp: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) });
     }
     selectedCandidateIds.value = [];
     await fetchMatches({ match_type: 'invoice' });
@@ -225,7 +234,6 @@ const handleBulkMatch = async () => {
 const unmatch = async (invId: string, txId: string) => {
     const m = matches.value.find((mx: any) => mx.transaction_ids?.includes(txId) && mx.document_ids?.includes(invId));
     if (m) await deleteMatch(m.id);
-    matchedItems.value = matchedItems.value.filter(item => !(item.invoice.id === invId && item.tx.id === txId));
     await fetchMatches({ match_type: 'invoice' });
     applyMatchStatus();
 };
@@ -261,13 +269,13 @@ const unmatch = async (invId: string, txId: string) => {
             <span class="mr-1">✨</span> 自動結合候補 ({{ candidatePairs.length }})
           </button>
  
-          <button 
-            @click="activeTab = 'matched'" 
+          <button
+            @click="activeTab = 'matched'"
             class="flex-1 px-6 py-2.5 rounded-lg text-sm font-bold transition-all relative flex items-center justify-center gap-1.5"
             :class="activeTab === 'matched' ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50'"
           >
-            <CheckCircle v-if="matchedItems.length > 0" class="h-4 w-4 text-emerald-500" />
-            結合済 ({{ matchedItems.length }})
+            <CheckCircle v-if="matchedFromDB.length > 0" class="h-4 w-4 text-emerald-500" />
+            結合済 ({{ matchedFromDB.length }})
           </button>
         </div>
       </div>
@@ -548,12 +556,12 @@ const unmatch = async (invId: string, txId: string) => {
     <!-- Matched Tab -->
     <template v-else-if="activeTab === 'matched'">
         <div class="h-full overflow-y-auto space-y-3 pb-8">
-            <div v-if="matchedItems.length === 0" class="flex flex-col items-center justify-center py-20 bg-white rounded-xl border border-gray-200 shadow-sm text-gray-400 w-full h-full"> 
+            <div v-if="matchedFromDB.length === 0" class="flex flex-col items-center justify-center py-20 bg-white rounded-xl border border-gray-200 shadow-sm text-gray-400 w-full h-full">
                 <CheckCircle class="w-16 h-16 mb-4 text-gray-200" />
-                <p class="font-medium">現在セッションでの消込済データはありません</p>
+                <p class="font-medium">消込済データはありません</p>
             </div>
-            
-            <div v-for="(item, index) in matchedItems" :key="index" class="bg-emerald-50/30 border border-emerald-200 rounded-xl p-4 flex items-center justify-between group shadow-sm">
+
+            <div v-for="item in matchedFromDB" :key="item.matchId" class="bg-emerald-50/30 border border-emerald-200 rounded-xl p-4 flex items-center justify-between group shadow-sm">
                 <div class="flex items-center gap-6 flex-1">
                     <div class="bg-emerald-100 text-emerald-700 p-2 rounded-full shrink-0">
                         <CheckCircle class="w-5 h-5" />

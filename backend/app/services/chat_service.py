@@ -1,10 +1,14 @@
 import logging
-from typing import Dict, Any, List
+import httpx
+from typing import Dict, Any, List, Optional
 from app.services.ai_service import AIService
 from app.db.mongodb import get_database
+from app.core.config import settings
 from bson import ObjectId
 
 logger = logging.getLogger(__name__)
+
+LAW_AGENT_ID = "tax_01"
 
 class ChatService:
     @staticmethod
@@ -47,20 +51,56 @@ class ChatService:
         }
 
     @staticmethod
+    async def query_law_agent(query: str) -> Optional[str]:
+        """
+        Call the external Law Agent API for legal/tax FAQ questions.
+        Returns the response text, or None if it cannot answer.
+        """
+        url = f"{settings.LAW_AGENT_URL}/api/chat"
+        payload = {
+            "message": query,
+            "agent_id": LAW_AGENT_ID,
+            "history": []
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(url, json=payload)
+                res.raise_for_status()
+                data = res.json()
+                response_text = data.get("response", "")
+                if not response_text:
+                    return None
+                return response_text
+        except Exception as e:
+            logger.error(f"Law Agent request failed: {e}")
+            return None
+
+    @staticmethod
     async def process_query(corporate_id: str, query: str) -> str:
         """
         Main entry point for chat. Coordinates between Corporate Data and AI.
+        Flow:
+          1. Try to answer from corporate context (Gemini)
+          2. If Gemini signals it cannot answer → ask Law Agent
+          3. If Law Agent also cannot answer → return fallback message
         """
-        # Step 1: Securely fetch data ONLY for this corporate_id
+        # Step 1: Fetch data scoped to this corporate_id
         context = await ChatService.get_corporate_context(corporate_id)
-        
-        # Step 2: Handle Law AI coordination (Placeholder logic)
-        # If query contains legal keywords, we could first query a specialized Law AI
-        if any(word in query for word in ["法律", "税法", "インボイス制度", "源泉"]):
-            # In a real scenario, this would be an API call to a separate Law RAG system
-            law_context = "【法令AIからの補足】インボイス制度では、適格請求書発行事業者の登録番号確認が必須です。また、保存期間は原則7年です。"
-            query = f"{query}\n\n(参考情報: {law_context})"
-        
-        # Step 3: Call Gemini with scoped context
-        response = await AIService.chat_advisor(query, context)
-        return response
+
+        # Step 2: Ask Gemini. Instruct it to reply with a special marker if it cannot answer.
+        gemini_response = await AIService.chat_advisor(query, context)
+
+        # Step 3: If Gemini couldn't answer, escalate to Law Agent
+        if "[[LAW_AGENT_REQUIRED]]" in gemini_response:
+            logger.info(f"Escalating to Law Agent for query: {query[:80]}")
+            law_response = await ChatService.query_law_agent(query)
+            if law_response:
+                return law_response
+            else:
+                return (
+                    "申し訳ありません。お客様のデータおよび税法・関連法令のFAQを確認しましたが、"
+                    "この質問にはお答えできませんでした。"
+                    "担当の税理士、またはお近くの税理士にお問い合わせください。"
+                )
+
+        return gemini_response

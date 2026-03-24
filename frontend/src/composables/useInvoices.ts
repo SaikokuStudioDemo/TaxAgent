@@ -34,6 +34,7 @@ export interface Invoice {
     created_by: string;
     created_at: string;
     paid_at?: string;
+    attachments?: string[];
     approval_history?: any[];
 }
 
@@ -120,19 +121,41 @@ export function useInvoices() {
         action: 'approved' | 'rejected' | 'returned',
         step: number,
         comment?: string,
+        addedSteps?: any[]
     ) => {
         try {
             return await api.post('/approvals/actions', {
-                document_type: 'invoice',
+                // Determine document type dynamically, assuming typical endpoints use 'received_invoice' or 'issued_invoice'
+                // Use a default for testing if not determinable easily here, or require it as param. 
+                // Let's assume 'received_invoice' since the approval dash is for received invoices currently.
+                document_type: 'received_invoice',
                 document_id: invoiceId,
                 action,
                 step,
                 approver_id: 'current_user',
                 comment: comment ?? null,
+                added_steps: addedSteps
             });
         } catch (e: any) {
             error.value = e.message;
             return null;
+        }
+    };
+
+    const bulkAction = async (ids: string[], action: 'delete' | 'send') => {
+        try {
+            await api.post('/invoices/bulk-action', { ids, action });
+            if (action === 'delete') {
+                invoices.value = invoices.value.filter(i => !ids.includes(i.id));
+            } else if (action === 'send') {
+                invoices.value.forEach(i => {
+                    if (ids.includes(i.id)) i.status = 'sent';
+                });
+            }
+            return true;
+        } catch (e: any) {
+            error.value = e.message;
+            return false;
         }
     };
 
@@ -147,5 +170,6 @@ export function useInvoices() {
         deleteInvoice,
         sendInvoice,
         submitApprovalAction,
+        bulkAction,
     };
 }

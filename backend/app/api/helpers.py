@@ -1,9 +1,11 @@
 """
 Shared dependency helpers for resolving corporate context from Firebase UID.
 """
+import logging
 from fastapi import HTTPException
 from app.db.mongodb import get_database
 
+logger = logging.getLogger(__name__)
 
 async def resolve_corporate_id(firebase_uid: str) -> tuple[str, str]:
     """

@@ -7,7 +7,7 @@ import { api } from '@/lib/api';
 export interface ApprovalCondition {
     field: string;
     operator: string;
-    value: number;
+    value: number | string;
 }
 
 export interface ApprovalStep {

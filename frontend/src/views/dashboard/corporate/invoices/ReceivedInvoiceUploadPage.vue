@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { UploadCloud, ScanLine, AlertCircle, FileText } from 'lucide-vue-next';
+import { UploadCloud, ScanLine, AlertCircle, FileText, Loader2, Trash2, CheckCircle2 } from 'lucide-vue-next';
 import { formatCurrency } from '@/lib/utils/formatters';
+import { uploadFile } from '@/lib/firebase/storage';
+import { useInvoices } from '@/composables/useInvoices';
 
 // Type definitions for staging received invoices
 interface StagedInvoice {
@@ -15,7 +17,11 @@ interface StagedInvoice {
   projectId?: string; // Link to project
   status: 'new' | 'edited' | 'error';
   errorMessage?: string; // Optional error reason
+  fileUrl?: string;
+  fileName?: string;
 }
+
+const { createInvoice } = useInvoices();
 
 const stagedInvoices = ref<StagedInvoice[]>([]);
 const isSubmitting = ref(false);
@@ -26,6 +32,8 @@ const showImageModal = ref(false);
 const selectedPreviewImageUrl = ref<string>('');
 const successCount = ref(0);
 
+const fileInput = ref<HTMLInputElement | null>(null);
+
 // Mock Projects
 const PROJECTS = [
   { id: '', name: '指定なし (部門費)' },
@@ -33,45 +41,57 @@ const PROJECTS = [
   { id: 'proj-2', name: '〇〇株式会社様 Webサイト制作' }
 ];
 
-// Mock Extraction Function to simulate OCR/Import
-const simulateExtraction = async (type: 'import' | 'ocr') => {
+// Handle actual file selection and upload
+const handleFileSelect = async (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  if (!target.files?.length) return;
+
   isExtracting.value = true;
-  // Simulate network delay
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  const files = Array.from(target.files);
   
-  const newInvoices: StagedInvoice[] = [];
-  const count = type === 'ocr' ? 1 : Math.floor(Math.random() * 3) + 2; // OCR gets 1, Import gets 2-4
-  
-  for (let i = 0; i < count; i++) {
-    const amount = Math.floor(Math.random() * 500000) + 10000;
-    const isError = Math.random() > 0.8; // Simulate 20% OCR failure chance
+  try {
+    const newInvoices: StagedInvoice[] = [];
     
-    // Generate dates
-    const issueDateObj = new Date(Date.now() - Math.floor(Math.random() * 30) * 24 * 60 * 60 * 1000);
-    const issueDate = issueDateObj.toISOString().split('T')[0];
+    for (const file of files) {
+      // 1. Upload to Firebase Storage
+      const timestamp = Date.now();
+      const storagePath = `invoices/corp_123/${timestamp}_${file.name}`;
+      const url = await uploadFile(file, storagePath);
+      
+      // 2. Mock 'Extraction' logic
+      const amount = Math.floor(Math.random() * 500000) + 10000;
+      const issueDateObj = new Date();
+      const issueDate = issueDateObj.toISOString().split('T')[0];
+      const dueDateObj = new Date(issueDateObj);
+      dueDateObj.setMonth(dueDateObj.getMonth() + 1);
+      const dueDate = dueDateObj.toISOString().split('T')[0];
+      
+      newInvoices.push({
+        id: crypto.randomUUID(),
+        selected: true,
+        issueDate,
+        dueDate,
+        amount,
+        taxRate: 10,
+        issuer: file.name.split('.')[0],
+        status: 'new',
+        fileUrl: url,
+        fileName: file.name
+      });
+    }
     
-    // Due date is usually end of next month
-    const dueDateObj = new Date(issueDateObj);
-    dueDateObj.setMonth(dueDateObj.getMonth() + 2);
-    dueDateObj.setDate(0);
-    const dueDate = dueDateObj.toISOString().split('T')[0];
-    
-    newInvoices.push({
-      id: crypto.randomUUID(),
-      selected: !isError, // Do not auto-select errored rows
-      issueDate: issueDate,
-      dueDate: dueDate,
-      amount: amount,
-      taxRate: 10,
-      issuer: `株式会社テストベンダー ${Math.floor(Math.random() * 100)}`,
-      projectId: Math.random() > 0.6 ? PROJECTS[Math.floor(Math.random() * (PROJECTS.length - 1)) + 1].id : '',
-      status: isError ? 'error' : 'new',
-      errorMessage: isError ? '振込先口座情報が読み取れませんでした。原本を確認してください。' : undefined
-    });
+    stagedInvoices.value.push(...newInvoices);
+  } catch (err) {
+    console.error('Upload failed', err);
+    alert('ファイルのアップロードに失敗しました。');
+  } finally {
+    isExtracting.value = false;
+    if (fileInput.value) fileInput.value.value = '';
   }
-  
-  stagedInvoices.value.push(...newInvoices);
-  isExtracting.value = false;
+};
+
+const triggerFileInput = () => {
+  fileInput.value?.click();
 };
 
 // Selection logic
@@ -89,9 +109,14 @@ const removeInvoice = (id: string) => {
 };
 
 // Preview Image
-const previewInvoice = (_invoice: StagedInvoice) => {
-  selectedPreviewImageUrl.value = 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80';
-  showImageModal.value = true;
+const previewInvoice = (invoice: StagedInvoice) => {
+  if (invoice.fileUrl) {
+    selectedPreviewImageUrl.value = invoice.fileUrl;
+    showImageModal.value = true;
+  } else {
+    selectedPreviewImageUrl.value = 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80';
+    showImageModal.value = true;
+  }
 };
 
 // Submission Logic
@@ -106,15 +131,43 @@ const submitSelected = async () => {
   }
   
   isSubmitting.value = true;
+  let saved = 0;
   
-  // Simulate successful submission
-  setTimeout(() => {
+  try {
+    const fiscal_period = new Date().toISOString().slice(0, 7);
+    for (const inv of selectedToSubmit) {
+      const result = await createInvoice({
+        direction: 'received',
+        invoice_number: `REC-${Date.now().toString().slice(-6)}`, // Generated number for received doc
+        client_name: inv.issuer,
+        recipient_email: 'finance@example.com', // Placeholder
+        issue_date: inv.issueDate,
+        due_date: inv.dueDate,
+        subtotal: Math.round(inv.amount / 1.1),
+        tax_amount: Math.round(inv.amount - (inv.amount / 1.1)),
+        total_amount: inv.amount,
+        fiscal_period,
+        line_items: [{
+          description: '請求書一括登録',
+          category: '仕入',
+          amount: inv.amount,
+          tax_rate: inv.taxRate
+        }],
+        attachments: inv.fileUrl ? [inv.fileUrl] : []
+      });
+      if (result) saved++;
+    }
+    
     const submittedIds = selectedToSubmit.map(r => r.id);
-    successCount.value = submittedIds.length;
+    successCount.value = saved;
     showSuccessModal.value = true;
     stagedInvoices.value = stagedInvoices.value.filter(r => !submittedIds.includes(r.id));
+  } catch (err) {
+    console.error('Submission failed', err);
+    alert('登録に失敗しました。');
+  } finally {
     isSubmitting.value = false;
-  }, 800);
+  }
 };
 
 // Number formatting for amount input
@@ -160,11 +213,21 @@ const handleAmountInput = (invoice: StagedInvoice, event: Event) => {
       </div>
     </div>
 
+    <!-- Hidden File Input -->
+    <input 
+      type="file" 
+      ref="fileInput" 
+      multiple 
+      accept=".pdf,.jpg,.jpeg,.png" 
+      class="hidden" 
+      @change="handleFileSelect"
+    />
+
     <!-- Upload Action Buttons -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
       <!-- Import Button -->
       <button 
-        @click="simulateExtraction('import')"
+        @click="triggerFileInput"
         :disabled="isExtracting"
         class="bg-white border-2 border-dashed border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 transition-all rounded-2xl p-8 flex flex-col items-center justify-center gap-3 group relative overflow-hidden"
       >
@@ -180,7 +243,7 @@ const handleAmountInput = (invoice: StagedInvoice, event: Event) => {
 
       <!-- OCR Button -->
       <button 
-        @click="simulateExtraction('ocr')"
+        @click="triggerFileInput"
         :disabled="isExtracting"
         class="bg-white border-2 border-dashed border-emerald-200 hover:border-emerald-400 hover:bg-emerald-50 transition-all rounded-2xl p-8 flex flex-col items-center justify-center gap-3 group relative overflow-hidden"
       >

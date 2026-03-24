@@ -8,6 +8,7 @@ from app.api.helpers import resolve_corporate_id
 from app.db.mongodb import get_database
 from app.models.invoice import InvoiceCreate, InvoiceInDB
 import logging
+from app.services.rule_evaluation_service import evaluate_approval_rules
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,15 +32,18 @@ async def create_invoice(
     # Determine fiscal period from issue_date (YYYY-MM-DD → YYYY-MM)
     fiscal_period = payload.issue_date[:7] if payload.issue_date else datetime.utcnow().strftime("%Y-%m")
 
+    # Match approval rules
+    rule_id, _ = await evaluate_approval_rules(corporate_id, f"{payload.direction}_invoice", payload.model_dump())
+
     doc = {
         **payload.model_dump(),
         "corporate_id": corporate_id,
         "created_by": user_id,
-        "status": "draft",
+        "status": payload.status or "draft",
         "review_status": "unreviewed",
         "current_step": 1,
-        "approval_rule_id": None,
-        "attachments": [],
+        "approval_rule_id": rule_id,
+        "attachments": payload.attachments or [],
         "fiscal_period": fiscal_period,
         "ai_extracted": False,
         "created_at": datetime.utcnow(),
@@ -62,7 +66,7 @@ async def list_invoices(
     corporate_id, _ = await resolve_corporate_id(firebase_uid)
     db = get_database()
 
-    query: dict = {"corporate_id": corporate_id}
+    query: dict = {"corporate_id": corporate_id, "is_deleted": {"$ne": True}}
     if direction:
         query["direction"] = direction
     if review_status:
@@ -149,8 +153,11 @@ async def delete_invoice(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid invoice ID")
 
-    result = await db["invoices"].delete_one({"_id": oid, "corporate_id": corporate_id})
-    if result.deleted_count == 0:
+    result = await db["invoices"].update_one(
+        {"_id": oid, "corporate_id": corporate_id},
+        {"$set": {"is_deleted": True}}
+    )
+    if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
     return {"status": "deleted", "invoice_id": invoice_id}
@@ -183,3 +190,43 @@ async def send_invoice(
         {"$set": {"status": "sent"}},
     )
     return {"status": "sent", "invoice_id": invoice_id}
+
+
+@router.post("/bulk-action", summary="複数の請求書に対して一括操作を行う")
+async def bulk_action(
+    payload: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Perform bulk actions (delete, send) on multiple invoices.
+    Payload: { "action": "delete" | "send", "ids": ["id1", "id2", ...] }
+    """
+    firebase_uid = current_user.get("uid")
+    corporate_id, _ = await resolve_corporate_id(firebase_uid)
+    db = get_database()
+
+    ids = payload.get("ids", [])
+    action = payload.get("action")
+
+    if not ids or not action:
+        raise HTTPException(status_code=400, detail="Missing ids or action")
+
+    try:
+        oids = [ObjectId(i) for i in ids]
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid ID format in list")
+
+    if action == "delete":
+        await db["invoices"].update_many(
+            {"_id": {"$in": oids}, "corporate_id": corporate_id},
+            {"$set": {"is_deleted": True}}
+        )
+    elif action == "send":
+        await db["invoices"].update_many(
+            {"_id": {"$in": oids}, "corporate_id": corporate_id, "direction": "issued", "status": "draft"},
+            {"$set": {"status": "sent"}}
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
+
+    return {"status": "success", "action": action, "count": len(ids)}

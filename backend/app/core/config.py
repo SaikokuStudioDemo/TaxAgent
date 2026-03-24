@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     FIREBASE_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""
 
+    LAW_AGENT_URL: str = "http://localhost:8001"
+
     class Config:
         env_file = ".env"
 

@@ -3,6 +3,8 @@ import { ref, computed } from 'vue';
 import { UploadCloud, ScanLine, Trash2, CheckCircle2, Save, Loader2, AlertCircle, FileText } from 'lucide-vue-next';
 import { formatCurrency } from '@/lib/utils/formatters';
 import { useReceipts } from '@/composables/useReceipts';
+import { uploadFile } from '@/lib/firebase/storage';
+import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
 
 // Type definitions for staging receipts
 interface StagedReceipt {
@@ -17,6 +19,8 @@ interface StagedReceipt {
   category: string;
   status: 'new' | 'edited' | 'error';
   errorMessage?: string;
+  fileUrl?: string; // Original document URL
+  fileName?: string;
 }
 
 const { createReceipt } = useReceipts();
@@ -30,6 +34,8 @@ const showImageModal = ref(false);
 const selectedPreviewImageUrl = ref<string>('');
 const successCount = ref(0);
 
+const fileInput = ref<HTMLInputElement | null>(null);
+
 const categories = ['消耗品費', '交際費', '旅費交通費', '通信費', '会議費'];
 const PROJECTS = [
   { id: '', name: '指定なし (部門費)' },
@@ -37,35 +43,55 @@ const PROJECTS = [
   { id: 'proj-2', name: '〇〇株式会社様 Webサイト制作' }
 ];
 
-// Simulate OCR/Import extraction (staging only — no DB write here)
-const simulateExtraction = async (type: 'import' | 'ocr') => {
+// Handle actual file selection and upload
+const handleFileSelect = async (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  if (!target.files?.length) return;
+
   isExtracting.value = true;
-  await new Promise(resolve => setTimeout(resolve, 1500));
-
-  const newReceipts: StagedReceipt[] = [];
-  const count = type === 'ocr' ? 1 : Math.floor(Math.random() * 3) + 2;
-
-  for (let i = 0; i < count; i++) {
-    const amount = Math.floor(Math.random() * 20000) + 1000;
-    const isError = Math.random() > 0.8;
-
-    newReceipts.push({
-      id: crypto.randomUUID(),
-      selected: !isError,
-      date: new Date(Date.now() - Math.floor(Math.random() * 10000000000)).toISOString().split('T')[0],
-      amount,
-      taxRate: 10,
-      paymentMethod: Math.random() > 0.5 ? '立替' : '法人カード',
-      projectId: Math.random() > 0.6 ? PROJECTS[Math.floor(Math.random() * (PROJECTS.length - 1)) + 1].id : '',
-      payee: `テスト加盟店 ${Math.floor(Math.random() * 100)}`,
-      category: categories[Math.floor(Math.random() * categories.length)],
-      status: isError ? 'error' : 'new',
-      errorMessage: isError ? '金額と税率の整合性が確認できませんでした。原本を確認してください。' : undefined,
-    });
+  const files = Array.from(target.files);
+  
+  try {
+    const newReceipts: StagedReceipt[] = [];
+    
+    for (const file of files) {
+      // 1. Upload to Firebase Storage
+      // Path format: receipts/corporate_id/timestamp_filename
+      // Note: In local bypass, corporate_id is usually 'corp_123'
+      const timestamp = Date.now();
+      const storagePath = `receipts/corp_123/${timestamp}_${file.name}`;
+      const url = await uploadFile(file, storagePath);
+      
+      // 2. Mock 'Extraction' logic (In real app, we'd call an AI extraction endpoint here)
+      const amount = Math.floor(Math.random() * 20000) + 1000;
+      
+      newReceipts.push({
+        id: crypto.randomUUID(),
+        selected: true,
+        date: new Date().toISOString().split('T')[0],
+        amount,
+        taxRate: 10,
+        paymentMethod: '立替',
+        payee: file.name.split('.')[0], // Use filename as payee name for now
+        category: '消耗品費',
+        status: 'new',
+        fileUrl: url,
+        fileName: file.name
+      });
+    }
+    
+    stagedReceipts.value.push(...newReceipts);
+  } catch (err) {
+    console.error('Upload failed', err);
+    alert('ファイルのアップロードに失敗しました。');
+  } finally {
+    isExtracting.value = false;
+    if (fileInput.value) fileInput.value.value = '';
   }
+};
 
-  stagedReceipts.value.push(...newReceipts);
-  isExtracting.value = false;
+const triggerFileInput = () => {
+  fileInput.value?.click();
 };
 
 const selectAll = computed({
@@ -80,9 +106,15 @@ const removeReceipt = (id: string) => {
   stagedReceipts.value = stagedReceipts.value.filter(r => r.id !== id);
 };
 
-const previewReceipt = (_receipt: StagedReceipt) => {
-  selectedPreviewImageUrl.value = 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80';
-  showImageModal.value = true;
+const previewReceipt = (receipt: StagedReceipt) => {
+  if (receipt.fileUrl) {
+    selectedPreviewImageUrl.value = receipt.fileUrl;
+    showImageModal.value = true;
+  } else {
+    // Fallback for old mock items
+    selectedPreviewImageUrl.value = 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80';
+    showImageModal.value = true;
+  }
 };
 
 // Submit staged receipts to the real API
@@ -100,7 +132,6 @@ const submitSelected = async () => {
   let saved = 0;
 
   try {
-    // Submit each receipt one by one (supports approval rule evaluation per item)
     const currentMonth = new Date().toISOString().slice(0, 7);
     for (const r of selectedToSubmit) {
       const result = await createReceipt({
@@ -111,6 +142,7 @@ const submitSelected = async () => {
         payee: r.payee,
         category: r.category,
         fiscal_period: currentMonth,
+        attachments: r.fileUrl ? [r.fileUrl] : []
       });
       if (result) saved++;
     }
@@ -165,11 +197,21 @@ const handleAmountInput = (receipt: StagedReceipt, event: Event) => {
       </div>
     </div>
 
+    <!-- Hidden File Input -->
+    <input 
+      type="file" 
+      ref="fileInput" 
+      multiple 
+      accept=".pdf,.jpg,.jpeg,.png" 
+      class="hidden" 
+      @change="handleFileSelect"
+    />
+
     <!-- Upload Action Buttons -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
       <!-- Import Button -->
       <button 
-        @click="simulateExtraction('import')"
+        @click="triggerFileInput"
         :disabled="isExtracting"
         class="bg-white border-2 border-dashed border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 transition-all rounded-2xl p-8 flex flex-col items-center justify-center gap-3 group relative overflow-hidden"
       >
@@ -185,7 +227,7 @@ const handleAmountInput = (receipt: StagedReceipt, event: Event) => {
 
       <!-- OCR Button -->
       <button 
-        @click="simulateExtraction('ocr')"
+        @click="triggerFileInput"
         :disabled="isExtracting"
         class="bg-white border-2 border-dashed border-emerald-200 hover:border-emerald-400 hover:bg-emerald-50 transition-all rounded-2xl p-8 flex flex-col items-center justify-center gap-3 group relative overflow-hidden"
       >
@@ -209,6 +251,15 @@ const handleAmountInput = (receipt: StagedReceipt, event: Event) => {
         <div class="text-sm text-gray-500 font-medium">
           選択中: <span class="text-indigo-600 font-bold">{{ selectedCount }}件</span> (合計 {{ formatCurrency(selectedTotalAmount) }})
         </div>
+      </div>
+      
+      <!-- Unified Approval Preview for Batch (Optional, showing for top item or general rule) -->
+      <div v-if="selectedCount > 0" class="px-6 py-4 bg-indigo-50/30 border-b border-indigo-100">
+        <ApprovalStepper 
+          document-type="receipt" 
+          :amount="selectedTotalAmount" 
+          class="!bg-transparent !border-none !p-0 !shadow-none"
+        />
       </div>
       
       <div class="overflow-x-auto">

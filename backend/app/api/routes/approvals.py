@@ -6,7 +6,7 @@ from bson import ObjectId
 from app.api.deps import get_current_user
 from app.api.helpers import resolve_corporate_id
 from app.db.mongodb import get_database
-from app.models.approval import ApprovalRuleCreate, ApprovalEventCreate
+from app.models.approval import ApprovalRuleCreate, ApprovalEventCreate, ApprovalPreviewRequest
 import logging
 
 logger = logging.getLogger(__name__)
@@ -106,6 +106,32 @@ async def delete_approval_rule(
     return {"status": "deleted", "rule_id": rule_id}
 
 
+@router.post("/rules/preview", summary="適用される承認ルールをプレビューする")
+async def preview_approval_rule(
+    payload: ApprovalPreviewRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    from app.services.rule_evaluation_service import evaluate_approval_rules
+    
+    firebase_uid = current_user.get("uid")
+    corporate_id, _ = await resolve_corporate_id(firebase_uid)
+    
+    # Simple document shim for evaluation
+    doc_shim = {
+        "amount": payload.amount,
+        "total_amount": payload.amount,
+        **(payload.payload or {})
+    }
+    
+    rule_id, steps = await evaluate_approval_rules(corporate_id, payload.document_type, doc_shim)
+    
+    return {
+        "rule_id": rule_id,
+        "steps": steps,
+        "matched": rule_id is not None
+    }
+
+
 # ─────────────── Approval Actions ───────────────
 
 @router.post("/actions", summary="承認アクション（承認・却下・差戻し）を記録する")
@@ -146,33 +172,38 @@ async def record_approval_action(
     doc_summary = f"¥{doc.get('amount', doc.get('total_amount', 0)):,}" if doc else ""
 
     if payload.action == "approved":
-        all_approved = True
+        all_approved = False
+        total_steps = 0
+        
+        # Persist manually added extra steps if provided
+        if payload.added_steps:
+            added_steps_dicts = [s.model_dump() for s in payload.added_steps]
+            await db[collection].update_one(
+                {"_id": doc_oid},
+                {"$set": {"extra_approval_steps": added_steps_dicts}}
+            )
+            # Update the local doc object so the step count logic below works
+            if doc:
+                doc["extra_approval_steps"] = added_steps_dicts
+
+        # Calculate standard steps from the rule
         if rule_id:
             try:
                 rule = await db["approval_rules"].find_one({"_id": ObjectId(rule_id)})
                 if rule:
                     required_steps = [s["step"] for s in rule.get("steps", []) if s.get("required")]
-                    if required_steps and next_step <= max(required_steps):
-                        all_approved = False
-            except Exception:
-                pass
+                    if required_steps:
+                        total_steps = max(required_steps)
+            except Exception as e:
+                logger.error(f"Error fetching/parsing rule {rule_id}: {e}")
+        
+        # Add extra steps to the total count
+        extra_steps = doc.get("extra_approval_steps", []) if doc else []
+        total_steps += len(extra_steps)
 
-        if all_approved:
-            await db[collection].update_one(
-                {"_id": doc_oid},
-                {"$set": {"review_status": "approved", "status": "approved"}},
-            )
-            # Notify the submitter that it's fully approved
-            if submitter_id:
-                await notify_submitter(
-                    corporate_id=corporate_id,
-                    document_type=payload.document_type,
-                    document_id=payload.document_id,
-                    submitter_id=submitter_id,
-                    action="approved",
-                    document_summary=doc_summary,
-                )
-        else:
+        # Logic check: Are there more steps?
+        if next_step <= total_steps:
+            # Not finished yet -> increment current_step and notify next
             await db[collection].update_one(
                 {"_id": doc_oid},
                 {"$set": {"current_step": next_step}},
@@ -187,6 +218,24 @@ async def record_approval_action(
                     approval_rule_id=rule_id,
                     document_summary=doc_summary,
                 )
+        else:
+            # All steps completed -> mark as approved
+            all_approved = True
+            await db[collection].update_one(
+                {"_id": doc_oid},
+                {"$set": {"review_status": "approved", "status": "approved"}},
+            )
+            # Notify the submitter that it's fully approved
+            if submitter_id:
+                await notify_submitter(
+                    corporate_id=corporate_id,
+                    document_type=payload.document_type,
+                    document_id=payload.document_id,
+                    submitter_id=submitter_id,
+                    action="approved",
+                    document_summary=doc_summary,
+                )
+
 
     elif payload.action in ("rejected", "returned"):
         await db[collection].update_one(

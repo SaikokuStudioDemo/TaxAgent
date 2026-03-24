@@ -1,119 +1,126 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { ChevronLeft, Plus, CheckCircle, Save, Send, FileText, Loader2, Building2, AlertCircle, Trash2, FileImage, X } from 'lucide-vue-next';
-import { useRouter } from 'vue-router';
+import { ref, computed, onMounted } from 'vue';
+import { ChevronLeft, Plus, CheckCircle, Save, Send, FileText, Loader2, Building2, AlertCircle as AlertCircleIcon, Trash2, FileImage, X, AlertCircle } from 'lucide-vue-next';
+import { useRouter, useRoute } from 'vue-router';
 import ClientFormModal from '@/components/invoices/ClientFormModal.vue';
 import TemplateEditorModal from '@/components/invoices/TemplateEditorModal.vue';
+import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
 import { useCompanyProfiles } from '@/composables/useCompanyProfiles';
+import { api } from '@/lib/api';
 
 const router = useRouter();
+const route = useRoute();
+const editingInvoiceId = ref<string | null>((route.query.id as string) || null);
 
-// --- STATE ---
+// --- UI STATE ---
 const isModalOpen = ref(false);
 const isTemplateEditorOpen = ref(false);
-const latestExtractedHtml = ref('');
-const latestExtractedName = ref('');
-const invoiceType = ref<'single' | 'recurring'>('single');
+const showSuccessPopup = ref(false);
+const showDraftSuccessPopup = ref(false);
+const isExtracting = ref(false);
+const showCodeEditor = ref(false);
+const isSaving = ref(false);
 
-// --- TEMPLATE GALLERY ---
+// --- DATA STATE ---
 interface InvoiceTemplate {
     id: string;
     name: string;
     description: string;
-    thumbnail: string; // CSS class for mock preview
+    thumbnail: string;
     isActive: boolean;
+    html: string;
 }
 
+interface LineItem {
+    id: number;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    taxRate: number;
+}
+
+const defaultHtml = `
+<div style="font-family: 'Helvetica', sans-serif; padding: 60px; color: #1e293b; background: white; max-width: 800px; margin: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 60px;">
+        <div>
+            <h1 style="font-size: 3rem; font-weight: 800; color: #2563eb; margin: 0; letter-spacing: -0.05em;">INVOICE</h1>
+            <p style="color: #64748b; font-weight: 600; margin-top: 4px;">No. {{ invoice_number }}</p>
+        </div>
+        <div style="text-align: right;">
+            <p style="font-size: 1.25rem; font-weight: 700; margin: 0;">{{ client_name }} 御中</p>
+            <div style="color: #64748b; font-size: 0.875rem; margin-top: 8px; line-height: 1.6;">
+                {{ client_details }}
+            </div>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-bottom: 60px;">
+        <div>
+            <p style="text-transform: uppercase; font-size: 0.75rem; font-weight: 700; color: #94a3b8; letter-spacing: 0.1em; margin-bottom: 8px;">Dates</p>
+            <p style="margin: 0; font-weight: 600;">Issued: {{ issue_date }}</p>
+            <p style="margin: 4px 0 0 0; font-weight: 600;">Due: {{ due_date }}</p>
+        </div>
+        <div style="text-align: right;">
+            <p style="text-transform: uppercase; font-size: 0.75rem; font-weight: 700; color: #94a3b8; letter-spacing: 0.1em; margin-bottom: 8px;">From</p>
+            <p style="margin: 0; font-weight: 600;">{{ sender_name }}</p>
+            <div style="color: #64748b; font-size: 0.875rem; margin-top: 4px; line-height: 1.6;">
+                {{ sender_details }}
+            </div>
+        </div>
+    </div>
+
+    <div style="border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; margin-bottom: 40px;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+                    <th style="padding: 16px; text-align: left; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Description</th>
+                    <th style="padding: 16px; text-align: right; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Qty</th>
+                    <th style="padding: 16px; text-align: right; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Price</th>
+                    <th style="padding: 16px; text-align: right; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ item_list }}
+            </tbody>
+        </table>
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 60px;">
+        <div style="width: 300px;">
+            <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f1f5f9; color: #64748b;">
+                <span>Subtotal</span>
+                <span>¥{{ subtotal }}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f1f5f9; color: #64748b;">
+                <span>Tax (10%)</span>
+                <span>¥{{ tax_amount }}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 16px 0; font-size: 1.5rem; font-weight: 800; color: #0f172a;">
+                <span>Total</span>
+                <span>¥{{ total_amount }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div style="border-top: 2px solid #f1f5f9; padding-top: 40px;">
+        <p style="text-transform: uppercase; font-size: 0.75rem; font-weight: 700; color: #94a3b8; letter-spacing: 0.1em; margin-bottom: 12px;">Notes</p>
+        <p style="color: #475569; font-size: 0.875rem; line-height: 1.8;">{{ note }}</p>
+    </div>
+</div>
+`;
+
 const templates = ref<InvoiceTemplate[]>([
-    { id: 'T-001', name: '請求書A', description: '標準的でプロフェッショナルなレイアウト', thumbnail: 'bg-blue-50 border-blue-200', isActive: true },
-    { id: 'T-002', name: '請求書B', description: 'シンプルでミニマルなデザイン', thumbnail: 'bg-gray-50 border-gray-200', isActive: false },
-    { id: 'T-003', name: '請求書C', description: '内訳が豊富な詳細フォーマット', thumbnail: 'bg-slate-50 border-slate-200', isActive: false },
-    { id: 'T-004', name: '請求書D', description: 'モダンでスタイリッシュな外観', thumbnail: 'bg-purple-50 border-purple-200', isActive: false },
+    { id: 'T-001', name: '請求書A', description: '標準的でプロフェッショナルなレイアウト', thumbnail: 'bg-blue-50 border-blue-200', isActive: true, html: defaultHtml },
+    { id: 'T-002', name: '請求書B', description: 'シンプルでミニマルなデザイン', thumbnail: 'bg-gray-50 border-gray-200', isActive: false, html: defaultHtml.replace('#2563eb', '#1e293b').replace('INVOICE', 'BILLING') },
+    { id: 'T-003', name: '請求書C', description: '内訳が豊富な詳細フォーマット', thumbnail: 'bg-slate-50 border-slate-200', isActive: false, html: defaultHtml.replace('#2563eb', '#059669') },
+    { id: 'T-004', name: '請求書D', description: 'モダンでスタイリッシュな外観', thumbnail: 'bg-purple-50 border-purple-200', isActive: false, html: defaultHtml.replace('#2563eb', '#7c3aed') },
 ]);
 
 const selectedTemplateId = ref('T-001');
-
-// --- TEMPLATE STATE ---
-const isTemplateUploaded = ref(true); // Default to true since T-001 is selected
-const isExtracting = ref(false); 
+const templateHtml = ref(templates.value[0].html);
 const templateName = ref('default_invoice_template.html');
-const templateHtml = ref(`
-<div style="font-family: sans-serif; padding: 40px; color: #333;">
-    <h1 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">御請求書</h1>
-    <div style="margin-top: 30px; display: flex; justify-content: space-between;">
-        <div style="font-size: 1.2rem;">
-            <h2><span class="var-client_name" style="border-bottom: 1px dotted #ccc;">{{ client_name }}</span> 御中</h2>
-        </div>
-        <div style="text-align: right; color: #666;">
-            <p>発行日: <span class="var-issue_date">{{ issue_date }}</span></p>
-            <p>支払期限: <span class="var-due_date">{{ due_date }}</span></p>
-            <br>
-            <p>自社株式会社<br>東京都渋谷区xxxxx<br>T-1234567890</p>
-        </div>
-    </div>
-    <div style="margin-top: 50px; background: #f8fafc; padding: 20px; border-radius: 8px; text-align: center;">
-        <p style="font-size: 1.1rem; margin: 0; color: #475569;">ご請求金額 (税込)</p>
-        <p style="font-size: 2.5rem; font-weight: bold; margin: 10px 0 0 0; color: #0f172a;">¥<span class="var-total_amount">{{ total_amount }}</span></p>
-    </div>
-    <table style="width: 100%; margin-top: 40px; border-collapse: collapse;">
-        <thead>
-            <tr style="background: #1e3a8a; color: white;">
-                <th style="padding: 12px; text-align: left;">品目</th>
-                <th style="padding: 12px; text-align: right;">金額</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr>
-                <td style="padding: 12px; border-bottom: 1px solid #eee;">サービス基本料</td>
-                <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">¥100,000</td>
-            </tr>
-            <tr>
-                <td style="padding: 12px; border-bottom: 1px solid #eee;">消費税 (10%)</td>
-                <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">¥10,000</td>
-            </tr>
-        </tbody>
-    </table>
-</div>`); 
-
-const selectTemplate = (id: string) => {
-    selectedTemplateId.value = id;
-    if (id === 'T-001') {
-        isTemplateUploaded.value = true;
-    } else {
-        isTemplateUploaded.value = false;
-        templateHtml.value = '';
-    }
-};
-
-// --- TEMPLATE DELETION ---
-const templateToDelete = ref<InvoiceTemplate | null>(null);
-
-const confirmDeleteTemplate = (templ: InvoiceTemplate) => {
-    templateToDelete.value = templ;
-};
-
-const executeDeleteTemplate = () => {
-    if (!templateToDelete.value) return;
-    
-    // Remove from array
-    templates.value = templates.value.filter(t => t.id !== templateToDelete.value?.id);
-    
-    // Fallback selection if the deleted one was selected
-    if (selectedTemplateId.value === templateToDelete.value.id) {
-        if (templates.value.length > 0) {
-            selectTemplate(templates.value[0].id);
-        } else {
-            selectedTemplateId.value = '';
-            isTemplateUploaded.value = false;
-            templateHtml.value = '';
-        }
-    }
-    
-    templateToDelete.value = null;
-};
-
-const showCodeEditor = ref(false); 
-
+const latestExtractedHtml = ref('');
+const latestExtractedName = ref('');
 const templateVariables = ref([
     { key: 'client_name', label: '取引先名', value: '株式会社クライアント 御中' },
     { key: 'issue_date', label: '発行日', value: '2024-10-24' },
@@ -121,46 +128,122 @@ const templateVariables = ref([
     { key: 'total_amount', label: 'ご請求金額', value: '110,000' }
 ]);
 
-// --- INVOICE DATA ---
 const invoiceNumber = ref(`INV-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-001`);
 const issueDate = ref('2024-10-24');
 const dueDate = ref('2024-11-30');
-
-// --- ITEMS & TOTALS ---
-interface LineItem {
-    id: number;
-    description: string;
-    quantity: number;
-    unitPrice: number;
-    taxRate: number; // e.g. 0.10 for 10%
-}
-
 const items = ref<LineItem[]>([
     { id: 1, description: '', quantity: 1, unitPrice: 0, taxRate: 0.10 }
 ]);
-
 const note = ref('');
+const activeClientId = ref('');
+const availableClients = ref([
+    { id: 'C-1001', name: '株式会社Aoyama Systems', contactPerson: '田中 健太' },
+    { id: 'C-1002', name: 'BlueOcean Inc.', contactPerson: 'David Smith' },
+    { id: 'C-1003', name: '山口会計事務所', contactPerson: '山口 太郎' }
+]);
+const templateToDelete = ref<InvoiceTemplate | null>(null);
+
+// --- COMPOSABLES ---
+const { profiles: senderProfiles, formatProfileForTextarea } = useCompanyProfiles();
+const defaultProfile = senderProfiles.value.find(p => p.isDefault) || senderProfiles.value[0];
+const activeSenderProfile = ref(defaultProfile ? defaultProfile.id : '');
 
 // --- COMPUTED ---
-const subtotal = computed(() => {
-    return items.value.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
-});
-
-const taxAmount = computed(() => {
-    return items.value.reduce((sum, item) => sum + (item.quantity * item.unitPrice * item.taxRate), 0);
-});
-
+const subtotal = computed(() => items.value.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0));
+const taxAmount = computed(() => items.value.reduce((sum, item) => sum + (item.quantity * item.unitPrice * item.taxRate), 0));
 const totalAmount = computed(() => subtotal.value + taxAmount.value);
+const senderInfo = computed(() => {
+    const profile = senderProfiles.value.find(p => p.id === activeSenderProfile.value);
+    return profile ? formatProfileForTextarea(profile) : '';
+});
+
+const clientDisplayName = computed(() => {
+    const text = templateVariables.value.find(v => v.key === 'client_name')?.value || '';
+    return text.split('\n')[0] || '未入力';
+});
+
+const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('ja-JP').format(amount);
+};
+
+const renderedPreviewHtml = computed(() => {
+    if (!templateHtml.value) return '';
+    
+    let html = templateHtml.value;
+    
+    // 1. Basic Fields
+    html = html.replace(/\{\{\s*invoice_number\s*\}\}/g, invoiceNumber.value || 'INV-000000');
+    html = html.replace(/\{\{\s*issue_date\s*\}\}/g, issueDate.value || 'YYYY/MM/DD');
+    html = html.replace(/\{\{\s*due_date\s*\}\}/g, dueDate.value || 'YYYY/MM/DD');
+    
+    // 2. Client Info
+    const clientText = templateVariables.value[0]?.value || '';
+    const clientLines = clientText.split('\n');
+    html = html.replace(/\{\{\s*client_name\s*\}\}/g, clientLines[0] || '取引先名');
+    html = html.replace(/\{\{\s*client_details\s*\}\}/g, clientLines.slice(1).join('<br>') || '');
+    
+    // 3. Sender Info
+    const senderInfoText = senderInfo.value;
+    const senderLines = senderInfoText.split('\n');
+    html = html.replace(/\{\{\s*sender_name\s*\}\}/g, senderLines[0] || '');
+    html = html.replace(/\{\{\s*sender_details\s*\}\}/g, senderLines.slice(1).join('<br>') || '');
+    
+    // 4. Amounts
+    html = html.replace(/\{\{\s*subtotal\s*\}\}/g, formatCurrency(subtotal.value));
+    html = html.replace(/\{\{\s*tax_amount\s*\}\}/g, formatCurrency(taxAmount.value));
+    html = html.replace(/\{\{\s*total_amount\s*\}\}/g, formatCurrency(totalAmount.value));
+    
+    // 5. Item List
+    let itemsHtml = '';
+    items.value.forEach(item => {
+        itemsHtml += `
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 16px; font-weight: 500;">${item.description || '名称未設定'}</td>
+                <td style="padding: 16px; text-align: right;">${item.quantity}</td>
+                <td style="padding: 16px; text-align: right;">¥${formatCurrency(item.unitPrice)}</td>
+                <td style="padding: 16px; text-align: right; font-weight: 600;">¥${formatCurrency(item.quantity * item.unitPrice)}</td>
+            </tr>
+        `;
+    });
+    html = html.replace(/\{\{\s*item_list\s*\}\}/g, itemsHtml);
+    
+    // 6. Notes
+    html = html.replace(/\{\{\s*note\s*\}\}/g, note.value.replace(/\n/g, '<br>') || '');
+    
+    return html;
+});
 
 // --- METHODS ---
+const selectTemplate = (id: string) => {
+    selectedTemplateId.value = id;
+    const template = templates.value.find(t => t.id === id);
+    if (template) {
+        templateHtml.value = template.html;
+    } else {
+        templateHtml.value = '';
+    }
+};
+
+const confirmDeleteTemplate = (templ: InvoiceTemplate) => {
+    templateToDelete.value = templ;
+};
+
+const executeDeleteTemplate = () => {
+    if (!templateToDelete.value) return;
+    templates.value = templates.value.filter(t => t.id !== templateToDelete.value?.id);
+    if (selectedTemplateId.value === templateToDelete.value.id) {
+        if (templates.value.length > 0) {
+            selectTemplate(templates.value[0].id);
+        } else {
+            selectedTemplateId.value = '';
+            templateHtml.value = '';
+        }
+    }
+    templateToDelete.value = null;
+};
+
 const addItem = () => {
-    items.value.push({
-        id: Date.now(),
-        description: '',
-        quantity: 1,
-        unitPrice: 0,
-        taxRate: 0.10
-    });
+    items.value.push({ id: Date.now(), description: '', quantity: 1, unitPrice: 0, taxRate: 0.10 });
 };
 
 const removeItem = (id: number) => {
@@ -169,505 +252,535 @@ const removeItem = (id: number) => {
     }
 };
 
-const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('ja-JP').format(amount);
+const fetchTemplates = async () => {
+    try {
+        const dbTemplates = await api.get('/templates');
+        if (dbTemplates && Array.isArray(dbTemplates)) {
+            const builtInIds = ['T-001', 'T-002', 'T-003', 'T-004'];
+            const filteredDb = dbTemplates.filter((t: any) => !builtInIds.includes(t.id));
+            const formattedDb = filteredDb.map((t: any) => ({
+                id: t.id,
+                name: t.name,
+                description: t.description || 'AI生成テンプレート',
+                thumbnail: t.thumbnail || 'bg-emerald-50 border-emerald-200',
+                isActive: t.is_active !== undefined ? t.is_active : true,
+                html: t.html
+            }));
+            templates.value = [...formattedDb, ...templates.value.filter(t => builtInIds.includes(t.id))];
+        }
+    } catch (error) {
+        console.error('Failed to fetch templates:', error);
+    }
 };
 
-const applyTemplate = (e: Event) => {
-    // Simulate reading an uploaded PDF/Excel file and AI converting it to HTML
+const loadInvoiceData = async (id: string) => {
+    try {
+        const invoice = await api.get<any>(`/invoices/${id}`);
+        if (invoice) {
+            invoiceNumber.value = invoice.invoice_number;
+            issueDate.value = invoice.issue_date;
+            dueDate.value = invoice.due_date;
+            activeClientId.value = invoice.client_id || '';
+            note.value = invoice.note || '';
+            
+            if (invoice.line_items && Array.isArray(invoice.line_items)) {
+                items.value = invoice.line_items.map((li: any, idx: number) => ({
+                    id: idx + 1,
+                    description: li.description,
+                    quantity: 1, 
+                    unitPrice: li.amount,
+                    taxRate: li.tax_rate
+                }));
+            }
+            
+            if (invoice.sender_profile_id) {
+                activeSenderProfile.value = invoice.sender_profile_id;
+            }
+
+            handleClientSelection();
+        }
+    } catch (error) {
+        console.error('Failed to load invoice for editing:', error);
+    }
+};
+
+onMounted(() => {
+    fetchTemplates();
+    if (editingInvoiceId.value) {
+        loadInvoiceData(editingInvoiceId.value);
+    }
+});
+
+const applyTemplate = async (e: Event) => {
     const target = e.target as HTMLInputElement;
     if (target.files && target.files.length > 0) {
         const file = target.files[0];
         templateName.value = file.name;
         isExtracting.value = true;
-        
-        // Trigger AI Upload Flow (simulated)
-        const newTemplateId = `T-${Date.now()}`;
-        templates.value.unshift({
-            id: newTemplateId,
-            name: file.name,
-            description: 'AI生成テンプレート',
-            thumbnail: 'bg-emerald-50 border-emerald-200',
-            isActive: true
-        });
-        selectTemplate(newTemplateId); // Select the newly uploaded template
-
-        setTimeout(() => {
+        try {
+            const result = await api.post<{ template_name: string; html: string; variables: string[] }>(
+                '/ai-training/generate',
+                { filename: file.name }
+            );
+            latestExtractedName.value = result.template_name || file.name.replace(/\.[^/.]+$/, '');
+            latestExtractedHtml.value = result.html;
             isExtracting.value = false;
-            latestExtractedName.value = file.name;
-            
-            // Mock template data (The "AI generated" HTML result)
-            latestExtractedHtml.value = `
-<div style="font-family: sans-serif; padding: 40px; color: #333;">
-    <h1 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">御請求書</h1>
-    <div style="margin-top: 30px; display: flex; justify-content: space-between;">
-        <div style="font-size: 1.2rem;">
-            <h2><span class="var-client_name" style="border-bottom: 1px dotted #ccc;">{{ client_name }}</span> 御中</h2>
-        </div>
-        <div style="text-align: right; color: #666;">
-            <p>発行日: <span class="var-issue_date">{{ issue_date }}</span></p>
-            <p>支払期限: <span class="var-due_date">{{ due_date }}</span></p>
-            <br>
-            <p>自社株式会社<br>東京都渋谷区xxxxx<br>T-1234567890</p>
-        </div>
-    </div>
-    <div style="margin-top: 50px; background: #f8fafc; padding: 20px; border-radius: 8px; text-align: center;">
-        <p style="font-size: 1.1rem; margin: 0; color: #475569;">ご請求金額 (税込)</p>
-        <p style="font-size: 2.5rem; font-weight: bold; margin: 10px 0 0 0; color: #0f172a;">¥<span class="var-total_amount">{{ total_amount }}</span></p>
-    </div>
-    <table style="width: 100%; margin-top: 40px; border-collapse: collapse;">
-        <thead>
-            <tr style="background: #1e3a8a; color: white;">
-                <th style="padding: 12px; text-align: left;">品目</th>
-                <th style="padding: 12px; text-align: right;">金額</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr>
-                <td style="padding: 12px; border-bottom: 1px solid #eee;">サービス基本料</td>
-                <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">¥100,000</td>
-            </tr>
-            <tr>
-                <td style="padding: 12px; border-bottom: 1px solid #eee;">消費税 (10%)</td>
-                <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">¥10,000</td>
-            </tr>
-        </tbody>
-    </table>
-</div>`;
-            isTemplateEditorOpen.value = true;
-        }, 2000);
+        } catch (error: any) {
+            console.error('AI Template Generation Error:', error);
+            isExtracting.value = false;
+            alert('AIによるテンプレート生成に失敗しました。\n' + (error?.message || ''));
+        } finally {
+            target.value = '';
+        }
     }
 };
 
-const handleTemplateSave = (payload: { name: string, html: string }) => {
-    isTemplateEditorOpen.value = false;
-    
-    // Create new template entry
-    const newTemplateId = `T-${Date.now()}`;
-    templates.value.unshift({
-        id: newTemplateId,
-        name: payload.name,
-        description: 'ユーザー登録テンプレート',
-        thumbnail: 'bg-emerald-50 border-emerald-200',
-        isActive: true
-    });
-    
-    // For this mock, inject html to the preview directly
-    templateHtml.value = payload.html;
-    selectedTemplateId.value = newTemplateId;
-    isTemplateUploaded.value = true;
+const handleTemplateSave = async (payload: { name: string, html: string }) => {
+    try {
+        const savedTemplate = await api.post<any>('/templates', {
+            name: payload.name,
+            description: 'AI生成テンプレート',
+            html: payload.html,
+            thumbnail: 'bg-emerald-50 border-emerald-200',
+            is_active: true
+        });
+        if (savedTemplate && savedTemplate.id) {
+            const newTemplate: InvoiceTemplate = {
+                id: savedTemplate.id,
+                name: savedTemplate.name,
+                description: savedTemplate.description,
+                thumbnail: savedTemplate.thumbnail,
+                isActive: true,
+                html: savedTemplate.html
+            };
+            templates.value.unshift(newTemplate);
+            selectedTemplateId.value = savedTemplate.id;
+            templateHtml.value = payload.html;
+        }
+    } catch (error) {
+        console.error('Failed to save template:', error);
+        alert('テンプレートの保存に失敗しました。');
+    } finally {
+        isTemplateEditorOpen.value = false;
+    }
 };
 
 const goBack = () => {
     router.push('/dashboard/corporate/invoices/list');
 };
-// State for sender info
-const { profiles: senderProfiles, formatProfileForTextarea } = useCompanyProfiles();
 
-// Set the active profile to the default one if available, otherwise just use the first
-const defaultProfile = senderProfiles.value.find(p => p.isDefault) || senderProfiles.value[0];
-const activeSenderProfile = ref(defaultProfile ? defaultProfile.id : '');
+const buildPayload = () => {
+    const clientText = templateVariables.value[0]?.value || '';
+    const clientName = clientText.split('\n')[0].replace(' 御中', '') || '未設定';
+    return {
+        direction: 'issued' as const,
+        invoice_number: invoiceNumber.value,
+        client_id: activeClientId.value || undefined,
+        client_name: clientName,
+        recipient_email: '',
+        issue_date: issueDate.value,
+        due_date: dueDate.value,
+        subtotal: subtotal.value,
+        tax_amount: taxAmount.value,
+        total_amount: totalAmount.value,
+        line_items: items.value.map(item => ({
+            description: item.description || '名称未設定',
+            category: '',
+            amount: item.quantity * item.unitPrice,
+            tax_rate: Math.round(item.taxRate * 100)
+        })),
+        template_id: selectedTemplateId.value || undefined
+    };
+};
 
-const senderInfo = computed(() => {
-    const profile = senderProfiles.value.find(p => p.id === activeSenderProfile.value);
-    return profile ? formatProfileForTextarea(profile) : '';
-});
+const saveDraft = async () => {
+    isSaving.value = true;
+    try {
+        const payload = buildPayload();
+        if (editingInvoiceId.value) {
+            await api.patch(`/invoices/${editingInvoiceId.value}`, payload);
+        } else {
+            await api.post('/invoices', payload);
+        }
+        showDraftSuccessPopup.value = true;
+    } catch (error) {
+        console.error('Failed to save draft:', error);
+        alert('下書き保存に失敗しました。');
+    } finally {
+        isSaving.value = false;
+    }
+};
 
-// Mock data for Client dropdown
-const activeClientId = ref('');
-const availableClients = ref([
-    { id: 'C-1001', name: '株式会社Aoyama Systems', contactPerson: '田中 健太' },
-    { id: 'C-1002', name: 'BlueOcean Inc.', contactPerson: 'David Smith' },
-    { id: 'C-1003', name: '山口会計事務所', contactPerson: '山口 太郎' }
-]);
+const handleDraftSuccessConfirm = () => {
+    showDraftSuccessPopup.value = false;
+    router.push('/dashboard/corporate/invoices/list');
+};
 
-const handleClientSelection = () => {
+const isApprovalRequired = ref(false);
+
+const handleApprovalRequirement = (required: boolean) => {
+    isApprovalRequired.value = required;
+};
+
+const submitInvoice = async () => {
+    isSaving.value = true;
+    try {
+        const payload = { 
+            ...buildPayload(), 
+            status: isApprovalRequired.value ? 'draft' : 'sent', 
+            // if approval is required, the backend will auto-set review_status
+        };
+        if (editingInvoiceId.value) {
+            await api.patch(`/invoices/${editingInvoiceId.value}`, payload);
+        } else {
+            await api.post('/invoices', payload);
+        }
+        
+        showSuccessPopup.value = true;
+    } catch (error) {
+        console.error('Failed to submit invoice:', error);
+        alert('操作に失敗しました。');
+    } finally {
+        isSaving.value = false;
+    }
+};
+
+function handleSuccessConfirm() {
+    showSuccessPopup.value = false;
+    router.push('/dashboard/corporate/invoices/list');
+}
+
+function handleClientSelection() {
     if (!activeClientId.value) {
-        templateVariables.value[0].value = '';
+        if (templateVariables.value.length > 0) templateVariables.value[0].value = '';
         return;
     }
-    // Simulate fetching full details
     const selected = availableClients.value.find(c => c.id === activeClientId.value);
-    if (selected) {
+    if (selected && templateVariables.value.length > 0) {
         templateVariables.value[0].value = `${selected.name} 御中\n担当: ${selected.contactPerson} 様\n〒100-0000\n東京都...`;
     }
-};
+}
 
-const handleClientSave = (clientData: any) => {
-    // Add to available clients list
+function handleClientSave(clientData: any) {
     availableClients.value.push(clientData);
     activeClientId.value = clientData.id;
-    
-    // Auto-fill the client textarea preview with the saved client info
-    templateVariables.value[0].value = `${clientData.name} 御中\n担当: ${clientData.contactPerson} 様\n〒${clientData.postalCode}\n${clientData.address}\nTEL: ${clientData.phone}`;
+    if (templateVariables.value.length > 0) {
+        templateVariables.value[0].value = `${clientData.name} 御中\n担当: ${clientData.contactPerson} 様\n〒${clientData.postalCode}\n${clientData.address}\nTEL: ${clientData.phone}`;
+    }
     isModalOpen.value = false;
-};
+}
 
 </script>
 
 <template>
-  <div class="h-full flex flex-col bg-slate-50">
-    <!-- Header -->
-    <header class="bg-white border-b border-gray-200 px-8 py-5 flex items-center justify-between shrink-0 z-10 sticky top-0 shadow-sm">
-      <div class="flex items-center gap-4">
-        <button @click="goBack" class="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500">
-          <ChevronLeft class="w-5 h-5" />
-        </button>
-        <div>
-          <h1 class="text-xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
-             請求書発行
-          </h1>
+  <Transition name="fade-page" appear>
+    <div class="relative h-full overflow-hidden flex flex-col bg-slate-50">
+      
+      <!-- Header -->
+      <header class="bg-white border-b border-gray-200 px-8 py-5 flex items-center justify-between shrink-0 z-10 sticky top-0 shadow-sm">
+        <div class="flex items-center gap-4">
+          <button @click="goBack" class="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500">
+            <ChevronLeft class="w-5 h-5" />
+          </button>
+          <div>
+            <h1 class="text-xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
+               <span v-if="editingInvoiceId" class="text-blue-600">下書きを編集</span>
+               <span v-else>請求書発行</span>
+            </h1>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="hidden md:flex bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-bold items-center gap-2 border border-blue-100">
+              <span class="relative flex h-2 w-2">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+              </span>
+              編集中
+          </div>
+        </div>
+      </header>
+
+      <!-- Main Content (Scrollable) -->
+      <div class="flex-1 overflow-y-auto bg-gray-50/50 p-8">
+          <div class="max-w-[1400px] mx-auto space-y-8">
+          
+          <div class="col-span-12 space-y-8">
+              <!-- TEMPLATE GALLERY -->
+              <div>
+                  <div class="flex items-center justify-between mb-4">
+                      <h2 class="text-xl font-bold text-gray-900">インボイス・テンプレートを選択</h2>
+                      <label class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm flex items-center shadow-sm cursor-pointer">
+                          <Plus class="w-4 h-4 mr-2" />テンプレート登録
+                          <input type="file" accept=".pdf, .xlsx, .xls, .doc, .docx" @change="applyTemplate" class="hidden" />
+                      </label>
+                  </div>
+                  
+                  <div class="flex gap-4 overflow-x-auto pb-6 pt-2 snap-x relative -ml-1 pl-1">
+                      <div v-if="isExtracting" class="w-[220px] shrink-0 border-2 border-dashed border-blue-400 rounded-xl bg-blue-50/50 flex flex-col items-center justify-center p-6 min-h-[280px]">
+                           <Loader2 class="w-8 h-8 text-blue-500 animate-spin mb-3" />
+                           <p class="font-bold text-sm text-blue-800 text-center leading-tight break-all">AIが「{{ templateName }}」を<br>解析中です...</p>
+                           <p class="text-[10px] text-blue-600 mt-2 text-center">レイアウトを抽出して<br>フォームブロックを生成</p>
+                      </div>
+
+                      <div v-for="templ in templates" :key="templ.id" 
+                           @click="selectTemplate(templ.id)"
+                           class="w-[200px] sm:w-[220px] shrink-0 rounded-xl cursor-pointer transition-all snap-start relative flex flex-col h-full border-2"
+                           :class="selectedTemplateId === templ.id ? 'border-blue-600 shadow-xl z-10 bg-white' : 'border-transparent hover:border-gray-200 hover:shadow-sm bg-white'">
+                          <div class="h-[180px] rounded-t-lg bg-gray-50 p-4 w-full flex flex-col gap-2 border-b border-gray-100 relative overflow-hidden group">
+                              <button v-if="templ.id !== 'T-001'" @click.stop="confirmDeleteTemplate(templ)" class="absolute top-2 right-2 p-1.5 bg-white shadow-sm border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 rounded-full opacity-0 group-hover:opacity-100 transition-all z-10" title="テンプレートを削除">
+                                  <X class="w-4 h-4" />
+                              </button>
+                              <div class="w-16 h-3 bg-gray-300 rounded mb-4" :class="templ.id === 'T-001' ? 'bg-blue-500' : templ.id === 'T-002' ? 'bg-gray-800' : 'bg-slate-600'"></div>
+                              <div class="w-full h-1.5 bg-gray-200 rounded"></div>
+                              <div class="w-3/4 h-1.5 bg-gray-200 rounded"></div>
+                              <div class="flex justify-end mt-4"><div class="w-20 h-10 bg-gray-200 rounded flex flex-col gap-1 items-end pt-1 pr-1"><div class="w-8 h-1 bg-gray-300 rounded"></div><div class="w-12 h-1 bg-gray-300 rounded"></div><div class="w-12 h-1 bg-blue-300 rounded"></div></div></div>
+                              <div class="w-full h-8 bg-gray-100 border border-gray-200 rounded mt-4"></div>
+                              <div v-if="selectedTemplateId === templ.id" class="absolute inset-0 border-4 border-blue-600/10 rounded-t-xl pointer-events-none"></div>
+                          </div>
+                          <div class="p-3 bg-white rounded-b-xl flex-1 flex flex-col gap-1">
+                              <div class="flex items-start justify-between gap-2">
+                                  <span class="font-bold text-sm text-gray-900 leading-tight break-all">{{ templ.name }}</span>
+                                  <CheckCircle v-if="selectedTemplateId === templ.id" class="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                              </div>
+                              <p class="text-[10px] text-gray-500 leading-tight opacity-80 overflow-hidden line-clamp-2">{{ templ.description }}</p>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+
+              <!-- FORM -->
+              <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden" v-if="!isExtracting">
+                  <div class="px-6 py-4 border-b border-gray-100 bg-slate-50 flex items-center gap-2">
+                      <FileText class="w-5 h-5 text-blue-600" />
+                      <h2 class="font-bold text-gray-900 text-lg">請求書情報入力</h2>
+                  </div>
+                  <div class="p-8 space-y-8">
+                      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          <div>
+                              <label class="block text-xs font-bold text-gray-700 mb-2">請求書番号</label>
+                              <input v-model="invoiceNumber" type="text" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-blue-500 focus:border-blue-500 font-mono" />
+                          </div>
+                          <div>
+                              <label class="block text-xs font-bold text-gray-700 mb-2">発行日</label>
+                              <input v-model="issueDate" type="date" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-blue-500 focus:border-blue-500" />
+                          </div>
+                          <div>
+                              <label class="block text-xs font-bold text-gray-700 mb-2">支払期日</label>
+                              <input v-model="dueDate" type="date" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-blue-500 focus:border-blue-500" />
+                          </div>
+                      </div>
+                      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4">
+                          <div>
+                              <label class="block text-xs font-bold text-gray-700 mb-2">請求先情報</label>
+                              <div class="border border-gray-200 rounded-lg bg-gray-50 flex flex-col group hover:border-blue-300 transition-colors relative overflow-hidden">
+                                  <div class="p-5 flex-1 relative">
+                                      <div class="mb-3 relative">
+                                          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                              <Building2 class="h-4 w-4 text-gray-400" />
+                                          </div>
+                                          <select v-model="activeClientId" @change="handleClientSelection" class="block w-full pl-10 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-white shadow-sm">
+                                              <option value="">取引先を選択してください</option>
+                                              <option v-for="client in availableClients" :key="client.id" :value="client.id">{{ client.name }}</option>
+                                          </select>
+                                      </div>
+                                      <textarea v-model="templateVariables[0].value" class="w-full h-24 bg-transparent border-0 resize-none focus:ring-0 p-0 text-sm leading-relaxed" placeholder="株式会社クライアント 御中\n担当：佐藤 健太 様\n東京都港区六本木...\n03-0000-0000"></textarea>
+                                  </div>
+                                  <div class="bg-white border-t border-gray-200 px-4 py-2 flex justify-center shrink-0 transition-colors">
+                                      <button @click="isModalOpen = true" class="text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors flex items-center justify-center gap-1 py-1 px-2 hover:bg-blue-50 rounded w-full">
+                                          <Plus class="w-3.5 h-3.5" /> 新規取引先を追加
+                                      </button>
+                                  </div>
+                              </div>
+                          </div>
+                          <div>
+                              <label class="block text-xs font-bold text-gray-700 mb-2">請求元情報</label>
+                              <div class="border border-gray-200 rounded-lg bg-gray-50 flex flex-col relative group overflow-hidden">
+                                  <div class="p-5 flex-1 relative">
+                                      <div class="mb-3">
+                                          <select v-model="activeSenderProfile" class="block w-full py-1.5 pl-3 pr-10 text-sm border-gray-300 focus:outline-none focus:ring-amber-500 focus:border-amber-500 rounded-md bg-white shadow-sm text-gray-700 font-medium">
+                                              <option v-for="profile in senderProfiles" :key="profile.id" :value="profile.id">自社プロファイル: {{ profile.name }}</option>
+                                          </select>
+                                      </div>
+                                      <textarea :value="senderInfo" class="w-full h-24 bg-transparent border-0 resize-none focus:ring-0 p-0 text-gray-600 text-sm leading-relaxed outline-none" readonly></textarea>
+                                  </div>
+                                  <div class="bg-white border-t border-gray-200 px-4 py-2 flex justify-center shrink-0">
+                                      <router-link to="/dashboard/corporate/settings/company" class="text-xs font-bold text-gray-500 hover:text-gray-700 transition-colors flex items-center justify-center gap-1 py-1 px-2 hover:bg-gray-50 rounded w-full">自社マスター設定を開く</router-link>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+              
+              <!-- ITEMS -->
+              <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden" v-if="!isExtracting">
+                  <div class="px-6 py-4 border-b border-gray-100 bg-slate-50 flex items-center gap-2">
+                      <h3 class="font-bold text-gray-900 text-lg">品目リスト</h3>
+                  </div>
+                  <div class="p-0">
+                      <div class="mb-4 grid grid-cols-12 gap-4 px-6 border-b border-gray-200 pb-3">
+                          <div class="col-span-5 text-xs font-bold text-gray-500 uppercase tracking-wider">品目名</div>
+                          <div class="col-span-2 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">数量</div>
+                          <div class="col-span-2 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">単価</div>
+                          <div class="col-span-1 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">税率</div>
+                          <div class="col-span-2 text-xs font-bold text-gray-500 uppercase tracking-wider text-right pr-4">金額</div>
+                      </div>
+                      <div class="space-y-0 text-sm bg-white border-b border-gray-200">
+                          <div v-for="item in items" :key="item.id" class="grid grid-cols-12 gap-4 items-center group py-4 px-6 border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
+                              <div class="col-span-5">
+                                  <input v-model="item.description" type="text" class="w-full bg-transparent border-0 p-0 text-sm font-medium text-gray-900 focus:ring-0 placeholder-gray-300">
+                              </div>
+                              <div class="col-span-2">
+                                  <input v-model="item.quantity" type="number" class="w-full bg-transparent border-0 p-0 text-sm text-right focus:ring-0">
+                              </div>
+                              <div class="col-span-2">
+                                  <input v-model="item.unitPrice" type="number" class="w-full bg-transparent border-0 p-0 text-sm text-right font-medium focus:ring-0">
+                              </div>
+                              <div class="col-span-1">
+                                  <select v-model="item.taxRate" class="w-full bg-transparent border-0 p-0 text-sm text-right focus:ring-0 appearance-none bg-no-repeat bg-right pr-4">
+                                      <option :value="0.10">10%</option>
+                                      <option :value="0.08">8%</option>
+                                      <option :value="0">0%</option>
+                                  </select>
+                              </div>
+                              <div class="col-span-2 flex items-center justify-end gap-3 font-bold text-gray-900">
+                                  ¥{{ formatCurrency(item.quantity * item.unitPrice) }}
+                                  <button @click="removeItem(item.id)" class="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 p-1"><Trash2 class="w-4 h-4" /></button>
+                              </div>
+                          </div>
+                      </div>
+                      <button @click="addItem" class="mt-4 text-blue-600 hover:text-blue-700 font-bold text-sm flex items-center transition-colors px-6"><Plus class="w-4 h-4 mr-1" /> 行を追加</button>
+                      <div class="px-6 py-4 bg-slate-50 border-t border-gray-200 mt-4 flex justify-end">
+                          <div class="w-72 space-y-2 text-sm">
+                              <div class="flex justify-between text-gray-600"><span>小計</span><span>¥{{ formatCurrency(subtotal) }}</span></div>
+                              <div class="flex justify-between text-gray-600"><span>消費税</span><span>¥{{ formatCurrency(taxAmount) }}</span></div>
+                              <div class="flex justify-between font-bold text-gray-900 border-t border-gray-200 pt-3 mt-3 text-lg"><span>合計金額</span><span>¥{{ formatCurrency(totalAmount) }}</span></div>
+                          </div>
+                      </div>
+                  </div>
+                  <div class="p-8 border-t border-gray-100 bg-white">
+                      <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">備考・メモ</label>
+                      <textarea v-model="note" rows="3" class="w-full border border-gray-200 rounded-lg p-3 text-sm focus:ring-blue-500 focus:border-blue-500 bg-gray-50/50 resize-none"></textarea>
+                  </div>
+              </div>
+              
+              <!-- APPROVAL PREVIEW -->
+              <ApprovalStepper 
+                  document-type="issued_invoice"
+                  mode="preview"
+                  :amount="totalAmount"
+                  @update:requires-approval="handleApprovalRequirement"
+                  :payload="{ client_id: activeClientId }"
+              />
+              
+              <!-- PREVIEW -->
+              <div class="space-y-6 pt-4">
+                  <div class="flex items-center justify-between">
+                      <h2 class="text-xl font-bold text-gray-900 flex items-center gap-2"><FileImage class="w-5 h-5 text-blue-600" /> 発行前プレビュー</h2>
+                      <div class="flex bg-gray-200 rounded-lg p-1">
+                          <button @click="showCodeEditor = false" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all" :class="!showCodeEditor ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'">Visual Preview</button>
+                          <button @click="showCodeEditor = true" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all" :class="showCodeEditor ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'">HTML Source</button>
+                      </div>
+                  </div>
+                  <div class="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden min-h-[600px] flex flex-col">
+                      <div v-if="showCodeEditor" class="flex-1 bg-[#1e1e1e] p-6">
+                          <textarea v-model="templateHtml" class="w-full h-full min-h-[500px] bg-transparent text-emerald-400 font-mono text-sm focus:outline-none resize-none leading-relaxed" spellcheck="false"></textarea>
+                      </div>
+                      <div v-else class="flex-1 bg-gray-100 p-8 flex justify-center overflow-auto">
+                          <div class="w-full max-w-[800px] bg-white shadow-2xl min-h-[1100px] p-0 transform origin-top transition-transform duration-300">
+                               <div v-if="templateHtml" v-html="renderedPreviewHtml" class="w-full h-full p-0"></div>
+                               <div v-if="isExtracting" class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm">
+                                  <Loader2 class="w-12 h-12 animate-spin mb-4 text-blue-500" />
+                                  <p class="font-bold text-gray-900 tracking-wider">AIテンプレート構築中...</p>
+                               </div>
+                          </div>
+                      </div>
+                      <div class="bg-blue-50 px-8 py-4 border-t border-blue-100 flex items-center gap-3">
+                          <AlertCircle class="w-5 h-5 text-blue-500" />
+                          <p class="text-xs text-blue-700 leading-relaxed font-medium">プレビューは入力内容に合わせてリアルタイムで更新されます。</p>
+                      </div>
+                  </div>
+              </div>
+          </div>
         </div>
       </div>
-      <div class="flex items-center gap-3">
-        <div class="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 mr-4 border border-blue-100">
-            <span class="relative flex h-2 w-2">
-                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                <span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-            </span>
-            編集中
-        </div>
-        <button class="bg-white border border-gray-300 text-gray-700 px-5 py-2.5 rounded-lg hover:bg-gray-50 transition-colors font-medium text-sm flex items-center shadow-sm">
-            <Save class="w-4 h-4 mr-2" />下書き保存
-        </button>
-        <button class="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-bold text-sm flex items-center shadow-sm shadow-blue-600/20">
-            <Send class="w-4 h-4 mr-2" />発行・送付する
-        </button>
+
+      <!-- Floating Action Footer -->
+      <footer class="bg-white/80 backdrop-blur-md border-t border-gray-200 p-4 md:px-12 md:py-5 flex items-center justify-between shrink-0 z-10 shadow-[0_-4px_20px_-5px_rgba(0,0,0,0.1)]">
+          <div class="flex items-center gap-6">
+              <div class="hidden lg:flex flex-col">
+                  <span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">合計金額 (税込)</span>
+                  <span class="text-xl font-black text-gray-900">¥{{ totalAmount.toLocaleString() }}</span>
+              </div>
+              <div class="h-8 w-px bg-gray-200 hidden lg:block"></div>
+              <div class="flex flex-col">
+                  <span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">宛先</span>
+                  <span class="text-sm font-bold text-gray-700 truncate max-w-[200px]">{{ clientDisplayName }}</span>
+              </div>
+          </div>
+          <div class="flex items-center gap-4">
+              <button @click="saveDraft" :disabled="isSaving" class="px-6 py-3 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all font-bold text-sm flex items-center shadow-sm disabled:opacity-50 hover:shadow-md active:scale-95">
+                  <Loader2 v-if="isSaving" class="w-4 h-4 mr-2 animate-spin" />
+                  <Save v-else class="w-4 h-4 mr-2" />下書き保存
+              </button>
+              <button @click="submitInvoice" :disabled="isSaving" class="px-8 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-bold text-sm flex items-center shadow-lg shadow-blue-600/20 disabled:opacity-50 hover:shadow-blue-600/30 active:scale-95 hover:-translate-y-0.5">
+                  <Loader2 v-if="isSaving" class="w-4 h-4 mr-2 animate-spin" />
+                  <template v-if="isApprovalRequired">
+                    <ShieldCheck v-if="!isSaving" class="w-4 h-4 mr-2" />承認を申請する
+                  </template>
+                  <template v-else>
+                    <Send v-if="!isSaving" class="w-4 h-4 mr-2" />発行・送付する
+                  </template>
+              </button>
+          </div>
+      </footer>
+
+      <!-- Modals & Popups -->
+      <ClientFormModal :show="isModalOpen" @close="isModalOpen = false" @save="handleClientSave" />
+      <TemplateEditorModal :show="isTemplateEditorOpen" :initial-name="latestExtractedName" :initial-html="latestExtractedHtml" @close="isTemplateEditorOpen = false" @save="handleTemplateSave" />
+      
+      <div v-if="templateToDelete" class="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" @click="templateToDelete = null"></div>
+          <div class="bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden w-full max-w-sm relative z-10 p-6 text-center animate-in fade-in zoom-in-95 duration-200">
+              <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4"><AlertCircleIcon class="w-6 h-6 text-red-600" /></div>
+              <h3 class="text-lg font-bold text-gray-900 mb-2">テンプレートの削除</h3>
+              <p class="text-sm text-gray-500 mb-6 font-medium">「{{ templateToDelete.name }}」を本当に削除しますか？</p>
+              <div class="flex items-center gap-3">
+                  <button @click="templateToDelete = null" class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 rounded-lg text-sm font-bold transition-colors">キャンセル</button>
+                  <button @click="executeDeleteTemplate" class="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold transition-colors">削除する</button>
+              </div>
+          </div>
       </div>
-    </header>
 
-    <!-- Main Content -->
-    <div class="flex-1 overflow-y-auto bg-gray-50/50 p-8">
-      <div class="max-w-[1400px] mx-auto grid grid-cols-12 gap-8">
-        
-        <!-- Left Side: Invoice Editor -->
-        <div class="col-span-12 xl:col-span-8 space-y-8">
-            
-            <!-- TEMPLATE GALLERY -->
-            <div>
-                <div class="flex items-center justify-between mb-4">
-                    <h2 class="text-xl font-bold text-gray-900">インボイス・テンプレートを選択</h2>
-                    
-                    <label class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm flex items-center shadow-sm cursor-pointer">
-                        <Plus class="w-4 h-4 mr-2" />テンプレート登録
-                        <input type="file" accept=".pdf, .xlsx, .xls, .doc, .docx" @change="applyTemplate" class="hidden" />
-                    </label>
-                </div>
-                
-                <div class="flex gap-4 overflow-x-auto pb-4 -mx-2 px-2 snap-x">
-                    <!-- Loading state representing a template being scanned by AI -->
-                    <div v-if="isExtracting" class="w-[220px] shrink-0 border-2 border-dashed border-blue-400 rounded-xl bg-blue-50/50 flex flex-col items-center justify-center p-6 min-h-[280px]">
-                         <Loader2 class="w-8 h-8 text-blue-500 animate-spin mb-3" />
-                         <p class="font-bold text-sm text-blue-800 text-center leading-tight">AIが「{{ templateName }}」を<br>解析中です...</p>
-                         <p class="text-[10px] text-blue-600 mt-2 text-center">レイアウトを抽出して<br>フォームブロックを生成</p>
-                    </div>
-
-                    <div v-for="templ in templates" :key="templ.id" 
-                         @click="selectTemplate(templ.id)"
-                         class="w-[220px] shrink-0 rounded-xl cursor-pointer transition-all snap-start relative flex flex-col"
-                         :class="selectedTemplateId === templ.id ? 'ring-2 ring-blue-600 shadow-md transform -translate-y-1' : 'border border-gray-200 hover:border-gray-300 hover:shadow-sm bg-white'">
-                        
-                        <!-- Miniature Preview Mockup inside Card -->
-                        <div class="h-[200px] rounded-t-xl bg-gray-50 p-4 w-full flex flex-col gap-2 border-b border-gray-100 relative overflow-hidden group">
-                            
-                            <!-- Delete Button -->
-                            <button v-if="templ.id !== 'T-001'" @click.stop="confirmDeleteTemplate(templ)" class="absolute top-2 right-2 p-1.5 bg-white shadow-sm border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 rounded-full opacity-0 group-hover:opacity-100 transition-all z-10" title="テンプレートを削除">
-                                <X class="w-4 h-4" />
-                            </button>
-
-                            <div class="w-16 h-3 bg-gray-300 rounded mb-4" :class="templ.id === 'T-001' ? 'bg-blue-500' : templ.id === 'T-002' ? 'bg-gray-800' : 'bg-slate-600'"></div>
-                            <div class="w-full h-1.5 bg-gray-200 rounded"></div>
-                            <div class="w-3/4 h-1.5 bg-gray-200 rounded"></div>
-                            <div class="flex justify-end mt-4"><div class="w-20 h-10 bg-gray-200 rounded flex flex-col gap-1 items-end pt-1 pr-1"><div class="w-8 h-1 bg-gray-300 rounded"></div><div class="w-12 h-1 bg-gray-300 rounded"></div><div class="w-12 h-1 bg-blue-300 rounded"></div></div></div>
-                            <div class="w-full h-8 bg-gray-100 border border-gray-200 rounded mt-4"></div>
-                            
-                            <!-- Selection Overlay styling -->
-                            <div v-if="selectedTemplateId === templ.id" class="absolute inset-0 border-4 border-blue-600/10 rounded-t-xl pointer-events-none"></div>
-                        </div>
-
-                        <!-- Card Info -->
-                        <div class="p-3 bg-white rounded-b-xl flex-1 flex flex-col justify-between">
-                            <div class="flex items-center justify-between mb-1">
-                                <span class="font-bold text-sm text-gray-900">{{ templ.name }}</span>
-                                <CheckCircle v-if="selectedTemplateId === templ.id" class="w-4 h-4 text-blue-600" />
-                            </div>
-                            <p class="text-[10px] text-gray-500 leading-tight">{{ templ.description }}</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- INVOICE INFO INPUT FORM -->
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden" v-if="!isExtracting">
-                
-                <!-- Accordion style header -->
-                <div class="px-6 py-4 border-b border-gray-100 bg-slate-50 flex items-center gap-2">
-                    <FileText class="w-5 h-5 text-blue-600" />
-                    <h2 class="font-bold text-gray-900 text-lg">請求書情報入力</h2>
-                </div>
-
-                <div class="p-8 space-y-8">
-                    
-                    <!-- Row 1: Key Dates & IDs -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div>
-                            <label class="block text-xs font-bold text-gray-700 mb-2">請求書番号</label>
-                            <input v-model="invoiceNumber" type="text" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-blue-500 focus:border-blue-500 font-mono" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-gray-700 mb-2">発行日</label>
-                            <input v-model="issueDate" type="date" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-blue-500 focus:border-blue-500" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-gray-700 mb-2">支払期日</label>
-                            <input v-model="dueDate" type="date" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-blue-500 focus:border-blue-500" />
-                        </div>
-                    </div>
-
-                    <!-- Row 2: Client & Sender Info Layout -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4">
-                        <!-- Client Info Section -->
-                        <div>
-                            <label class="block text-xs font-bold text-gray-700 mb-2">請求先情報</label>
-                            
-                            <div class="border border-gray-200 rounded-lg bg-gray-50 flex flex-col group hover:border-blue-300 transition-colors relative overflow-hidden">
-                                <!-- Internal Content -->
-                                <div class="p-5 flex-1 relative">
-                                    <!-- Smart Dropdown Header -->
-                                    <div class="mb-3 relative">
-                                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <Building2 class="h-4 w-4 text-gray-400" />
-                                        </div>
-                                        <select 
-                                            v-model="activeClientId" 
-                                            @change="handleClientSelection"
-                                            class="block w-full pl-10 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-white shadow-sm"
-                                        >
-                                            <option value="">取引先を選択してください</option>
-                                            <option v-for="client in availableClients" :key="client.id" :value="client.id">
-                                                {{ client.name }}
-                                            </option>
-                                        </select>
-                                    </div>
-
-                                    <textarea 
-                                        v-model="templateVariables[0].value" 
-                                        class="w-full h-24 bg-transparent border-0 resize-none focus:ring-0 p-0 text-sm leading-relaxed" 
-                                        placeholder="株式会社クライアント 御中\n担当：佐藤 健太 様\n東京都港区六本木...\n03-0000-0000"
-                                    ></textarea>
-                                </div>
-
-                                <!-- Bottom Action Bar -->
-                                <div class="bg-white border-t border-gray-200 px-4 py-2 flex justify-center shrink-0 transition-colors">
-                                    <button @click="isModalOpen = true" class="text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors flex items-center justify-center gap-1 py-1 px-2 hover:bg-blue-50 rounded w-full">
-                                        <Plus class="w-3.5 h-3.5" /> 新規取引先を追加
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Sender Info Section -->
-                        <div>
-                            <label class="block text-xs font-bold text-gray-700 mb-2">請求元情報</label>
-                            
-                            <div class="border border-gray-200 rounded-lg bg-gray-50 flex flex-col relative group overflow-hidden">
-                                <div class="p-5 flex-1 relative">
-                                    <!-- Multi-Sender Switcher -->
-                                    <div class="mb-3">
-                                        <select 
-                                            v-model="activeSenderProfile" 
-                                            class="block w-full py-1.5 pl-3 pr-10 text-sm border-gray-300 focus:outline-none focus:ring-amber-500 focus:border-amber-500 rounded-md bg-white shadow-sm text-gray-700 font-medium"
-                                        >
-                                            <option v-for="profile in senderProfiles" :key="profile.id" :value="profile.id">
-                                                自社プロファイル: {{ profile.name }}
-                                            </option>
-                                        </select>
-                                    </div>
-
-                                    <textarea 
-                                        :value="senderInfo"
-                                        class="w-full h-24 bg-transparent border-0 resize-none focus:ring-0 p-0 text-gray-600 text-sm leading-relaxed outline-none" 
-                                        readonly
-                                    ></textarea>
-                                </div>
-
-                                <!-- Bottom Action Bar (Optional, for consistency or editing profiles in the future) -->
-                                <div class="bg-white border-t border-gray-200 px-4 py-2 flex justify-center shrink-0">
-                                    <router-link to="/dashboard/corporate/settings/company" class="text-xs font-bold text-gray-500 hover:text-gray-700 transition-colors flex items-center justify-center gap-1 py-1 px-2 hover:bg-gray-50 rounded w-full">
-                                        自社マスター設定を開く
-                                    </router-link>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                </div>
-            </div>
-            
-            <!-- Items Data Table (Standard functionality kept alongside dynamic template) -->
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden" v-if="!isExtracting">
-                <div class="px-6 py-4 border-b border-gray-100 bg-slate-50 flex items-center gap-2">
-                    <h3 class="font-bold text-gray-900 text-lg">品目リスト</h3>
-                </div>
-                <div class="p-0">
-                    <div class="mb-4 grid grid-cols-12 gap-4 px-6 border-b border-gray-200 pb-3">
-                        <div class="col-span-5 text-xs font-bold text-gray-500 uppercase tracking-wider">品目名</div>
-                        <div class="col-span-2 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">数量</div>
-                        <div class="col-span-2 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">単価</div>
-                        <div class="col-span-1 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">税率</div>
-                        <div class="col-span-2 text-xs font-bold text-gray-500 uppercase tracking-wider text-right pr-4">金額</div>
-                    </div>
-                    
-                    <div class="space-y-0 text-sm bg-white border-b border-gray-200">
-                        <div v-for="item in items" :key="item.id" class="grid grid-cols-12 gap-4 items-center group py-4 px-6 border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
-                            <div class="col-span-5">
-                                <input v-model="item.description" type="text" placeholder="例: Webサイト制作・デザイン費用" class="w-full bg-transparent border-0 p-0 text-sm font-medium text-gray-900 focus:ring-0 placeholder-gray-300">
-                            </div>
-                            <div class="col-span-2">
-                                <input v-model="item.quantity" type="number" min="1" class="w-full bg-transparent border-0 p-0 text-sm text-right focus:ring-0">
-                            </div>
-                            <div class="col-span-2">
-                                <input v-model="item.unitPrice" type="number" class="w-full bg-transparent border-0 p-0 text-sm text-right font-medium focus:ring-0">
-                            </div>
-                            <div class="col-span-1">
-                                <select v-model="item.taxRate" class="w-full bg-transparent border-0 p-0 text-sm text-right focus:ring-0 appearance-none bg-no-repeat bg-right pr-4" style="background-image: url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3E%3Cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'m6 8 4 4 4-4\'/%3E%3Csvg%3E'); background-size: 1.5em 1.5em;">
-                                    <option :value="0.10">10%</option>
-                                    <option :value="0.08">8%</option>
-                                    <option :value="0">0%</option>
-                                </select>
-                            </div>
-                            <div class="col-span-2 flex items-center justify-end gap-3 font-bold text-gray-900">
-                                ¥{{ formatCurrency(item.quantity * item.unitPrice) }}
-                                <button @click="removeItem(item.id)" class="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 p-1" title="行を削除">
-                                    <Trash2 class="w-4 h-4" />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <button @click="addItem" class="mt-4 text-blue-600 hover:text-blue-700 font-bold text-sm flex items-center transition-colors px-6">
-                        <Plus class="w-4 h-4 mr-1" /> 行を追加
-                    </button>
-
-                    <!-- Alert for more than 5 items -->
-                    <div v-if="items.length > 5" class="mx-6 mt-4 mb-2 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3 text-blue-800">
-                        <AlertCircle class="w-5 h-5 shrink-0 text-blue-600 mt-0.5" />
-                        <div class="text-sm">
-                            <p class="font-bold">品目数が5行を超えています</p>
-                            <p class="text-blue-700 mt-0.5">自動的に「内訳明細書（別紙）」が作成され、請求書本紙には「合計金額および一式」の合算のみが記載されます。</p>
-                        </div>
-                    </div>
-
-                    <!-- Totals -->
-                    <div class="px-6 py-4 bg-slate-50 border-t border-gray-200 mt-4 flex justify-end">
-                        <div class="w-72 space-y-2 text-sm">
-                            <div class="flex justify-between text-gray-600">
-                                <span>小計</span>
-                                <span>¥{{ formatCurrency(subtotal) }}</span>
-                            </div>
-                            <div class="flex justify-between text-gray-600">
-                                <span>消費税</span>
-                                <span>¥{{ formatCurrency(taxAmount) }}</span>
-                            </div>
-                            <div class="flex justify-between font-bold text-gray-900 border-t border-gray-200 pt-3 mt-3 text-lg">
-                                <span>合計金額</span>
-                                <span>¥{{ formatCurrency(totalAmount) }}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Notes -->
-                <div class="p-8 border-t border-gray-100 bg-white">
-                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">備考・メモ</label>
-                    <textarea v-model="note" rows="3" placeholder="振込先情報等は設定から自動挿入されます。特記事項があれば入力してください。" class="w-full border border-gray-200 rounded-lg p-3 text-sm focus:ring-blue-500 focus:border-blue-500 bg-gray-50/50 resize-none"></textarea>
-                </div>
-            </div>
-        </div>
-
-        <!-- Right Side: Preview & Totals -->
-        <div class="col-span-12 xl:col-span-4 space-y-6">
-            
-            <!-- Realtime Preview -->
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden sticky top-24" v-if="selectedTemplateId && !isExtracting">
-                <div class="bg-slate-800 px-6 py-4 flex items-center justify-between border-b" :class="invoiceType === 'recurring' ? 'border-b-purple-500' : 'border-b-blue-500'">
-                     <h3 class="text-white font-bold text-sm tracking-wider flex items-center gap-2"><FileImage class="w-4 h-4 text-slate-300" /> プレビュー</h3>
-                     
-                     <div class="flex bg-slate-700 rounded p-0.5">
-                        <button @click="showCodeEditor = false" class="px-3 py-1 text-xs font-bold rounded transition-colors" :class="!showCodeEditor ? 'bg-slate-500 text-white' : 'text-slate-300 hover:text-white'">Visual</button>
-                        <button @click="showCodeEditor = true" class="px-3 py-1 text-xs font-bold rounded transition-colors" :class="showCodeEditor ? 'bg-slate-500 text-white' : 'text-slate-300 hover:text-white'">Code</button>
-                     </div>
-                </div>
-                
-                <div class="relative min-h-[400px]">
-                    <!-- Placeholder when no template is uploaded -->
-                    <div v-if="!isTemplateUploaded && !isExtracting" class="absolute inset-0 flex items-center justify-center bg-slate-50 border-t border-slate-200 p-8 text-center text-sm text-gray-400">
-                        左側のパネルで既存の請求書ファイル（PDF/Excel等）をアップロードすると、AIが解析した結果のプレビューがここに表示されます。
-                    </div>
-                    
-                    <!-- Loading state -->
-                    <div v-if="isExtracting" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-800 border-t border-slate-700 p-8 text-center text-sm text-blue-400">
-                        <Loader2 class="w-10 h-10 animate-spin mb-4 text-blue-500" />
-                        <p class="font-bold tracking-widest uppercase mb-1">Generating Template</p>
-                        <p class="text-xs text-blue-400/60 font-mono">Compiling HTML structures from visual layout...</p>
-                    </div>
-
-                    <!-- Code Editor Mode -->
-                    <div v-else-if="showCodeEditor" class="absolute inset-0 bg-[#1e1e1e] p-4 overflow-y-auto">
-                        <textarea v-model="templateHtml" class="w-full h-full min-h-[400px] bg-transparent text-gray-300 font-mono text-xs focus:outline-none resize-none" spellcheck="false"></textarea>
-                    </div>
-
-                    <!-- Visual HTML Render Mode -->
-                    <div v-else class="absolute inset-0 bg-white p-4 overflow-y-auto shadow-inner border border-gray-200 m-4 rounded scale-[0.6] origin-top-left w-[166%] h-[166%]" v-html="templateHtml.replace(/\{\{\s*client_name\s*\}\}/g, templateVariables[0].value.split('\n')[0]).replace(/\{\{\s*issue_date\s*\}\}/g, issueDate).replace(/\{\{\s*due_date\s*\}\}/g, dueDate).replace(/\{\{\s*total_amount\s*\}\}/g, formatCurrency(totalAmount))">
-                    </div>
-                </div>
-
-                <div class="p-6 space-y-4 bg-gray-50 border-t border-gray-200">
-                    <p class="text-[11px] text-gray-500 text-center leading-relaxed">
-                        ※ Code（コード）ビューで直接HTMLを修正し、Visual（プレビュー）ビューで即座に確認できます。<br>
-                    </p>
-                </div>
-            </div>
-        </div>
+      <div v-if="showSuccessPopup" class="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+          <div class="bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden w-full max-w-sm relative z-10 p-8 text-center animate-in fade-in zoom-in-95 duration-200">
+              <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4"><CheckCircle class="w-10 h-10 text-green-600" /></div>
+              <h3 class="text-xl font-bold text-gray-900 mb-2">{{ isApprovalRequired ? '申請完了' : '送信完了' }}</h3>
+              <p class="text-sm text-gray-500 mb-6 font-medium">{{ isApprovalRequired ? '請求書の発行承認を申請しました。' : '請求書を発行し、メールで送信しました。' }}</p>
+              <button @click="handleSuccessConfirm" class="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-colors">確認しました</button>
+          </div>
       </div>
+
+      <div v-if="showDraftSuccessPopup" class="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+          <div class="bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden w-full max-w-sm relative z-10 p-8 text-center animate-in fade-in zoom-in-95 duration-200">
+              <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4"><Save class="w-10 h-10 text-blue-600" /></div>
+              <h3 class="text-xl font-bold text-gray-900 mb-2">下書き保存完了</h3>
+              <p class="text-sm text-gray-500 mb-6 font-medium">請求書を下書きとして保存しました。</p>
+              <button @click="handleDraftSuccessConfirm" class="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-colors">確認しました</button>
+          </div>
+      </div>
+
     </div>
-  </div>
-  
-  <ClientFormModal 
-      :show="isModalOpen" 
-      @close="isModalOpen = false"
-      @save="handleClientSave"
-  />
-
-  <TemplateEditorModal
-      :show="isTemplateEditorOpen"
-      :initial-name="latestExtractedName"
-      :initial-html="latestExtractedHtml"
-      @close="isTemplateEditorOpen = false"
-      @save="handleTemplateSave"
-  />
-
-  <!-- Template Deletion Confirmation Modal -->
-  <div v-if="templateToDelete" class="fixed inset-0 z-[110] flex items-center justify-center p-4">
-      <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" @click="templateToDelete = null"></div>
-      <div class="bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden w-full max-w-sm relative z-10 p-6 text-center animate-in fade-in zoom-in-95 duration-200">
-          <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertCircle class="w-6 h-6 text-red-600" />
-          </div>
-          <h3 class="text-lg font-bold text-gray-900 mb-2">テンプレートの削除</h3>
-          <p class="text-sm text-gray-500 mb-6 font-medium">
-              「{{ templateToDelete.name }}」を本当に削除しますか？<br>この操作は取り消せません。
-          </p>
-          <div class="flex items-center gap-3">
-              <button @click="templateToDelete = null" class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 rounded-lg text-sm font-bold transition-colors">
-                  キャンセル
-              </button>
-              <button @click="executeDeleteTemplate" class="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold transition-colors shadow-sm shadow-red-600/20 flex justify-center items-center gap-2">
-                  <Trash2 class="w-4 h-4" /> 削除する
-              </button>
-          </div>
-      </div>
-  </div>
-
+  </Transition>
 </template>
-```
+
+<style scoped>
+.fade-page-enter-active {
+  transition: opacity 0.6s ease-out;
+}
+.fade-page-enter-from {
+  opacity: 0;
+}
+</style>

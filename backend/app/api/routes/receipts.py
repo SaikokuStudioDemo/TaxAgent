@@ -8,50 +8,15 @@ from app.api.helpers import resolve_corporate_id
 from app.db.mongodb import get_database
 from app.models.transaction import ReceiptCreate
 import logging
+from app.services.rule_evaluation_service import evaluate_approval_rules
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
 
 def _serialize(doc: dict) -> dict:
     """Convert ObjectId fields to strings for JSON responses."""
     doc["id"] = str(doc.pop("_id"))
     return doc
-
-
-async def _find_matching_rule(db, corporate_id: str, receipt_amount: int) -> Optional[str]:
-    """
-    Evaluate approval rules for 'receipt' and return the first matching rule_id.
-    Rules are sorted by most specific (highest amount threshold) first.
-    """
-    cursor = db["approval_rules"].find({
-        "corporate_id": corporate_id,
-        "active": True,
-        "applies_to": "receipt",
-    })
-    rules = await cursor.to_list(length=100)
-
-    for rule in rules:
-        conditions = rule.get("conditions", [])
-        matched = True
-        for cond in conditions:
-            field = cond.get("field")
-            op = cond.get("operator")
-            val = cond.get("value")
-            if field == "amount":
-                if op == ">=" and not (receipt_amount >= val):
-                    matched = False
-                elif op == ">" and not (receipt_amount > val):
-                    matched = False
-                elif op == "<=" and not (receipt_amount <= val):
-                    matched = False
-                elif op == "<" and not (receipt_amount < val):
-                    matched = False
-                elif op == "==" and not (receipt_amount == val):
-                    matched = False
-        if matched:
-            return str(rule["_id"])
-    return None
 
 
 # ─────────────── Batch Submit (existing feature, kept for backwards compat) ───────────────
@@ -80,7 +45,7 @@ async def submit_receipts_batch(
     for r in receipts_data:
         amount = r.get("amount", 0)
         fiscal_period = r.get("date", datetime.utcnow().strftime("%Y-%m"))[:7]
-        rule_id = await _find_matching_rule(db, corporate_id, amount)
+        rule_id, _ = await evaluate_approval_rules(corporate_id, "receipt", r)
         doc = {
             "corporate_id": corporate_id,
             "submitted_by": user_id,
@@ -121,7 +86,7 @@ async def create_receipt(
     corporate_id, user_id = await resolve_corporate_id(firebase_uid)
     db = get_database()
 
-    rule_id = await _find_matching_rule(db, corporate_id, payload.amount)
+    rule_id, _ = await evaluate_approval_rules(corporate_id, "receipt", payload.model_dump())
     fiscal_period = payload.date[:7] if payload.date else datetime.utcnow().strftime("%Y-%m")
 
     doc = {
