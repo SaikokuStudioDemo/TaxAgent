@@ -11,6 +11,8 @@ import { api } from '@/lib/api';
 const router = useRouter();
 const route = useRoute();
 const editingInvoiceId = ref<string | null>((route.query.id as string) || null);
+const previewIframe = ref<HTMLIFrameElement | null>(null);
+const isIframeReady = ref(false);
 
 // --- UI STATE ---
 const isModalOpen = ref(false);
@@ -435,8 +437,64 @@ const openTemplateEditor = (templ: InvoiceTemplate) => {
     isTemplateEditorOpen.value = true;
 };
 
-onMounted(() => {});
+// Sync Preview HTML to Iframe
+const updateIframeContent = () => {
+    if (!previewIframe.value) return;
+    const doc = previewIframe.value.contentDocument || previewIframe.value.contentWindow?.document;
+    if (!doc) return;
 
+    doc.open();
+    doc.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body { margin: 0; padding: 0; overflow: visible; background: white; width: 100%; }
+                /* Ensure images and tables don't overflow */
+                img, table { max-width: 100%; height: auto; }
+            </style>
+        </head>
+        <body>
+            <div id="invoice-root">${renderedPreviewHtml.value}</div>
+            <scr' + 'ipt>
+                function sendHeight() {
+                    const el = document.getElementById("invoice-root");
+                    const height = Math.max(el.offsetHeight, el.scrollHeight, document.documentElement.scrollHeight);
+                    window.parent.postMessage({ type: "resize-iframe", height: height }, "*");
+                }
+                window.onload = sendHeight;
+                window.onresize = sendHeight;
+                new MutationObserver(sendHeight).observe(document.body, { attributes: true, childList: true, subtree: true });
+            </scr' + 'ipt>
+        </body>
+        </html>
+    `);
+    doc.close();
+};
+
+const handleIframeMessage = (event: MessageEvent) => {
+    if (event.data.type === 'resize-iframe' && previewIframe.value) {
+        previewIframe.value.style.height = (event.data.height + 40) + 'px';
+    }
+};
+
+onMounted(() => {
+    window.addEventListener('message', handleIframeMessage);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('message', handleIframeMessage);
+});
+
+watch(renderedPreviewHtml, () => {
+    updateIframeContent();
+}, { immediate: true });
+
+const onIframeLoad = () => {
+    isIframeReady.value = true;
+    updateIframeContent();
+};
 
 const applyTemplate = async (e: Event) => {
     const target = e.target as HTMLInputElement;
@@ -856,9 +914,16 @@ function handleClientSelection() {
                           リアルタイム同期中
                       </div>
                   </div>
-                  <div class="bg-white rounded-2xl shadow-xl border border-gray-200">
-                      <div class="bg-gray-100/50 p-12">
-                          <div class="bg-white shadow-2xl mx-auto w-full max-w-[800px]" v-html="renderedPreviewHtml"></div>
+                  <div class="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden min-h-[800px] flex flex-col">
+                      <div class="flex-1 overflow-auto bg-gray-100/50 p-12">
+                          <div class="bg-white shadow-2xl mx-auto w-full max-w-[800px] overflow-hidden transform transition-transform duration-500 relative">
+                              <iframe 
+                                  ref="previewIframe"
+                                  @load="onIframeLoad"
+                                  class="w-full border-none transition-all duration-300"
+                                  scrolling="no"
+                              ></iframe>
+                          </div>
                       </div>
                   </div>
               </div>
