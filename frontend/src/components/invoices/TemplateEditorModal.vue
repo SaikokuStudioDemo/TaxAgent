@@ -23,7 +23,7 @@ watch(() => props.show, (newVal) => {
         templateName.value = props.initialName.replace(/\.[^/.]+$/, ""); // Strip extension
         if (!templateName.value) templateName.value = '新規抽出テンプレート';
         templateHtml.value = props.initialHtml || '<div></div>';
-        activeTab.value = 'visual';
+        activeTab.value = 'code';
     }
 });
 

@@ -461,19 +461,19 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
       <!-- Data Table -->
       <div class="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
         <div class="overflow-x-auto">
-          <table class="min-w-full divide-y divide-gray-200 table-fixed">
+          <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50/80">
               <tr>
-                <th scope="col" class="w-12 px-6 py-4 text-center">
+                <th scope="col" class="w-12 px-4 py-4 text-center">
                     <input type="checkbox" :checked="isAllSelected" @change="toggleSelectAll" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
                 </th>
-                <th scope="col" class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-40">請求書番号 / 発行日</th>
-                <th scope="col" class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-64">取引先</th>
-                <th scope="col" class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">件名 / プロジェクト</th>
-                <th scope="col" class="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider w-36">金額 (税込)</th>
-                <th scope="col" class="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-40">全体ステータス</th>
-                <th v-if="activeTab === 'received'" scope="col" class="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-36">承認状況</th>
-                <th scope="col" class="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-32">操作</th>
+                <th scope="col" class="px-4 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider min-w-[120px]">発行日 / 番号</th>
+                <th scope="col" class="px-4 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider min-w-[150px]">取引先</th>
+                <th scope="col" class="hidden lg:table-cell px-4 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">件名 / プロジェクト</th>
+                <th scope="col" class="px-4 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider min-w-[120px]">金額 (税込)</th>
+                <th scope="col" class="px-4 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider min-w-[140px]">ステータス</th>
+                <th v-if="activeTab === 'received'" scope="col" class="hidden md:table-cell px-4 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider min-w-[100px]">承認状況</th>
+                <th scope="col" class="px-4 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-24 sticky right-0 bg-gray-50/90 backdrop-blur shadow-[-4px_0_10px_-4px_rgba(0,0,0,0.1)]">操作</th>
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
@@ -482,64 +482,62 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
                 class="hover:bg-blue-50/30 transition-colors group cursor-pointer"
                 @click="toggleExpansion(invoice.id)"
               >
-                <td class="px-6 py-4 whitespace-nowrap text-center" @click.stop>
+                <td class="px-4 py-4 text-center" @click.stop>
                     <input type="checkbox" :value="invoice.id" v-model="selectedInvoiceIds" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="font-bold text-gray-900 text-sm mb-1">{{ invoice.id }}</div>
-                    <div class="text-xs text-gray-500 flex items-center gap-1">
+                <td class="px-4 py-4 whitespace-nowrap">
+                    <div class="text-xs text-gray-500 flex items-center gap-1 mb-1">
                         <Calendar class="w-3 h-3" /> {{ invoice.issueDate }}
                     </div>
+                    <div class="font-bold text-gray-900 text-sm">{{ invoice.id }}</div>
                 </td>
-                <td class="px-6 py-4">
+                <td class="px-4 py-4">
                     <div class="flex items-center gap-2 mb-1">
-                        <component :is="invoice.clientType === 'student' ? UserCircle2 : Building2" class="w-4 h-4" :class="invoice.clientType === 'student' ? 'text-emerald-500' : 'text-blue-500'" />
-                        <span class="font-bold text-gray-900 text-sm truncate" :title="invoice.clientName">{{ invoice.clientName }}</span>
+                        <component :is="invoice.clientType === 'student' ? UserCircle2 : Building2" class="w-4 h-4 shrink-0" :class="invoice.clientType === 'student' ? 'text-emerald-500' : 'text-blue-500'" />
+                        <span class="font-bold text-gray-900 text-sm truncate max-w-[120px] md:max-w-none" :title="invoice.clientName">{{ invoice.clientName }}</span>
                     </div>
-                    <div class="text-xs text-gray-500 truncate" :title="invoice.clientId">ID: {{ invoice.clientId }}</div>
+                    <div class="text-[10px] text-gray-400 truncate" :title="invoice.clientId">{{ invoice.clientId }}</div>
                 </td>
-                <td class="px-6 py-4">
-                    <div class="font-bold text-gray-900 text-sm mb-1">{{ invoice.title }}</div>
+                <td class="hidden lg:table-cell px-4 py-4">
+                    <div class="font-bold text-gray-900 text-sm mb-1 truncate max-w-[150px]">{{ invoice.title }}</div>
                     <div class="flex items-center gap-2">
                         <span v-if="invoice.type === 'recurring'" class="bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded text-[10px] font-bold inline-flex items-center">
-                            自動生成 ({{ invoice.recurringDetails }})
+                            自動
                         </span>
-                        <span v-if="invoice.projectName" class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-medium border border-gray-200">
+                        <span v-if="invoice.projectName" class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-medium border border-gray-200 truncate max-w-[80px]">
                             {{ invoice.projectName }}
                         </span>
                     </div>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-right">
+                <td class="px-4 py-4 whitespace-nowrap text-right">
                     <div class="font-black text-gray-900">¥{{ formatCurrency(invoice.amount) }}</div>
-                    <div class="text-[11px] text-gray-500 mt-0.5">期日: {{ invoice.dueDate }}</div>
+                    <div class="text-[10px] text-gray-500 mt-0.5">期日: {{ invoice.dueDate }}</div>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-center">
-                    <span class="inline-flex items-center px-2.5 py-1.5 rounded-md text-xs font-bold border" :class="getStatusBadge(invoice.displayStatus).classes">
-                        <component :is="getStatusBadge(invoice.displayStatus).icon" class="w-3.5 h-3.5 mr-1.5" />
+                <td class="px-4 py-4 whitespace-nowrap text-center">
+                    <span class="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold border shrink-0" :class="getStatusBadge(invoice.displayStatus).classes">
                         {{ getStatusBadge(invoice.displayStatus).label }}
                     </span>
                 </td>
-                <!-- Approval status column (received tab only) -->
-                <td v-if="activeTab === 'received'" class="px-6 py-4 whitespace-nowrap text-center">
-                    <span class="inline-flex items-center px-2.5 py-1.5 rounded-md text-xs font-bold border" :class="getReviewBadge(invoice.reviewStatus).classes">
+                <td v-if="activeTab === 'received'" class="hidden md:table-cell px-4 py-4 whitespace-nowrap text-center">
+                    <span class="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold border" :class="getReviewBadge(invoice.reviewStatus).classes">
                         {{ getReviewBadge(invoice.reviewStatus).label }}
                     </span>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-center">
-                    <div class="flex items-center justify-center gap-2">
+                <td class="px-4 py-4 whitespace-nowrap text-center sticky right-0 bg-white/90 group-hover:bg-blue-50/90 transition-colors backdrop-blur shadow-[-4px_0_10px_-4px_rgba(0,0,0,0.1)]">
+                    <div class="flex items-center justify-center gap-1.5">
                         <button 
                           @click.stop="openPreview(invoice)"
-                          class="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors inline-flex items-center justify-center" 
-                          title="詳細を見る"
+                          class="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors inline-flex items-center justify-center" 
+                          title="詳細"
                         >
-                             <FileText class="w-5 h-5" />
+                             <FileText class="w-4 h-4" />
                         </button>
                         <button 
                           @click.stop="handleDeleteSingle(invoice.id)"
-                          class="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors inline-flex items-center justify-center" 
+                          class="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors inline-flex items-center justify-center" 
                           title="削除"
                         >
-                            <Trash2 class="w-5 h-5" />
+                            <Trash2 class="w-4 h-4" />
                         </button>
                     </div>
                 </td>

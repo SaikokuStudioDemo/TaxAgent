@@ -61,6 +61,39 @@ async def list_templates(
     docs = await cursor.to_list(length=100)
     return [_serialize(doc) for doc in docs]
 
+@router.patch("/{template_id}", response_model=TemplateResponse, summary="テンプレートを更新する")
+async def update_template(
+    template_id: str,
+    payload: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    firebase_uid = current_user.get("uid")
+    corporate_id, _ = await resolve_corporate_id(firebase_uid)
+    db = get_database()
+
+    try:
+        oid = ObjectId(template_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid template ID")
+
+    allowed_updates = {"name", "description", "html", "is_active", "thumbnail"}
+    update_data = {k: v for k, v in payload.items() if k in allowed_updates}
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid update fields provided")
+
+    result = await db["templates"].update_one(
+        {"_id": oid, "corporate_id": corporate_id},
+        {"$set": update_data}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    updated = await db["templates"].find_one({"_id": oid})
+    return _serialize(updated)
+
+
 @router.delete("/{template_id}", summary="テンプレートを削除する")
 async def delete_template(
     template_id: str,

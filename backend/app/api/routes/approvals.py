@@ -201,13 +201,23 @@ async def record_approval_action(
         extra_steps = doc.get("extra_approval_steps", []) if doc else []
         total_steps += len(extra_steps)
 
+        # Optimistic locking query to ensure current_step hasn't changed
+        db_query = {"_id": doc_oid}
+        if doc and "current_step" in doc:
+            db_query["current_step"] = current_step
+        else:
+            db_query["current_step"] = {"$exists": False}
+
         # Logic check: Are there more steps?
         if next_step <= total_steps:
             # Not finished yet -> increment current_step and notify next
-            await db[collection].update_one(
-                {"_id": doc_oid},
+            update_result = await db[collection].update_one(
+                db_query,
                 {"$set": {"current_step": next_step}},
             )
+            if update_result.matched_count == 0:
+                raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
+
             # Notify the next approver
             if rule_id:
                 await notify_next_approver(
@@ -221,10 +231,13 @@ async def record_approval_action(
         else:
             # All steps completed -> mark as approved
             all_approved = True
-            await db[collection].update_one(
-                {"_id": doc_oid},
+            update_result = await db[collection].update_one(
+                db_query,
                 {"$set": {"review_status": "approved", "status": "approved"}},
             )
+            if update_result.matched_count == 0:
+                raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
+                
             # Notify the submitter that it's fully approved
             if submitter_id:
                 await notify_submitter(
@@ -238,10 +251,19 @@ async def record_approval_action(
 
 
     elif payload.action in ("rejected", "returned"):
-        await db[collection].update_one(
-            {"_id": doc_oid},
+        db_query = {"_id": doc_oid}
+        if doc and "current_step" in doc:
+            db_query["current_step"] = current_step
+        else:
+            db_query["current_step"] = {"$exists": False}
+
+        update_result = await db[collection].update_one(
+            db_query,
             {"$set": {"review_status": "rejected"}},
         )
+        if update_result.matched_count == 0:
+            raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
+
         # Notify the submitter that it was rejected
         if submitter_id:
             await notify_submitter(

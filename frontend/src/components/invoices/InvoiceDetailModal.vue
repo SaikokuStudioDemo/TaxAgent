@@ -100,7 +100,7 @@ const handleAddApprover = () => {
 const handleApprove = async () => {
   if (!props.invoice) return;
   
-  const extSteps: AddedStep[] = props.invoice.approvalHistory
+  const extSteps: AddedStep[] = (props.invoice.approvalHistory || [])
     .filter(h => h.id.startsWith('h_ext_'))
     .map(h => ({
       roleId: h.roleId,

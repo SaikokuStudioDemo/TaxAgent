@@ -96,7 +96,11 @@ const mapApiInvoice = (inv: any): InvoiceItem => {
 };
 
 const loadData = async () => {
-    await fetchInvoices({ direction: activeDirection.value });
+    const requestedDirection = activeDirection.value;
+    await fetchInvoices({ direction: requestedDirection });
+    // Prevent race condition if user rapid-clicked tabs
+    if (activeDirection.value !== requestedDirection) return; 
+    
     mockInvoices.value = (apiInvoices.value as any[]).map(mapApiInvoice);
 };
 
@@ -154,37 +158,41 @@ const handleActionCompleted = async () => {
 <template>
   <div class="space-y-6">
     <!-- Header Area -->
-    <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
-      <div>
-        <h1 class="text-2xl font-bold tracking-tight text-gray-900 border-b-2 border-primary pb-2 inline-block">請求書承認状況</h1>
-        <p class="text-muted-foreground mt-2 text-sm text-gray-500">
-          {{ activeDirection === 'received' ? '仕入先から届いた請求書の支払内容を確認し、承認・差戻しを行います。' : '発行を予定している請求書の内容を確認し、承認・差戻しを行います。' }}
-        </p>
+    <header class="bg-white border-b border-gray-200 px-8 py-6 -mx-6 -mt-6">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900 tracking-tight">請求書承認状況</h1>
+          <p class="text-sm text-gray-500 mt-1">
+            {{ activeDirection === 'received' ? '仕入先から届いた請求書の支払内容を確認し、承認を行います' : '発行を予定している請求書の内容を確認し、承認を行います' }}
+          </p>
+        </div>
       </div>
+    </header>
 
-      <!-- Direction Toggle -->
-      <div class="inline-flex p-1 bg-gray-100 rounded-xl shadow-inner border border-gray-200">
-          <button 
-            @click="activeDirection = 'received'"
-            class="px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2"
-            :class="activeDirection === 'received' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
-          >
-            <Clock class="w-4 h-4" v-if="activeDirection === 'received'" />
-            受領請求書
-          </button>
-          <button 
-            @click="activeDirection = 'issued'"
-            class="px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center gap-2"
-            :class="activeDirection === 'issued' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
-          >
-            <CheckCircle class="w-4 h-4" v-if="activeDirection === 'issued'" />
-            発行請求書
-          </button>
-      </div>
+    <div class="mt-6"></div>
+
+    <!-- Direction Toggle (Full Width) -->
+    <div class="flex bg-gray-200/50 p-1.5 rounded-xl mb-6 shadow-inner border border-gray-200/50">
+        <button 
+          @click="activeDirection = 'received'"
+          class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
+          :class="activeDirection === 'received' ? 'bg-white text-blue-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
+        >
+          <Clock class="w-4 h-4" />
+          受領請求書
+        </button>
+        <button 
+          @click="activeDirection = 'issued'"
+          class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
+          :class="activeDirection === 'issued' ? 'bg-white text-blue-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
+        >
+          <CheckCircle class="w-4 h-4" />
+          発行請求書
+        </button>
     </div>
 
     <!-- Quick Metrics -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex items-center justify-between hover:shadow-md transition-shadow cursor-pointer" @click="activeTab = 'pending'">
             <div>
                 <p class="text-sm font-medium text-gray-500 mb-1">あなたの承認待ち</p>
@@ -223,56 +231,52 @@ const handleActionCompleted = async () => {
         </div>
     </div>
 
-    <!-- Tab Navigation & Filters -->
-    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div class="border-b border-gray-200 px-4 pt-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <nav class="flex space-x-6 overflow-x-auto no-scrollbar" aria-label="Tabs">
-                <button
-                    @click="activeTab = 'pending'"
-                    class="pb-3 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap"
-                    :class="activeTab === 'pending' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                >
-                    あなたの承認待ち
-                    <span v-if="pendingInvoices.length" class="ml-2 bg-blue-100 text-blue-700 py-0.5 px-2 rounded-full text-xs">{{ pendingInvoices.length }}</span>
-                </button>
-                <button
-                    @click="activeTab = 'pending_all'"
-                    class="pb-3 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap"
-                    :class="activeTab === 'pending_all' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                    title="管理者向け: 全社の未承認一覧"
-                >
-                    全社未承認一覧
-                    <span v-if="pendingAllInvoices.length" class="ml-2 bg-purple-100 text-purple-700 py-0.5 px-2 rounded-full text-xs">{{ pendingAllInvoices.length }}</span>
-                </button>
-                <button
-                    @click="activeTab = 'approved'"
-                    class="pb-3 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap"
-                    :class="activeTab === 'approved' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                >
-                    承認済履歴
-                </button>
-                <button
-                    @click="activeTab = 'rejected'"
-                    class="pb-3 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap"
-                    :class="activeTab === 'rejected' ? 'border-rose-600 text-rose-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                >
-                    差戻し履歴
-                </button>
-            </nav>
-            <div class="flex items-center gap-2 pb-3">
-                <div class="relative w-64 md:w-80 border-l border-gray-200 pl-4 ml-4">
-                    <div class="absolute inset-y-0 left-4 pl-3 flex items-center pointer-events-none">
-                        <Search class="h-4 w-4 text-gray-400" />
-                    </div>
-                    <input type="text" placeholder="名前や金額・発行元で検索..." class="block w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-gray-50 focus:ring-blue-500 focus:border-blue-500 text-gray-900" />
-                </div>
-                <button class="p-1.5 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50" title="フィルター設定">
-                    <Filter class="h-4 w-4" />
-                </button>
-            </div>
-        </div>
+    <!-- Status Tabs (Full Width) -->
+    <div class="flex bg-gray-200/50 p-1.5 rounded-xl mb-6 shadow-inner border border-gray-200/50">
+        <button 
+          @click="activeTab = 'pending'" 
+          class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
+          :class="activeTab === 'pending' ? 'bg-white text-blue-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
+        >
+          あなたの承認待ち <span v-if="pendingInvoices.length" class="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0.5 rounded-full ml-1">{{ pendingInvoices.length }}</span>
+        </button>
+        <button 
+          @click="activeTab = 'pending_all'" 
+          class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
+          :class="activeTab === 'pending_all' ? 'bg-white text-purple-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
+        >
+          全社未承認 <span v-if="pendingAllInvoices.length" class="bg-purple-100 text-purple-700 text-[10px] px-1.5 py-0.5 rounded-full ml-1">{{ pendingAllInvoices.length }}</span>
+        </button>
+        <button 
+          @click="activeTab = 'approved'" 
+          class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
+          :class="activeTab === 'approved' ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
+        >
+          承認済履歴
+        </button>
+        <button 
+          @click="activeTab = 'rejected'" 
+          class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
+          :class="activeTab === 'rejected' ? 'bg-white text-rose-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
+        >
+          差戻し履歴
+        </button>
+    </div>
 
-        <!-- Data Table -->
+    <!-- Search & Filters -->
+    <div class="mb-6 flex flex-col md:flex-row gap-4 items-center justify-between">
+        <div class="flex items-center gap-3 w-full">
+          <div class="relative flex-1">
+            <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input type="text" placeholder="名前や金額・発行元で検索..." class="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 bg-white shadow-sm transition-all" />
+          </div>
+          <button class="bg-white border border-gray-200 text-gray-700 px-4 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm shrink-0 flex items-center gap-2 text-sm font-medium">
+            <Filter class="w-4 h-4" /> フィルター
+          </button>
+        </div>
+    </div>
+
+    <div class="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
         <div class="overflow-x-auto">
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50/80">
@@ -285,8 +289,8 @@ const handleActionCompleted = async () => {
                         </th>
                         <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">件名</th>
                         <th scope="col" class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">金額 (税込)</th>
-                        <th scope="col" class="px-6 py-3.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-40">ステータス</th>
-                        <th scope="col" class="px-6 py-3.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">詳細</th>
+                        <th scope="col" class="px-6 py-3.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-40 sticky right-20 bg-gray-50/90 backdrop-blur z-10 shadow-[-4px_0_10px_-4px_rgba(0,0,0,0.05)]">ステータス</th>
+                        <th scope="col" class="px-6 py-3.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20 sticky right-0 bg-gray-50/90 backdrop-blur z-10 shadow-[-4px_0_10px_-4px_rgba(0,0,0,0.1)]">詳細</th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200">
@@ -339,22 +343,22 @@ const handleActionCompleted = async () => {
                            <p class="text-[11px] text-gray-500 mt-0.5">{{ invoice.paymentMethod }}</p>
                         </td>
                         <!-- Status Badge -->
-                        <td class="px-6 py-4 whitespace-nowrap text-center">
-                            <span v-if="invoice.status === 'pending'" class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+                        <td class="px-6 py-4 whitespace-nowrap text-center sticky right-20 bg-white/90 group-hover:bg-blue-50/90 transition-colors backdrop-blur z-10 shadow-[-4px_0_10px_-4px_rgba(0,0,0,0.05)]">
+                            <span v-if="invoice.status === 'pending'" class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-800 border border-blue-200">
                                 <Clock class="w-3.5 h-3.5 mr-1" />
                                 承認待ち ({{ invoice.currentStepIndex + 1 }}/{{ invoice.approvalHistory.length }})
                             </span>
-                            <span v-else-if="invoice.status === 'approved'" class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <span v-else-if="invoice.status === 'approved'" class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
                                 <CheckCircle class="w-3.5 h-3.5 mr-1" />
                                 承認済
                             </span>
-                            <span v-else class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-200">
+                            <span v-else class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-rose-100 text-rose-800 border border-rose-200">
                                 <XCircle class="w-3.5 h-3.5 mr-1" />
                                 差戻し
                             </span>
                         </td>
                         <!-- Action -->
-                        <td class="px-6 py-4 whitespace-nowrap text-center text-sm">
+                        <td class="px-6 py-4 whitespace-nowrap text-center text-sm sticky right-0 bg-white/90 group-hover:bg-blue-50/90 transition-colors backdrop-blur z-10 shadow-[-4px_0_10px_-4px_rgba(0,0,0,0.1)]">
                             <button class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors inline-flex items-center justify-center">
                                 <FileText class="w-5 h-5" />
                             </button>

@@ -38,6 +38,7 @@ const handleSend = async () => {
         const res = await api.post<{ response: string }>('/advisor/chat', { query: userMsg });
         messages.value.push({ role: 'ai', text: res.response });
     } catch (err) {
+        console.error('AIChat Error:', err);
         messages.value.push({ 
             role: 'ai', 
             text: '申し訳ありません。アドバイザーとの接続に問題が発生しました。' 

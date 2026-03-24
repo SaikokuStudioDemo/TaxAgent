@@ -20,8 +20,7 @@ import {
   ArrowRightLeft,
   BookText,
   Send as SendIcon,
-  Paperclip as PaperclipIcon,
-  Cpu as CpuIcon
+  Paperclip as PaperclipIcon
 } from 'lucide-vue-next';
 
 const isLeftSidebarOpen = ref(true);
@@ -133,8 +132,8 @@ onMounted(async () => {
               <RouterLink to="/dashboard/corporate/invoices/receive" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="受領請求書アップロード">
                 <FileText :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">受領請求書アップロード</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/invoices/approvals" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="受領請求書承認状況">
-                <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">受領請求書承認状況</span>
+              <RouterLink to="/dashboard/corporate/invoices/approvals" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="請求書承認状況">
+                <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">請求書承認状況</span>
               </RouterLink>
               <RouterLink to="/dashboard/corporate/invoices/matching" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="マッチング確認 (入金)">
                 <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">マッチング確認 (入金)</span>
@@ -148,9 +147,6 @@ onMounted(async () => {
             <div class="space-y-1" :class="{'mt-4': !isLeftSidebarOpen}">
               <RouterLink to="/dashboard/corporate/banking/import" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="データアップロード">
                 <CreditCard :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">データアップロード</span>
-              </RouterLink>
-              <RouterLink to="/dashboard/corporate/ai/training" class="flex items-center gap-3 px-3 py-2 text-emerald-400 hover:text-emerald-300 hover:bg-white/5 rounded-lg transition-colors" active-class="bg-emerald-600/20 text-emerald-300" :class="{'justify-center': !isLeftSidebarOpen}" title="AIトレーニング">
-                <CpuIcon :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">AIトレーニング</span>
               </RouterLink>
             </div>
           </div>
