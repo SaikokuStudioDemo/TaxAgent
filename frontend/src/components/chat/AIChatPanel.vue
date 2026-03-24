@@ -1,6 +1,5 @@
-<script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue';
-import { MessageSquare, X, Send, Bot, User, Loader2 } from 'lucide-vue-next';
+import { ref, nextTick } from 'vue';
+import { MessageSquare, X, Send, Bot, Loader2 } from 'lucide-vue-next';
 import { api } from '@/lib/api';
 
 const isOpen = ref(false);

@@ -103,38 +103,6 @@ export function useReceipts() {
         }
     };
 
-    const submitApprovalAction = async (
-        receiptId: string,
-        action: 'approved' | 'rejected' | 'returned',
-        step: number,
-        comment?: string,
-        addedSteps?: any[]
-    ) => {
-        try {
-            return await api.post('/approvals/actions', {
-                document_type: 'receipt',
-                document_id: receiptId,
-                action,
-                step,
-                approver_id: 'current_user',
-                comment: comment ?? null,
-                added_steps: addedSteps
-            });
-        } catch (e: any) {
-            error.value = e.message;
-            return null;
-        }
-    };
-
-    const approveReceipt = async (
-        id: string,
-        action: 'approve' | 'reject',
-        comment?: string,
-    ) => {
-        const apiAction = action === 'approve' ? 'approved' : 'rejected';
-        return submitApprovalAction(id, apiAction, 1, comment);
-    };
-
     return {
         receipts,
         isLoading,
@@ -144,7 +112,5 @@ export function useReceipts() {
         createReceipt,
         updateReceipt,
         deleteReceipt,
-        submitApprovalAction,
-        approveReceipt,
     };
 }

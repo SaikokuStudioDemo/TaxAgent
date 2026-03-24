@@ -99,7 +99,10 @@ async def get_invoice(
 
     # Fetch approval events for this invoice
     events_cursor = db["approval_events"].find(
-        {"document_id": invoice_id, "document_type": "invoice"}
+        {
+            "document_id": invoice_id, 
+            "document_type": {"$in": ["invoice", "received_invoice", "issued_invoice"]}
+        }
     ).sort("timestamp", 1)
     events = await events_cursor.to_list(length=100)
     serialized_events = [_serialize(e) for e in events]

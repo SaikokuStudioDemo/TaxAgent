@@ -116,32 +116,6 @@ export function useInvoices() {
         }
     };
 
-    const submitApprovalAction = async (
-        invoiceId: string,
-        action: 'approved' | 'rejected' | 'returned',
-        step: number,
-        comment?: string,
-        addedSteps?: any[]
-    ) => {
-        try {
-            return await api.post('/approvals/actions', {
-                // Determine document type dynamically, assuming typical endpoints use 'received_invoice' or 'issued_invoice'
-                // Use a default for testing if not determinable easily here, or require it as param. 
-                // Let's assume 'received_invoice' since the approval dash is for received invoices currently.
-                document_type: 'received_invoice',
-                document_id: invoiceId,
-                action,
-                step,
-                approver_id: 'current_user',
-                comment: comment ?? null,
-                added_steps: addedSteps
-            });
-        } catch (e: any) {
-            error.value = e.message;
-            return null;
-        }
-    };
-
     const bulkAction = async (ids: string[], action: 'delete' | 'send') => {
         try {
             await api.post('/invoices/bulk-action', { ids, action });
@@ -169,7 +143,6 @@ export function useInvoices() {
         updateInvoice,
         deleteInvoice,
         sendInvoice,
-        submitApprovalAction,
         bulkAction,
     };
 }

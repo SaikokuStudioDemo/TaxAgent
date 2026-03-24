@@ -52,3 +52,27 @@ export const INITIAL_USERS = [
         }
     },
 ];
+
+/**
+ * 個別承認者追加で選択可能な上位承認者マスター
+ * ※将来的にはAPIから取得するが、現時点ではモックデータ
+ */
+export const MASTER_APPROVERS = [
+  { id: 'u101', roleId: 'manager', roleName: '部門長', name: '高橋 健一', rank: 3 },
+  { id: 'u102', roleId: 'director', roleName: '担当役員', name: '鈴木 次郎', rank: 4 },
+  { id: 'u103', roleId: 'president', roleName: '代表取締役', name: '佐藤 社長', rank: 5 },
+];
+
+/**
+ * roleIdからランク（承認階層の高さ）を判定するユーティリティ
+ * 個別承認者追加時に「現在の承認者より上位のみ選択可能」とするために使用
+ */
+export const getRankFromRoleId = (roleId: string): number => {
+  if (roleId.includes('staff')) return 1;
+  if (roleId.includes('accounting')) return 2;
+  if (roleId.includes('leader')) return 2;
+  if (roleId.includes('manager')) return 3;
+  if (roleId.includes('director')) return 4;
+  if (roleId.includes('president')) return 5;
+  return 1;
+};

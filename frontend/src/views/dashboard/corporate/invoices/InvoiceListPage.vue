@@ -10,23 +10,88 @@ import {
     Calendar,
     Trash2,
     FileText,
-    XCircle,
     Plus,
     CheckCircle,
     Clock,
-    ChevronDown,
-    CheckCircle2,
-    ArrowUpRight,
-    MoreVertical,
-    Download,
-    ExternalLink,
-    Printer,
-    Share2,
     AlertCircle
 } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import { useInvoices } from '@/composables/useInvoices';
-import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
+import InvoiceDetailModal from '@/components/invoices/InvoiceDetailModal.vue';
+
+// --- Types for Modal compatibility ---
+interface ApprovalHistory {
+  id: string;
+  step: number;
+  roleId: string;
+  roleName: string;
+  approverId?: string;
+  approverName?: string;
+  status: 'pending' | 'approved' | 'rejected' | 'skipped';
+  actionDate?: string;
+  comment?: string;
+}
+
+interface InvoiceItem {
+  id: string;
+  vendorName: string;
+  title: string;
+  amount: number;
+  issuedDate: string;
+  dueDate: string;
+  category: string;
+  paymentMethod: string;
+  memo: string;
+  status: 'pending' | 'approved' | 'rejected';
+  currentStepIndex: number; 
+  approvalHistory: ApprovalHistory[];
+  imageUrl: string;
+}
+
+const mapToModalData = (inv: any): InvoiceItem => {
+  const history = (inv.approval_history && inv.approval_history.length > 0)
+    ? inv.approval_history.map((h: any, i: number) => ({
+        id: h.id ?? `h_${i}`,
+        step: h.step ?? i + 1,
+        roleId: h.role_id ?? 'accounting',
+        roleName: h.role_name ?? '経理担当',
+        approverId: h.approver_id,
+        approverName: h.approver_name,
+        status: h.status ?? 'pending',
+        actionDate: h.action_date,
+        comment: h.comment,
+      }))
+    : [];
+
+  const extraSteps = (inv.extra_approval_steps || []).map((s: any, i: number) => ({
+      id: `h_ext_${Date.now()}_${i}`,
+      step: history.length + i + 1,
+      roleId: s.roleId,
+      roleName: s.roleName,
+      approverName: s.approverName,
+      status: 'pending' as const,
+  }));
+
+  const combinedHistory = [...history, ...extraSteps];
+
+  return {
+    id: inv.id,
+    vendorName: inv.clientName || '不明',
+    title: inv.title || '請求書',
+    amount: inv.totalAmount || 0,
+    issuedDate: inv.issueDate || '',
+    dueDate: inv.dueDate || '',
+    category: inv.category || '未分類',
+    paymentMethod: inv.paymentMethod || '請求書払い',
+    memo: inv.memo || '',
+    status: inv.reviewStatus === 'approved' ? 'approved' : inv.reviewStatus === 'rejected' ? 'rejected' : 'pending',
+    currentStepIndex: inv.current_step_index || 0,
+    approvalHistory: combinedHistory.length > 0
+      ? combinedHistory
+      : [{ id: 'h_default', step: 1, roleId: 'accounting', roleName: '承認担当', status: (inv.reviewStatus === 'approved' ? 'approved' : inv.reviewStatus === 'rejected' ? 'rejected' : 'pending') as any }],
+    imageUrl: inv.image_url || ((inv.attachments && inv.attachments.length > 0) ? inv.attachments[0] : ''),
+  };
+};
 
 const router = useRouter();
 
@@ -51,7 +116,6 @@ const toggleSelectAll = () => {
 };
 
 const showConfirmModal = ref(false);
-const showRedirectLoading = ref(false);
 const confirmConfig = ref({
     title: '',
     message: '',
@@ -121,23 +185,23 @@ const handleDeleteSingle = (id: string) => {
     });
 };
 
-const handleEditSingle = async (id: string) => {
-    showRedirectLoading.value = true;
-    // Brief delay to show loading state as requested
-    await new Promise(resolve => setTimeout(resolve, 800));
-    router.push({ path: '/dashboard/corporate/invoices/create', query: { id } });
-};
+// handleEditSingle removed as it's not currently used in the list view actions
 
 const selectedPreviewInvoice = ref<any | null>(null);
 const isPreviewModalOpen = ref(false);
 
 const openPreview = (invoice: any) => {
-    selectedPreviewInvoice.value = invoice;
+    selectedPreviewInvoice.value = mapToModalData(invoice);
     isPreviewModalOpen.value = true;
 };
 const closePreview = () => {
     isPreviewModalOpen.value = false;
     setTimeout(() => { selectedPreviewInvoice.value = null; }, 300);
+};
+
+const handleModalActionCompleted = async () => {
+    closePreview();
+    await loadInvoices();
 };
 
 // Fetch all invoices to calculate counts and allow filtering
@@ -177,6 +241,7 @@ const filteredInvoices = computed(() => {
         projectName: undefined,
         reviewStatus: inv.review_status,
         approval_history: (inv as any).approval_history || [],
+        extra_approval_steps: (inv as any).extra_approval_steps || [],
         current_step_index: (inv as any).current_step_index || 0,
         lineItems: inv.line_items,
     }));
@@ -408,8 +473,7 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
                 <th scope="col" class="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider w-36">金額 (税込)</th>
                 <th scope="col" class="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-40">全体ステータス</th>
                 <th v-if="activeTab === 'received'" scope="col" class="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-36">承認状況</th>
-                <th scope="col" class="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-20">詳細</th>
-                <th scope="col" class="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-20">削除</th>
+                <th scope="col" class="px-6 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-32">操作</th>
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
@@ -462,22 +526,22 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
                     </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-center">
-                    <button 
-                      @click.stop="openPreview(invoice)"
-                      class="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors inline-flex items-center justify-center" 
-                      title="詳細を見る"
-                    >
-                         <FileText class="w-5 h-5" />
-                    </button>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-center">
-                    <button 
-                      @click.stop="handleDeleteSingle(invoice.id)"
-                      class="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors inline-flex items-center justify-center" 
-                      title="削除"
-                    >
-                        <Trash2 class="w-5 h-5" />
-                    </button>
+                    <div class="flex items-center justify-center gap-2">
+                        <button 
+                          @click.stop="openPreview(invoice)"
+                          class="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors inline-flex items-center justify-center" 
+                          title="詳細を見る"
+                        >
+                             <FileText class="w-5 h-5" />
+                        </button>
+                        <button 
+                          @click.stop="handleDeleteSingle(invoice.id)"
+                          class="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors inline-flex items-center justify-center" 
+                          title="削除"
+                        >
+                            <Trash2 class="w-5 h-5" />
+                        </button>
+                    </div>
                 </td>
               </tr>
               
@@ -590,7 +654,7 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
         <div class="relative bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 overflow-hidden">
           <div class="flex items-center gap-4 mb-6">
             <div :class="confirmConfig.isDanger ? 'bg-red-50' : 'bg-blue-50'" class="p-3 rounded-full">
-              <AlertCircleIcon :class="confirmConfig.isDanger ? 'text-red-600' : 'text-blue-600'" class="w-6 h-6" />
+              <AlertCircle :class="confirmConfig.isDanger ? 'text-red-600' : 'text-blue-600'" class="w-6 h-6" />
             </div>
             <h3 class="text-xl font-bold text-gray-900">{{ confirmConfig.title }}</h3>
           </div>
@@ -616,81 +680,15 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
       </div>
     </Transition>
 
-    <!-- Transition Loading Overlay -->
-    <Transition
-      enter-active-class="transition duration-300 ease-out"
-      enter-from-class="opacity-0"
-      enter-to-class="opacity-100"
-      leave-active-class="transition duration-200 ease-in"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
-      <div v-if="showRedirectLoading" class="fixed inset-0 z-[150] bg-white/80 backdrop-blur-md flex flex-col items-center justify-center">
-        <div class="relative w-24 h-24 mb-6">
-          <div class="absolute inset-0 border-4 border-blue-100 rounded-full"></div>
-          <div class="absolute inset-0 border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div>
-          <FileText class="absolute inset-0 m-auto w-8 h-8 text-blue-600 animate-pulse" />
-        </div>
-        <h2 class="text-xl font-bold text-gray-900 mb-2">下書きを読み込んでいます</h2>
-        <p class="text-gray-500 font-medium tracking-wide">編集画面へ移動します...</p>
-      </div>
-    </Transition>
 
-    <!-- Preview Modal -->
-    <Teleport to="body">
-    <div v-if="isPreviewModalOpen && selectedPreviewInvoice" class="fixed inset-0 z-[120] flex items-center justify-center p-4 sm:p-6" aria-labelledby="slide-over-title" role="dialog" aria-modal="true">
-        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] transition-opacity" @click="closePreview"></div>
-        <div class="relative w-full max-w-5xl h-[95vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-            <div class="h-full flex flex-col w-full overflow-y-auto bg-slate-50 relative">
-                <!-- Header -->
-                <div class="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-                    <div>
-                        <h2 class="text-lg font-bold text-gray-900" id="slide-over-title">請求書プレビュー : {{ selectedPreviewInvoice.id }}</h2>
-                        <p class="text-xs text-gray-500 mt-1">取引先: <span class="font-medium text-gray-700">{{ selectedPreviewInvoice.clientName }}</span></p>
-                    </div>
-                    <button @click="closePreview" class="rounded-full p-2 bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <span class="sr-only">Close panel</span>
-                        <XCircle class="h-6 w-6" aria-hidden="true" />
-                    </button>
-                </div>
-                <!-- Content Area -->
-                <div class="flex-1 overflow-y-auto p-6 space-y-6">
-                    <!-- Unified Approval Stepper -->
-                    <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm">
-                        <ApprovalStepper 
-                            :document-type="activeTab === 'issued' || activeTab === 'drafts' ? 'issued_invoice' : 'received_invoice'"
-                            mode="status"
-                            :history="selectedPreviewInvoice.approval_history || []"
-                            :current-step="selectedPreviewInvoice.current_step_index !== undefined ? selectedPreviewInvoice.current_step_index + 1 : 1"
-                        />
-                    </div>
-                    <!-- Invoice Info -->
-                    <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm">
-                        <h3 class="text-sm font-bold text-gray-900 border-b border-gray-100 pb-2 mb-3">基本情報</h3>
-                        <dl class="grid grid-cols-2 gap-4 text-sm">
-                            <div class="col-span-2 flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
-                                <span class="text-gray-600 font-medium">合計金額</span>
-                                <span class="text-2xl font-bold tracking-tight">¥{{ formatCurrency(selectedPreviewInvoice.amount) }}</span>
-                            </div>
-                            <div>
-                                <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">発行日</dt>
-                                <dd class="font-medium text-gray-900">{{ selectedPreviewInvoice.issueDate }}</dd>
-                            </div>
-                            <div>
-                                <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">支払期日</dt>
-                                <dd class="font-medium text-gray-900">{{ selectedPreviewInvoice.dueDate }}</dd>
-                            </div>
-                            <div class="col-span-2">
-                                <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">件名</dt>
-                                <dd class="font-medium text-gray-900">{{ selectedPreviewInvoice.title }}</dd>
-                            </div>
-                        </dl>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    </Teleport>
+    <!-- Detail Modal -->
+    <InvoiceDetailModal
+        :show="isPreviewModalOpen"
+        :invoice="selectedPreviewInvoice"
+        :direction="activeTab === 'received' ? 'received' : 'issued'"
+        @close="closePreview"
+        @action-completed="handleModalActionCompleted"
+    />
     </div>
   </div>
 </template>

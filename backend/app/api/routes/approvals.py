@@ -173,7 +173,6 @@ async def record_approval_action(
 
     if payload.action == "approved":
         all_approved = False
-        total_steps = 0
         
         # Persist manually added extra steps if provided
         if payload.added_steps:
@@ -187,13 +186,14 @@ async def record_approval_action(
                 doc["extra_approval_steps"] = added_steps_dicts
 
         # Calculate standard steps from the rule
+        total_steps = 1 # Minimum implicit step
         if rule_id:
             try:
                 rule = await db["approval_rules"].find_one({"_id": ObjectId(rule_id)})
                 if rule:
                     required_steps = [s["step"] for s in rule.get("steps", []) if s.get("required")]
                     if required_steps:
-                        total_steps = max(required_steps)
+                        total_steps = max(total_steps, max(required_steps))
             except Exception as e:
                 logger.error(f"Error fetching/parsing rule {rule_id}: {e}")
         
