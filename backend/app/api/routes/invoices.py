@@ -30,19 +30,18 @@ async def create_invoice(
     fiscal_period = payload.issue_date[:7] if payload.issue_date else datetime.utcnow().strftime("%Y-%m")
 
     # Match approval rules
-    rule_id, rule_steps = await evaluate_approval_rules(ctx.corporate_id, f"{payload.direction}_invoice", payload.model_dump())
+    rule_id, rule_steps = await evaluate_approval_rules(ctx.corporate_id, f"{payload.document_type}_invoice", payload.model_dump())
 
-    final_status = payload.status or "draft"
+    requested_status = payload.approval_status or "draft"
     # 承認ルールなしで即送付 → 自動承認扱い
-    is_auto_approved = final_status == "sent" and rule_id is None
+    is_auto_approved = requested_status == "sent" and rule_id is None
 
     doc = {
         **payload.model_dump(),
         "corporate_id": ctx.corporate_id,
         "created_by": ctx.user_id,
-        "status": final_status,
-        "review_status": "approved" if is_auto_approved else "unreviewed",
-        "is_auto_approved": is_auto_approved,
+        "approval_status": "auto_approved" if is_auto_approved else requested_status,
+        "reconciliation_status": "unreconciled",
         "current_step": 1,
         "approval_rule_id": rule_id,
         "approval_steps": rule_steps if rule_id else [],
@@ -60,16 +59,16 @@ async def create_invoice(
 
 @router.get("", summary="請求書一覧を取得する")
 async def list_invoices(
-    direction: Optional[str] = None,
-    review_status: Optional[str] = None,
+    document_type: Optional[str] = None,
+    approval_status: Optional[str] = None,
     fiscal_period: Optional[str] = None,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     query: dict = {"corporate_id": ctx.corporate_id, "is_deleted": {"$ne": True}}
-    if direction:
-        query["direction"] = direction
-    if review_status:
-        query["review_status"] = review_status
+    if document_type:
+        query["document_type"] = document_type
+    if approval_status:
+        query["approval_status"] = approval_status
     if fiscal_period:
         query["fiscal_period"] = fiscal_period
 
@@ -112,21 +111,20 @@ async def update_invoice(
     forbidden = {"corporate_id", "created_by", "created_at", "_id"}
     update_data = {k: v for k, v in payload.items() if k not in forbidden}
 
-    existing = await ctx.db["invoices"].find_one({"_id": oid, "corporate_id": ctx.corporate_id}, {"approval_rule_id": 1, "status": 1})
+    existing = await ctx.db["invoices"].find_one({"_id": oid, "corporate_id": ctx.corporate_id}, {"approval_rule_id": 1, "approval_status": 1})
 
     # pending_approval に遷移する場合はルールのステップを保存
-    if update_data.get("status") == "pending_approval" and existing:
+    if update_data.get("approval_status") == "pending_approval" and existing:
         rule_id = existing.get("approval_rule_id")
         if rule_id:
             from app.services.rule_evaluation_service import get_rule_steps
             steps = await get_rule_steps(rule_id)
             update_data["approval_steps"] = steps
 
-    # 承認ルールなしで sent に遷移する場合は自動承認フラグをセット
-    if update_data.get("status") == "sent":
+    # 承認ルールなしで sent に遷移する場合は自動承認扱いにセット
+    if update_data.get("approval_status") == "sent":
         if existing and not existing.get("approval_rule_id"):
-            update_data["is_auto_approved"] = True
-            update_data["review_status"] = "approved"
+            update_data["approval_status"] = "auto_approved"
 
     result = await ctx.db["invoices"].update_one(
         {"_id": oid, "corporate_id": ctx.corporate_id},
@@ -164,12 +162,12 @@ async def send_invoice(
     """Mark invoice as sent. Actual email sending will be handled by the notification service."""
     invoice = await get_doc_or_404(ctx.db, "invoices", invoice_id, ctx.corporate_id, "invoice")
 
-    if invoice.get("direction") != "issued":
+    if invoice.get("document_type") != "issued":
         raise HTTPException(status_code=400, detail="Only issued invoices can be sent.")
 
     await ctx.db["invoices"].update_one(
         {"_id": invoice["_id"]},
-        {"$set": {"status": "sent"}},
+        {"$set": {"approval_status": "sent"}},
     )
     return {"status": "sent", "invoice_id": invoice_id}
 
@@ -201,8 +199,8 @@ async def bulk_action(
         )
     elif action == "send":
         await ctx.db["invoices"].update_many(
-            {"_id": {"$in": oids}, "corporate_id": ctx.corporate_id, "direction": "issued", "status": "draft"},
-            {"$set": {"status": "sent"}}
+            {"_id": {"$in": oids}, "corporate_id": ctx.corporate_id, "document_type": "issued", "approval_status": "draft"},
+            {"$set": {"approval_status": "sent"}}
         )
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")

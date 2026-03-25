@@ -25,7 +25,8 @@ class ReceiptInDB(ReceiptCreate):
     id: Optional[str] = Field(None, alias="_id")
     corporate_id: str
     submitted_by: str
-    status: str = "pending_approval" # pending_approval / approved / rejected / matched
+    approval_status: str = "pending_approval"
+    reconciliation_status: str = "unreconciled"
     approval_rule_id: Optional[str] = None
     approval_history: List[ApprovalHistoryItem] = []
     extra_approval_steps: List[AddedApprovalStep] = []
@@ -41,7 +42,7 @@ class BankTransactionInDB(BaseModel):
     description: str
     normalized_name: Optional[str] = None
     amount: int
-    direction: Literal["credit", "debit"]
+    transaction_type: Literal["credit", "debit"]
     status: Literal["unmatched", "matched"] = "unmatched"
     fiscal_period: str
     imported_at: datetime = Field(default_factory=datetime.utcnow)

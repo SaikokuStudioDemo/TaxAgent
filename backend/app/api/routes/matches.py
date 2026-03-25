@@ -139,7 +139,7 @@ async def create_match(
     for did in document_ids:
         try:
             await ctx.db[collection].update_one(
-                {"_id": ObjectId(did)}, {"$set": {"status": "matched"}}
+                {"_id": ObjectId(did)}, {"$set": {"reconciliation_status": "reconciled"}}
             )
         except Exception:
             pass
@@ -196,7 +196,8 @@ async def delete_match(
     for did in match.get("document_ids", []):
         try:
             await ctx.db[collection].update_one(
-                {"_id": ObjectId(did)}, {"$set": {"status": "approved"}}  # revert to pre-match
+                {"_id": ObjectId(did)},
+                {"$set": {"reconciliation_status": "unreconciled", "approval_status": "approved"}}
             )
         except Exception:
             pass

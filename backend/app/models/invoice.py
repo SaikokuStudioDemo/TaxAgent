@@ -10,7 +10,7 @@ class InvoiceLineItem(BaseModel):
     tax_rate: int
 
 class InvoiceCreate(BaseModel):
-    direction: Literal["issued", "received"]
+    document_type: Literal["issued", "received"]
     invoice_number: str
     client_id: Optional[str] = None
     client_name: str
@@ -25,13 +25,13 @@ class InvoiceCreate(BaseModel):
     is_temporary_approval_needed: bool = False
     is_auto_send_enabled: bool = False
     attachments: List[str] = []
-    status: Optional[str] = None
+    approval_status: Optional[str] = None
 
 class InvoiceInDB(InvoiceCreate):
     id: Optional[str] = Field(None, alias="_id")
     corporate_id: str
-    status: str = "draft"
-    review_status: str = "unreviewed" # unreviewed / approved / rejected / draft
+    approval_status: str = "draft"
+    reconciliation_status: str = "unreconciled"
     current_step: int = 1
     approval_rule_id: Optional[str] = None
     approval_history: List[ApprovalHistoryItem] = []

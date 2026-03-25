@@ -44,6 +44,7 @@ async def submit_receipts_batch(
         doc = {
             "corporate_id": ctx.corporate_id,
             "submitted_by": ctx.user_id,
+            "document_type": "receipt",
             "date": r.get("date", ""),
             "amount": amount,
             "tax_rate": r.get("taxRate", r.get("tax_rate", 10)),
@@ -54,8 +55,8 @@ async def submit_receipts_batch(
             "attachments": r.get("attachments", []),
             "fiscal_period": fiscal_period,
             "ai_extracted": True,
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "approval_rule_id": rule_id,
             "current_step": 1,
             "created_at": datetime.utcnow(),
@@ -84,8 +85,9 @@ async def create_receipt(
         **payload.model_dump(),
         "corporate_id": ctx.corporate_id,
         "submitted_by": ctx.user_id,
-        "status": "pending_approval",
-        "review_status": "unreviewed",
+        "document_type": "receipt",
+        "approval_status": "pending_approval",
+        "reconciliation_status": "unreconciled",
         "approval_rule_id": rule_id,
         "current_step": 1,
         "fiscal_period": fiscal_period,
@@ -98,17 +100,14 @@ async def create_receipt(
 
 @router.get("", summary="領収書一覧を取得する")
 async def list_receipts(
-    status: Optional[str] = None,
-    review_status: Optional[str] = None,
+    approval_status: Optional[str] = None,
     fiscal_period: Optional[str] = None,
     submitted_by: Optional[str] = None,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     query: dict = {"corporate_id": ctx.corporate_id}
-    if status:
-        query["status"] = status
-    if review_status:
-        query["review_status"] = review_status
+    if approval_status:
+        query["approval_status"] = approval_status
     if fiscal_period:
         query["fiscal_period"] = fiscal_period
     if submitted_by == "me":
@@ -131,10 +130,10 @@ async def list_pending_for_me(
     employee = await ctx.db["employees"].find_one({"firebase_uid": ctx.firebase_uid})
     user_role = employee.get("role", "staff") if employee else "admin"
 
-    # Get all unreviewed receipts for this corporate
+    # Get all pending receipts for this corporate
     cursor = ctx.db["receipts"].find({
         "corporate_id": ctx.corporate_id,
-        "review_status": "unreviewed",
+        "approval_status": "pending_approval",
     })
     all_pending = await cursor.to_list(length=500)
 

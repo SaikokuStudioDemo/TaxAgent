@@ -199,7 +199,7 @@ async def record_approval_action(
             all_approved = True
             update_result = await ctx.db[collection].update_one(
                 db_query,
-                {"$set": {"review_status": "approved", "status": "approved"}},
+                {"$set": {"approval_status": "approved"}},
             )
             if update_result.matched_count == 0:
                 raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
@@ -224,7 +224,7 @@ async def record_approval_action(
 
         update_result = await ctx.db[collection].update_one(
             db_query,
-            {"$set": {"review_status": "rejected"}},
+            {"$set": {"approval_status": "rejected"}},
         )
         if update_result.matched_count == 0:
             raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
