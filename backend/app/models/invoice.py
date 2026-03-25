@@ -22,6 +22,7 @@ class InvoiceCreate(BaseModel):
     total_amount: int
     line_items: List[InvoiceLineItem] = []
     template_id: Optional[str] = None
+    bank_account_id: Optional[str] = None
     is_temporary_approval_needed: bool = False
     is_auto_send_enabled: bool = False
     attachments: List[str] = []
