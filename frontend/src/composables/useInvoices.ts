@@ -13,7 +13,7 @@ export interface LineItem {
 
 export interface Invoice {
     id: string;
-    direction: 'issued' | 'received';
+    document_type: 'issued' | 'received';
     invoice_number: string;
     client_id?: string;
     client_name: string;
@@ -23,8 +23,9 @@ export interface Invoice {
     subtotal: number;
     tax_amount: number;
     total_amount: number;
-    status: string;
-    review_status: string;
+    approval_status: string;
+    delivery_status?: 'unsent' | 'sent';
+    reconciliation_status?: 'unreconciled' | 'reconciled';
     current_step: number;
     approval_rule_id: string | null;
     is_temporary_approval_needed: boolean;
@@ -44,16 +45,16 @@ export function useInvoices() {
     const error = ref<string | null>(null);
 
     const fetchInvoices = async (params?: {
-        direction?: string;
-        review_status?: string;
+        document_type?: string;
+        approval_status?: string;
         fiscal_period?: string;
     }) => {
         isLoading.value = true;
         error.value = null;
         try {
             const query = new URLSearchParams();
-            if (params?.direction) query.append('direction', params.direction);
-            if (params?.review_status) query.append('review_status', params.review_status);
+            if (params?.document_type) query.append('document_type', params.document_type);
+            if (params?.approval_status) query.append('approval_status', params.approval_status);
             if (params?.fiscal_period) query.append('fiscal_period', params.fiscal_period);
             const qs = query.toString();
             invoices.value = await api.get<Invoice[]>(`/invoices${qs ? '?' + qs : ''}`);
@@ -123,7 +124,7 @@ export function useInvoices() {
                 invoices.value = invoices.value.filter(i => !ids.includes(i.id));
             } else if (action === 'send') {
                 invoices.value.forEach(i => {
-                    if (ids.includes(i.id)) i.status = 'sent';
+                    if (ids.includes(i.id)) i.delivery_status = 'sent';
                 });
             }
             return true;

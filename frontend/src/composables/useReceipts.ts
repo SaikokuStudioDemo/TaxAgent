@@ -12,8 +12,8 @@ export interface Receipt {
     payee: string;
     category: string;
     payment_method: string;
-    status: string;
-    review_status: string;
+    approval_status: string;
+    reconciliation_status?: 'unreconciled' | 'reconciled';
     approval_rule_id: string | null;
     current_step: number;
     fiscal_period: string;
@@ -38,8 +38,7 @@ export function useReceipts() {
     const error = ref<string | null>(null);
 
     const fetchReceipts = async (params?: {
-        review_status?: string;
-        status?: string;
+        approval_status?: string;
         fiscal_period?: string;
         submitted_by?: string;
     }) => {
@@ -47,8 +46,7 @@ export function useReceipts() {
         error.value = null;
         try {
             const query = new URLSearchParams();
-            if (params?.review_status) query.append('review_status', params.review_status);
-            if (params?.status) query.append('status', params.status);
+            if (params?.approval_status) query.append('approval_status', params.approval_status);
             if (params?.fiscal_period) query.append('fiscal_period', params.fiscal_period);
             if (params?.submitted_by) query.append('submitted_by', params.submitted_by);
             const qs = query.toString();

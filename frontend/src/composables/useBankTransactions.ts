@@ -12,7 +12,7 @@ export interface BankTransaction {
     description: string;
     normalized_name?: string;
     amount: number;
-    direction: 'credit' | 'debit';
+    transaction_type: 'credit' | 'debit';
     status: 'unmatched' | 'matched';
     fiscal_period: string;
     imported_at: string;
