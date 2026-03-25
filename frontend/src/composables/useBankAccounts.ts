@@ -63,7 +63,7 @@ export function useBankAccounts() {
     accounts.value = accounts.value.map(a => ({ ...a, is_default: a.id === id }));
   };
 
-  const lookupBank = async (bankCode: string): Promise<{ bank_code: string; bank_name: string } | null> => {
+  const lookupBank = async (bankCode: string): Promise<{ bank_code: string; bank_name: string; kana: string } | null> => {
     try {
       return await api.get(`/bank-accounts/zengin/banks/${bankCode}`);
     } catch {
@@ -71,7 +71,7 @@ export function useBankAccounts() {
     }
   };
 
-  const lookupBranch = async (bankCode: string, branchCode: string): Promise<{ branch_code: string; branch_name: string } | null> => {
+  const lookupBranch = async (bankCode: string, branchCode: string): Promise<{ branch_code: string; branch_name: string; kana: string } | null> => {
     try {
       return await api.get(`/bank-accounts/zengin/banks/${bankCode}/branches/${branchCode}`);
     } catch {
@@ -79,9 +79,27 @@ export function useBankAccounts() {
     }
   };
 
+  const searchBanks = async (q: string): Promise<{ code: string; name: string; kana: string }[]> => {
+    if (!q) return [];
+    try {
+      return await api.get(`/bank-accounts/zengin/banks/search?q=${encodeURIComponent(q)}`);
+    } catch {
+      return [];
+    }
+  };
+
+  const searchBranches = async (bankCode: string, q: string): Promise<{ code: string; name: string; kana: string }[]> => {
+    if (!bankCode || !q) return [];
+    try {
+      return await api.get(`/bank-accounts/zengin/banks/${bankCode}/branches/search?q=${encodeURIComponent(q)}`);
+    } catch {
+      return [];
+    }
+  };
+
   return {
     accounts, isLoading, error,
     fetchBankAccounts, createBankAccount, updateBankAccount, deleteBankAccount, setDefaultBankAccount,
-    lookupBank, lookupBranch,
+    lookupBank, lookupBranch, searchBanks, searchBranches,
   };
 }
