@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { ChevronLeft, Plus, CheckCircle, Save, Send, FileText, Loader2, Building2, AlertCircle as AlertCircleIcon, Trash2, FileImage, X, AlertCircle, GripHorizontal, Pencil, Mail, ShieldCheck } from 'lucide-vue-next';
+import { ChevronLeft, Plus, CheckCircle, Save, Send, FileText, Loader2, Building2, AlertCircle as AlertCircleIcon, Trash2, FileImage, X, AlertCircle, GripHorizontal, Pencil, Mail, ShieldCheck, FolderKanban } from 'lucide-vue-next';
 import { useRouter, useRoute } from 'vue-router';
 import ClientFormModal from '@/components/invoices/ClientFormModal.vue';
 import TemplateEditorModal from '@/components/invoices/TemplateEditorModal.vue';
 import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
 import { useCompanyProfiles } from '@/composables/useCompanyProfiles';
 import { useBankAccounts } from '@/composables/useBankAccounts';
+import { useProjects } from '@/composables/useProjects';
 import { api } from '@/lib/api';
 import { formatNumber as formatCurrency } from '@/lib/utils/formatters';
 
@@ -148,8 +149,10 @@ const templateToDelete = ref<InvoiceTemplate | null>(null);
 // --- COMPOSABLES ---
 const { profiles: senderProfiles, fetchProfiles, formatProfileForTextarea } = useCompanyProfiles();
 const { accounts: bankAccounts, fetchBankAccounts } = useBankAccounts();
+const { projects, fetchProjects } = useProjects();
 const activeSenderProfile = ref('');
 const activeBankAccountId = ref('');
+const activeProjectId = ref('');
 
 // 請求元プロファイルが変わったら紐づく口座を再取得してデフォルトを選択
 watch(activeSenderProfile, async (profileId) => {
@@ -446,6 +449,7 @@ const loadInvoiceData = async (id: string) => {
 
 onMounted(async () => {
     fetchTemplates();
+    fetchProjects();
     await fetchProfiles();
     // Set default sender profile
     const defaultProfile = senderProfiles.value.find((p: any) => p.is_default) || senderProfiles.value[0];
@@ -588,6 +592,7 @@ const buildPayload = () => {
         })),
         template_id: selectedTemplateId.value || undefined,
         bank_account_id: activeBankAccountId.value || undefined,
+        project_id: activeProjectId.value || undefined,
     };
 };
 
@@ -879,6 +884,17 @@ function handleClientSelection() {
                                        <option v-for="opt in bankAccountOptions" :key="opt.id" :value="opt.id">
                                            {{ opt.label }}{{ opt.is_default ? ' ★' : '' }}
                                        </option>
+                                   </select>
+                               </div>
+                               <!-- プロジェクト -->
+                               <div>
+                                   <label class="block text-xs font-bold text-gray-700 mb-2 flex items-center gap-1.5">
+                                     <FolderKanban class="w-3.5 h-3.5 text-indigo-400" />
+                                     プロジェクト（任意）
+                                   </label>
+                                   <select v-model="activeProjectId" class="block w-full py-2 pl-3 pr-10 text-sm border border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 rounded-lg bg-white shadow-sm text-gray-700">
+                                       <option value="">指定なし</option>
+                                       <option v-for="proj in projects" :key="proj.id" :value="proj.id">{{ proj.name }}</option>
                                    </select>
                                </div>
                            </div>

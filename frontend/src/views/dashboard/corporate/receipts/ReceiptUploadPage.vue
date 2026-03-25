@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { UploadCloud, ScanLine, Trash2, CheckCircle2, Save, Loader2, AlertCircle, FileText } from 'lucide-vue-next';
+import { ref, computed, onMounted } from 'vue';
+import { UploadCloud, ScanLine, Trash2, CheckCircle2, Save, Loader2, AlertCircle, FileText, ChevronDown } from 'lucide-vue-next';
 import { formatCurrency } from '@/lib/utils/formatters';
 import { useReceipts } from '@/composables/useReceipts';
+import { useProjects } from '@/composables/useProjects';
 import { uploadFile } from '@/lib/firebase/storage';
 import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
 
@@ -24,6 +25,7 @@ interface StagedReceipt {
 }
 
 const { createReceipt } = useReceipts();
+const { projects, fetchProjects } = useProjects();
 
 const stagedReceipts = ref<StagedReceipt[]>([]);
 const isSubmitting = ref(false);
@@ -37,11 +39,8 @@ const successCount = ref(0);
 const fileInput = ref<HTMLInputElement | null>(null);
 
 const categories = ['消耗品費', '交際費', '旅費交通費', '通信費', '会議費'];
-const PROJECTS = [
-  { id: '', name: '指定なし (部門費)' },
-  { id: 'proj-1', name: '社内基幹システムリプレイス' },
-  { id: 'proj-2', name: '〇〇株式会社様 Webサイト制作' }
-];
+
+onMounted(() => fetchProjects());
 
 // Handle actual file selection and upload
 const handleFileSelect = async (event: Event) => {
@@ -142,7 +141,8 @@ const submitSelected = async () => {
         payee: r.payee,
         category: r.category,
         fiscal_period: currentMonth,
-        attachments: r.fileUrl ? [r.fileUrl] : []
+        attachments: r.fileUrl ? [r.fileUrl] : [],
+        ...(r.projectId ? { project_id: r.projectId } : {}),
       });
       if (result) saved++;
     }
@@ -322,7 +322,8 @@ const handleAmountInput = (receipt: StagedReceipt, event: Event) => {
               </td>
               <td class="py-4 px-4">
                 <select v-model="receipt.projectId" :class="{'text-red-600': receipt.status === 'error'}" class="bg-transparent border border-transparent hover:border-gray-300 focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-2 py-1 w-full transition-colors text-gray-700">
-                  <option v-for="proj in PROJECTS" :key="proj.id" :value="proj.id">{{ proj.name }}</option>
+                  <option value="">指定なし</option>
+                  <option v-for="proj in projects" :key="proj.id" :value="proj.id">{{ proj.name }}</option>
                 </select>
               </td>
               <td class="py-4 px-4">
