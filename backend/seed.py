@@ -8,8 +8,9 @@ seed.py - 開発・テスト用シードデータ投入スクリプト
 フィールド設計:
     invoices:
         - document_type: "issued" | "received"  (旧: direction)
-        - approval_status: "draft" | "pending_approval" | "approved" | "auto_approved" | "rejected" | "sent"
+        - approval_status: "draft" | "pending_approval" | "approved" | "auto_approved" | "rejected"
           (旧: status + review_status を統合)
+        - delivery_status: "unsent" | "sent"  (旧: approval_status="sent")
         - reconciliation_status: "unreconciled" | "reconciled"  (新規)
     receipts:
         - document_type: "receipt"  (新規・統一)
@@ -239,6 +240,7 @@ async def seed():
         "name": "株式会社アルファ",
         "corporateType": "corporate",
         "planId": "plan_standard",
+        "advising_tax_firm_id": TAX_FIRM_UID,
         "is_active": True,
         "created_at": today,
     })
@@ -456,6 +458,7 @@ async def seed():
         "name": "株式会社ベータ",
         "corporateType": "corporate",
         "planId": "plan_basic",
+        "advising_tax_firm_id": TAX_FIRM_UID,
         "is_active": True,
         "created_at": today,
     })
