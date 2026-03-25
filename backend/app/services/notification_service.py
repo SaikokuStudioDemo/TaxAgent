@@ -64,7 +64,7 @@ async def notify_next_approver(
 
     # Find an employee with the matching role in this corporate
     employee = await db["employees"].find_one({
-        "parent_corporate_firebase_uid": {"$exists": True},
+        "corporate_id": corporate_id,
         "role": target_role,
     })
 
