@@ -1,0 +1,589 @@
+"""
+seed_mock_data.py - 開発・テスト用シードデータ投入スクリプト
+
+使用方法:
+    cd backend
+    PYTHONPATH=. venv/bin/python seed_mock_data.py
+
+構成:
+    - 税理士法人1社 (firebase_uid: "tax_firm_uid")       + 従業員2名
+    - 一般法人A    (firebase_uid: "seed_corp_a_uid")    + 従業員2名
+    - 一般法人B    (firebase_uid: "seed_corp_b_uid")    + 従業員2名
+    - 各法人に invoices / receipts / approval_rules を最低2件ずつ
+
+フィールド設計:
+    - employees.corporate_id は MongoDB ObjectId 文字列で統一
+    - parent_corporate_firebase_uid / parent_corporate_id は使用しない
+"""
+
+import asyncio
+from datetime import datetime, timedelta
+from motor.motor_asyncio import AsyncIOMotorClient
+
+MONGO_URI = "mongodb://localhost:27017"
+DB_NAME = "tax_agent"
+
+# Firebase UID（テスト環境用固定値）
+TAX_FIRM_UID   = "tax_firm_uid"
+CORP_A_UID     = "seed_corp_a_uid"
+CORP_B_UID     = "seed_corp_b_uid"
+
+# 従業員 Firebase UID
+EMP_TAX_STAFF_UID    = "tax_emp_staff_uid"
+EMP_TAX_MANAGER_UID  = "tax_emp_manager_uid"
+EMP_A_STAFF_UID      = "seed_emp_a_staff"
+EMP_A_MANAGER_UID    = "seed_emp_a_manager"
+EMP_B_STAFF_UID      = "seed_emp_b_staff"
+EMP_B_MANAGER_UID    = "seed_emp_b_manager"
+
+ALL_CORP_UIDS = [TAX_FIRM_UID, CORP_A_UID, CORP_B_UID]
+ALL_EMP_UIDS  = [
+    EMP_TAX_STAFF_UID, EMP_TAX_MANAGER_UID,
+    EMP_A_STAFF_UID, EMP_A_MANAGER_UID,
+    EMP_B_STAFF_UID, EMP_B_MANAGER_UID,
+]
+
+
+async def seed():
+    client = AsyncIOMotorClient(MONGO_URI)
+    db = client[DB_NAME]
+    today = datetime.utcnow()
+
+    print(f"\n🌱 Seeding database: {DB_NAME}\n")
+
+    # ─────── 既存シードデータをクリア ───────
+    for uid in ALL_CORP_UIDS:
+        corp = await db["corporates"].find_one({"firebase_uid": uid})
+        if corp:
+            cid = str(corp["_id"])
+            for col in [
+                "employees", "receipts", "invoices", "approval_rules",
+                "clients", "company_profiles", "notifications",
+                "bank_transactions", "matches", "approval_events",
+            ]:
+                await db[col].delete_many({"corporate_id": cid})
+    await db["corporates"].delete_many({"firebase_uid": {"$in": ALL_CORP_UIDS}})
+    await db["employees"].delete_many({"firebase_uid": {"$in": ALL_EMP_UIDS}})
+    print("✅ 既存シードデータをクリアしました")
+
+    # ═══════════════════════════════════════════
+    # 税理士法人
+    # ═══════════════════════════════════════════
+    res_tax = await db["corporates"].insert_one({
+        "firebase_uid": TAX_FIRM_UID,
+        "name": "青山税理士法人",
+        "corporateType": "tax_firm",
+        "planId": "plan_premium",
+        "is_active": True,
+        "created_at": today,
+    })
+    tax_id = str(res_tax.inserted_id)
+    print(f"✅ 税理士法人 作成: {tax_id}")
+
+    await db["employees"].insert_many([
+        {
+            "firebase_uid": EMP_TAX_STAFF_UID,
+            "corporate_id": tax_id,
+            "role": "staff",
+            "email": "staff@aoyama-tax.co.jp",
+            "is_active": True,
+            "created_at": today,
+        },
+        {
+            "firebase_uid": EMP_TAX_MANAGER_UID,
+            "corporate_id": tax_id,
+            "role": "dept_manager",
+            "email": "manager@aoyama-tax.co.jp",
+            "is_active": True,
+            "created_at": today,
+        },
+    ])
+    print("✅ 税理士法人 従業員2名作成")
+
+    # 承認ルール（税理士法人）
+    tax_rules_res = await db["approval_rules"].insert_many([
+        {
+            "corporate_id": tax_id,
+            "name": "基本承認ルート（全件）",
+            "applies_to": ["receipt", "received_invoice", "issued_invoice"],
+            "conditions": [{"field": "always", "operator": "", "value": ""}],
+            "steps": [{"step": 1, "role": "dept_manager", "required": True}],
+            "active": True,
+            "created_at": today,
+        },
+        {
+            "corporate_id": tax_id,
+            "name": "高額承認ルート（10万円以上）",
+            "applies_to": ["receipt", "received_invoice"],
+            "conditions": [{"field": "amount", "operator": ">=", "value": 100000}],
+            "steps": [
+                {"step": 1, "role": "accounting", "required": True},
+                {"step": 2, "role": "dept_manager", "required": True},
+            ],
+            "active": True,
+            "created_at": today,
+        },
+    ])
+    tax_base_rule_id   = str(tax_rules_res.inserted_ids[0])
+    tax_strict_rule_id = str(tax_rules_res.inserted_ids[1])
+
+    # 請求書（税理士法人）
+    await db["invoices"].insert_many([
+        {
+            "corporate_id": tax_id,
+            "direction": "issued",
+            "invoice_number": "TAX-INV-001",
+            "client_name": "株式会社サンプル商事",
+            "recipient_email": "contact@sample.co.jp",
+            "issue_date": today.strftime("%Y-%m-%d"),
+            "due_date": (today + timedelta(days=30)).strftime("%Y-%m-%d"),
+            "subtotal": 100000,
+            "tax_amount": 10000,
+            "total_amount": 110000,
+            "line_items": [{"description": "税務顧問料 3月分", "category": "売上", "amount": 100000, "tax_rate": 10}],
+            "status": "sent",
+            "review_status": "approved",
+            "current_step": 1,
+            "approval_rule_id": tax_base_rule_id,
+            "approval_history": [{"step": 1, "roleId": "dept_manager", "roleName": "部門長", "status": "approved"}],
+            "fiscal_period": today.strftime("%Y-%m"),
+            "created_by": tax_id,
+            "created_at": today,
+            "is_deleted": False,
+        },
+        {
+            "corporate_id": tax_id,
+            "direction": "received",
+            "invoice_number": "TAX-REC-001",
+            "client_name": "クラウドサービス株式会社",
+            "recipient_email": "billing@cloud.co.jp",
+            "issue_date": (today - timedelta(days=10)).strftime("%Y-%m-%d"),
+            "due_date": (today + timedelta(days=20)).strftime("%Y-%m-%d"),
+            "subtotal": 150000,
+            "tax_amount": 15000,
+            "total_amount": 165000,
+            "line_items": [{"description": "サーバー利用料", "category": "通信費", "amount": 150000, "tax_rate": 10}],
+            "status": "pending_approval",
+            "review_status": "unreviewed",
+            "current_step": 1,
+            "approval_rule_id": tax_strict_rule_id,
+            "approval_history": [
+                {"step": 1, "roleId": "accounting", "roleName": "経理担当", "status": "pending"},
+                {"step": 2, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"},
+            ],
+            "fiscal_period": today.strftime("%Y-%m"),
+            "created_by": tax_id,
+            "created_at": today,
+            "is_deleted": False,
+        },
+    ])
+
+    # 領収書（税理士法人）
+    await db["receipts"].insert_many([
+        {
+            "corporate_id": tax_id,
+            "date": today.strftime("%Y-%m-%d"),
+            "amount": 5500,
+            "tax_rate": 10,
+            "payee": "タクシー会社",
+            "category": "旅費交通費",
+            "payment_method": "立替",
+            "line_items": [{"description": "移動費", "category": "旅費交通費", "amount": 5000, "tax_rate": 10}],
+            "attachments": [],
+            "fiscal_period": today.strftime("%Y-%m"),
+            "ai_extracted": True,
+            "submitted_by": tax_id,
+            "status": "pending_approval",
+            "review_status": "unreviewed",
+            "current_step": 1,
+            "approval_rule_id": tax_base_rule_id,
+            "approval_history": [{"step": 1, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"}],
+            "created_at": today,
+        },
+        {
+            "corporate_id": tax_id,
+            "date": today.strftime("%Y-%m-%d"),
+            "amount": 120000,
+            "tax_rate": 10,
+            "payee": "PCショップ",
+            "category": "消耗品費",
+            "payment_method": "法人カード",
+            "line_items": [{"description": "ノートPC", "category": "消耗品費", "amount": 120000, "tax_rate": 10}],
+            "attachments": [],
+            "fiscal_period": today.strftime("%Y-%m"),
+            "ai_extracted": False,
+            "submitted_by": tax_id,
+            "status": "pending_approval",
+            "review_status": "unreviewed",
+            "current_step": 1,
+            "approval_rule_id": tax_strict_rule_id,
+            "approval_history": [
+                {"step": 1, "roleId": "accounting", "roleName": "経理担当", "status": "pending"},
+                {"step": 2, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"},
+            ],
+            "created_at": today,
+        },
+    ])
+    print("✅ 税理士法人 承認ルール2件 / 請求書2件 / 領収書2件 作成")
+
+    # ═══════════════════════════════════════════
+    # 一般法人A（seed_corp_a_uid: test-token でアクセスする法人）
+    # ═══════════════════════════════════════════
+    res_a = await db["corporates"].insert_one({
+        "firebase_uid": CORP_A_UID,
+        "name": "株式会社アルファ",
+        "corporateType": "corporate",
+        "planId": "plan_standard",
+        "is_active": True,
+        "created_at": today,
+    })
+    corp_a_id = str(res_a.inserted_id)
+    print(f"✅ 一般法人A 作成: {corp_a_id}")
+
+    await db["employees"].insert_many([
+        {
+            "firebase_uid": EMP_A_STAFF_UID,
+            "corporate_id": corp_a_id,
+            "role": "staff",
+            "email": "staff@alpha.co.jp",
+            "is_active": True,
+            "created_at": today,
+        },
+        {
+            "firebase_uid": EMP_A_MANAGER_UID,
+            "corporate_id": corp_a_id,
+            "role": "dept_manager",
+            "email": "manager@alpha.co.jp",
+            "is_active": True,
+            "created_at": today,
+        },
+    ])
+    print("✅ 一般法人A 従業員2名作成")
+
+    # 承認ルール（法人A）
+    a_rules_res = await db["approval_rules"].insert_many([
+        {
+            "corporate_id": corp_a_id,
+            "name": "（テスト）基本ルート（全件対象）",
+            "applies_to": ["receipt", "received_invoice", "issued_invoice"],
+            "conditions": [{"field": "always", "operator": "", "value": ""}],
+            "steps": [{"step": 1, "role": "direct_manager", "required": True}],
+            "active": True,
+            "created_at": today,
+        },
+        {
+            "corporate_id": corp_a_id,
+            "name": "（テスト）経理確認＋部長承認（10万円以上）",
+            "applies_to": ["receipt", "received_invoice", "issued_invoice"],
+            "conditions": [{"field": "amount", "operator": ">=", "value": 100000}],
+            "steps": [
+                {"step": 1, "role": "accounting", "required": True},
+                {"step": 2, "role": "direct_manager", "required": True},
+            ],
+            "active": True,
+            "created_at": today,
+        },
+    ])
+    a_base_rule_id   = str(a_rules_res.inserted_ids[0])
+    a_strict_rule_id = str(a_rules_res.inserted_ids[1])
+
+    # 請求書（法人A）
+    await db["invoices"].insert_many([
+        {
+            "corporate_id": corp_a_id,
+            "direction": "issued",
+            "invoice_number": "INV-MOCK-001",
+            "client_name": "株式会社モックアルファ",
+            "recipient_email": "alpha@example.com",
+            "issue_date": "2024-03-01",
+            "due_date": "2024-03-31",
+            "subtotal": 50000,
+            "tax_amount": 5000,
+            "total_amount": 55000,
+            "line_items": [{"description": "コンサルティング費用", "category": "売上", "amount": 50000, "tax_rate": 10}],
+            "status": "pending_approval",
+            "review_status": "unreviewed",
+            "current_step": 1,
+            "approval_rule_id": a_base_rule_id,
+            "approval_history": [{"step": 1, "roleId": "direct_manager", "roleName": "直属の部門長", "status": "pending"}],
+            "fiscal_period": "2024-03",
+            "created_by": corp_a_id,
+            "created_at": today,
+            "is_deleted": False,
+        },
+        {
+            "corporate_id": corp_a_id,
+            "direction": "received",
+            "invoice_number": "REC-MOCK-001",
+            "client_name": "（受領）デザイン事務所",
+            "recipient_email": "design@example.com",
+            "issue_date": "2024-03-10",
+            "due_date": "2024-04-10",
+            "subtotal": 150000,
+            "tax_amount": 15000,
+            "total_amount": 165000,
+            "line_items": [{"description": "ロゴデザイン費用", "category": "外注費", "amount": 150000, "tax_rate": 10}],
+            "status": "pending_approval",
+            "review_status": "unreviewed",
+            "current_step": 1,
+            "approval_rule_id": a_strict_rule_id,
+            "approval_history": [
+                {"step": 1, "roleId": "accounting", "roleName": "経理担当", "status": "pending"},
+                {"step": 2, "roleId": "direct_manager", "roleName": "直属の部門長", "status": "pending"},
+            ],
+            "fiscal_period": "2024-03",
+            "created_by": corp_a_id,
+            "created_at": today,
+            "is_deleted": False,
+        },
+        {
+            "corporate_id": corp_a_id,
+            "direction": "received",
+            "invoice_number": "REC-MOCK-002",
+            "client_name": "（受領）クラウドサービス",
+            "recipient_email": "cloud@example.com",
+            "issue_date": "2024-02-28",
+            "due_date": (today - timedelta(days=7)).strftime("%Y-%m-%d"),  # 期限切れ
+            "subtotal": 80000,
+            "tax_amount": 8000,
+            "total_amount": 88000,
+            "line_items": [{"description": "サーバー利用料", "category": "通信費", "amount": 80000, "tax_rate": 10}],
+            "status": "approved",
+            "review_status": "approved",
+            "current_step": 2,
+            "approval_rule_id": a_base_rule_id,
+            "approval_history": [
+                {"step": 1, "roleId": "direct_manager", "roleName": "直属の部門長", "status": "approved", "approverName": "山田太郎", "actionDate": "2024-03-01"}
+            ],
+            "fiscal_period": "2024-02",
+            "created_by": corp_a_id,
+            "created_at": today,
+            "is_deleted": False,
+        },
+    ])
+
+    # 領収書（法人A）
+    await db["receipts"].insert_many([
+        {
+            "corporate_id": corp_a_id,
+            "date": "2024-03-05",
+            "amount": 5500,
+            "tax_rate": 10,
+            "payee": "タクシー会社",
+            "category": "旅費交通費",
+            "payment_method": "法人カード",
+            "line_items": [{"description": "移動費", "category": "旅費交通費", "amount": 5000, "tax_rate": 10}],
+            "attachments": [],
+            "fiscal_period": "2024-03",
+            "ai_extracted": True,
+            "submitted_by": corp_a_id,
+            "status": "pending_approval",
+            "review_status": "unreviewed",
+            "current_step": 1,
+            "approval_rule_id": a_base_rule_id,
+            "approval_history": [{"step": 1, "roleId": "direct_manager", "roleName": "直属の部門長", "status": "pending"}],
+            "created_at": today,
+        },
+        {
+            "corporate_id": corp_a_id,
+            "date": "2024-03-08",
+            "amount": 110000,
+            "tax_rate": 10,
+            "payee": "PCショップ",
+            "category": "消耗品費",
+            "payment_method": "立替",
+            "line_items": [{"description": "ディスプレイ", "category": "消耗品費", "amount": 100000, "tax_rate": 10}],
+            "attachments": [],
+            "fiscal_period": "2024-03",
+            "ai_extracted": False,
+            "submitted_by": corp_a_id,
+            "status": "pending_approval",
+            "review_status": "unreviewed",
+            "current_step": 1,
+            "approval_rule_id": a_strict_rule_id,
+            "approval_history": [
+                {"step": 1, "roleId": "accounting", "roleName": "経理担当", "status": "pending"},
+                {"step": 2, "roleId": "direct_manager", "roleName": "直属の部門長", "status": "pending"},
+            ],
+            "created_at": today,
+        },
+    ])
+    print("✅ 一般法人A 承認ルール2件 / 請求書3件 / 領収書2件 作成")
+
+    # ═══════════════════════════════════════════
+    # 一般法人B（データ分離テスト用）
+    # ═══════════════════════════════════════════
+    res_b = await db["corporates"].insert_one({
+        "firebase_uid": CORP_B_UID,
+        "name": "株式会社ベータ",
+        "corporateType": "corporate",
+        "planId": "plan_basic",
+        "is_active": True,
+        "created_at": today,
+    })
+    corp_b_id = str(res_b.inserted_id)
+    print(f"✅ 一般法人B 作成: {corp_b_id}")
+
+    await db["employees"].insert_many([
+        {
+            "firebase_uid": EMP_B_STAFF_UID,
+            "corporate_id": corp_b_id,
+            "role": "staff",
+            "email": "staff@beta.co.jp",
+            "is_active": True,
+            "created_at": today,
+        },
+        {
+            "firebase_uid": EMP_B_MANAGER_UID,
+            "corporate_id": corp_b_id,
+            "role": "dept_manager",
+            "email": "manager@beta.co.jp",
+            "is_active": True,
+            "created_at": today,
+        },
+    ])
+    print("✅ 一般法人B 従業員2名作成")
+
+    # 承認ルール（法人B）
+    b_rules_res = await db["approval_rules"].insert_many([
+        {
+            "corporate_id": corp_b_id,
+            "name": "B社 基本承認ルート",
+            "applies_to": ["receipt", "received_invoice", "issued_invoice"],
+            "conditions": [{"field": "always", "operator": "", "value": ""}],
+            "steps": [{"step": 1, "role": "dept_manager", "required": True}],
+            "active": True,
+            "created_at": today,
+        },
+        {
+            "corporate_id": corp_b_id,
+            "name": "B社 高額承認ルート（5万円以上）",
+            "applies_to": ["receipt", "received_invoice"],
+            "conditions": [{"field": "amount", "operator": ">=", "value": 50000}],
+            "steps": [
+                {"step": 1, "role": "accounting", "required": True},
+                {"step": 2, "role": "dept_manager", "required": True},
+            ],
+            "active": True,
+            "created_at": today,
+        },
+    ])
+    b_base_rule_id   = str(b_rules_res.inserted_ids[0])
+    b_strict_rule_id = str(b_rules_res.inserted_ids[1])
+
+    # 請求書（法人B）
+    await db["invoices"].insert_many([
+        {
+            "corporate_id": corp_b_id,
+            "direction": "issued",
+            "invoice_number": "B-INV-001",
+            "client_name": "株式会社ガンマ",
+            "recipient_email": "gamma@example.com",
+            "issue_date": today.strftime("%Y-%m-%d"),
+            "due_date": (today + timedelta(days=30)).strftime("%Y-%m-%d"),
+            "subtotal": 30000,
+            "tax_amount": 3000,
+            "total_amount": 33000,
+            "line_items": [{"description": "業務委託費", "category": "売上", "amount": 30000, "tax_rate": 10}],
+            "status": "pending_approval",
+            "review_status": "unreviewed",
+            "current_step": 1,
+            "approval_rule_id": b_base_rule_id,
+            "approval_history": [{"step": 1, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"}],
+            "fiscal_period": today.strftime("%Y-%m"),
+            "created_by": corp_b_id,
+            "created_at": today,
+            "is_deleted": False,
+        },
+        {
+            "corporate_id": corp_b_id,
+            "direction": "received",
+            "invoice_number": "B-REC-001",
+            "client_name": "（受領）B社の取引先",
+            "recipient_email": "vendor@example.com",
+            "issue_date": (today - timedelta(days=5)).strftime("%Y-%m-%d"),
+            "due_date": (today + timedelta(days=25)).strftime("%Y-%m-%d"),
+            "subtotal": 75000,
+            "tax_amount": 7500,
+            "total_amount": 82500,
+            "line_items": [{"description": "広告費", "category": "広告宣伝費", "amount": 75000, "tax_rate": 10}],
+            "status": "pending_approval",
+            "review_status": "unreviewed",
+            "current_step": 1,
+            "approval_rule_id": b_strict_rule_id,
+            "approval_history": [
+                {"step": 1, "roleId": "accounting", "roleName": "経理担当", "status": "pending"},
+                {"step": 2, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"},
+            ],
+            "fiscal_period": today.strftime("%Y-%m"),
+            "created_by": corp_b_id,
+            "created_at": today,
+            "is_deleted": False,
+        },
+    ])
+
+    # 領収書（法人B）
+    await db["receipts"].insert_many([
+        {
+            "corporate_id": corp_b_id,
+            "date": today.strftime("%Y-%m-%d"),
+            "amount": 12000,
+            "tax_rate": 10,
+            "payee": "B社の取引先",
+            "category": "交際費",
+            "payment_method": "立替",
+            "line_items": [{"description": "会食費", "category": "交際費", "amount": 12000, "tax_rate": 10}],
+            "attachments": [],
+            "fiscal_period": today.strftime("%Y-%m"),
+            "ai_extracted": False,
+            "submitted_by": corp_b_id,
+            "status": "pending_approval",
+            "review_status": "unreviewed",
+            "current_step": 1,
+            "approval_rule_id": b_base_rule_id,
+            "approval_history": [{"step": 1, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"}],
+            "created_at": today,
+        },
+        {
+            "corporate_id": corp_b_id,
+            "date": today.strftime("%Y-%m-%d"),
+            "amount": 68000,
+            "tax_rate": 10,
+            "payee": "オフィス用品店",
+            "category": "消耗品費",
+            "payment_method": "法人カード",
+            "line_items": [{"description": "オフィスチェア", "category": "消耗品費", "amount": 68000, "tax_rate": 10}],
+            "attachments": [],
+            "fiscal_period": today.strftime("%Y-%m"),
+            "ai_extracted": False,
+            "submitted_by": corp_b_id,
+            "status": "pending_approval",
+            "review_status": "unreviewed",
+            "current_step": 1,
+            "approval_rule_id": b_strict_rule_id,
+            "approval_history": [
+                {"step": 1, "roleId": "accounting", "roleName": "経理担当", "status": "pending"},
+                {"step": 2, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"},
+            ],
+            "created_at": today,
+        },
+    ])
+    print("✅ 一般法人B 承認ルール2件 / 請求書2件 / 領収書2件 作成")
+
+    # ─────── 完了メッセージ ───────
+    print("\n" + "=" * 60)
+    print("🎉 シードデータの投入が完了しました！")
+    print("=" * 60)
+    print(f"\n【確認用情報】")
+    print(f"  税理士法人  corporate_id : {tax_id}   (firebase_uid: {TAX_FIRM_UID})")
+    print(f"  一般法人A   corporate_id : {corp_a_id}  (firebase_uid: {CORP_A_UID})")
+    print(f"  一般法人B   corporate_id : {corp_b_id}  (firebase_uid: {CORP_B_UID})")
+    print(f"\n  ※ API テスト時: Authorization: Bearer test-token")
+    print(f"     → uid=seed_corp_a_uid → 一般法人A としてアクセス")
+    print(f"\n  Swagger Docs: http://localhost:8000/docs\n")
+
+    client.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(seed())
