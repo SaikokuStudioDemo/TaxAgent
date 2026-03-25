@@ -34,7 +34,7 @@ CONCURRENCY = 20  # 並列ダウンロード数
 # ---------------------------------------------------------------------------
 # ダウンロードヘルパー
 # ---------------------------------------------------------------------------
-async def fetch_json(client: httpx.AsyncClient, url: str) -> dict | None:
+async def fetch_json(client: httpx.AsyncClient, url: str):
     try:
         resp = await client.get(url)
         if resp.status_code == 404:
@@ -46,7 +46,7 @@ async def fetch_json(client: httpx.AsyncClient, url: str) -> dict | None:
         return None
 
 
-async def download_branches(bank_codes: list[str]) -> dict[str, dict]:
+async def download_branches(bank_codes):
     """全銀行の支店データを並列ダウンロードして {bank_code: {branch_code: {...}}} を返す"""
     results: dict[str, dict] = {}
     semaphore = asyncio.Semaphore(CONCURRENCY)
