@@ -221,13 +221,20 @@ async def update_employee(
     if not caller_uid:
         raise HTTPException(status_code=400, detail="Invalid auth token format")
 
-    # Resolve corporate_id
+    # Resolve corporate_id and verify caller has admin/manager role
     caller_emp = await db["employees"].find_one({"firebase_uid": caller_uid})
     if caller_emp and caller_emp.get("corporate_id"):
         corporate_id = caller_emp.get("corporate_id")
+        # Employees must have admin or manager role to update other employees
+        caller_role = caller_emp.get("role", "staff")
+        if caller_role not in ("admin", "manager"):
+            raise HTTPException(status_code=403, detail="従業員情報の更新には管理者または管理職の権限が必要です。")
     else:
+        # Corporate entity itself (owner) can always update employees
         corp = await db["corporates"].find_one({"firebase_uid": caller_uid}, {"_id": 1})
         corporate_id = str(corp["_id"]) if corp else None
+        if not corp:
+            raise HTTPException(status_code=403, detail="アクセス権限がありません。")
 
     # Verify the target employee belongs to this corporate
     try:
@@ -273,9 +280,15 @@ async def delete_employee(
         corp = await db["corporates"].find_one({"firebase_uid": parent_firebase_uid}, {"_id": 1})
         corporate_id = str(corp["_id"]) if corp else None
 
-    # 1. Verify the employee belongs to this corporate
+    # 1. Verify the employee belongs to this corporate (ObjectId only)
+    try:
+        from bson import ObjectId as EmpObjectId
+        emp_oid = EmpObjectId(employee_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid employee ID format")
+
     target_emp = await db["employees"].find_one({
-        "$or": [{"firebase_uid": employee_id}, {"email": employee_id}],
+        "_id": emp_oid,
         "corporate_id": corporate_id
     })
     

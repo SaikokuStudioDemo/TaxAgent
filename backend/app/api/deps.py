@@ -28,11 +28,13 @@ async def get_current_user(cred: HTTPAuthorizationCredentials = Depends(security
     
     # -------------------------------------------------------------
     # MOCK MODE (For fast development without actual Firebase Auth)
+    # Only allow mock tokens in non-production environments
     # -------------------------------------------------------------
-    if token == "test-token":
-        return {"uid": "seed_corp_a_uid", "email": "admin@example.com"}
-    if token == "tax-test-token":
-        return {"uid": "tax_firm_uid", "email": "admin@tax-firm.example.com"}
+    if os.environ.get("ENVIRONMENT", "development") != "production":
+        if token == "test-token":
+            return {"uid": "seed_corp_a_uid", "email": "admin@example.com"}
+        if token == "tax-test-token":
+            return {"uid": "tax_firm_uid", "email": "admin@tax-firm.example.com"}
         
     # -------------------------------------------------------------
     # PRODUCTION MODE (Requires active Firebase creds)
