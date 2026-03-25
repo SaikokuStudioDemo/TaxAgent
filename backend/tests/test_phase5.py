@@ -96,7 +96,7 @@ async def test_rule_evaluation_match(corporate_id, approval_rule, client):
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["approval_rule_id"] == approval_rule
-    assert data["review_status"] == "unreviewed"
+    assert data["approval_status"] == "pending_approval"
     assert data["current_step"] == 1
 
 
@@ -153,13 +153,13 @@ async def test_approval_step_progression(corporate_id, approval_rule, client):
     db = get_database()
     updated = await db["receipts"].find_one({"_id": ObjectId(receipt_id)})
     assert updated["current_step"] == 2
-    assert updated["review_status"] == "unreviewed"
+    assert updated["approval_status"] == "pending_approval"
 
 
 @pytest.mark.asyncio
 async def test_approval_final_step(corporate_id, approval_rule, client):
     """
-    Approving the final step (step 2) should set review_status to 'approved'.
+    Approving the final step (step 2) should set approval_status to 'approved'.
     """
     create_resp = await client.post("/api/v1/receipts", json={
         "date": "2025-04-01",
@@ -192,7 +192,7 @@ async def test_approval_final_step(corporate_id, approval_rule, client):
 
     db = get_database()
     updated = await db["receipts"].find_one({"_id": ObjectId(receipt_id)})
-    assert updated["review_status"] == "approved"
+    assert updated["approval_status"] == "approved"
 
 
 @pytest.mark.asyncio
@@ -222,7 +222,7 @@ async def test_rejection_requires_comment(corporate_id, approval_rule, client):
 
 @pytest.mark.asyncio
 async def test_rejection_sets_status(corporate_id, approval_rule, client):
-    """Reject with comment should set review_status to rejected."""
+    """Reject with comment should set approval_status to rejected."""
     create_resp = await client.post("/api/v1/receipts", json={
         "date": "2025-04-01",
         "amount": 50000,
@@ -245,7 +245,7 @@ async def test_rejection_sets_status(corporate_id, approval_rule, client):
 
     db = get_database()
     updated = await db["receipts"].find_one({"_id": ObjectId(receipt_id)})
-    assert updated["review_status"] == "rejected"
+    assert updated["approval_status"] == "rejected"
 
 
 # ─────────────── Alert Service Tests ───────────────
@@ -266,7 +266,7 @@ async def test_high_amount_alert_generated(corporate_id, client):
         "category": "設備費",
         "payment_method": "銀行振込",
         "fiscal_period": "2025-04",
-        "review_status": "unreviewed",
+        "approval_status": "pending_approval",
         "high_amount_alerted": False,
         "created_at": datetime.utcnow(),
     })
@@ -290,7 +290,7 @@ async def test_overdue_alert_generated(corporate_id):
 
     await db["invoices"].insert_one({
         "corporate_id": corporate_id,
-        "direction": "received",
+        "document_type": "received",
         "invoice_number": "INV-001",
         "client_name": "遅延テスト株式会社",
         "issue_date": "2025-03-01",

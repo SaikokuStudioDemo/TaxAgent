@@ -161,8 +161,8 @@ async def run_all():
             })
         updated = await db["receipts"].find_one({"_id": ObjectId(rid)})
         assert updated["current_step"] == 2, f"step={updated['current_step']}"
-        assert updated["review_status"] == "unreviewed"
-        ok(f"step1承認後: current_step={updated['current_step']}, review_status={updated['review_status']}")
+        assert updated["approval_status"] == "pending_approval"
+        ok(f"step1承認後: current_step={updated['current_step']}, approval_status={updated['approval_status']}")
     except Exception as e:
         fail("承認 step1→step2", e)
 
@@ -185,8 +185,8 @@ async def run_all():
                     "step": step, "approver_id": f"approver_{step}", "action": "approved",
                 })
         final = await db["receipts"].find_one({"_id": ObjectId(rid)})
-        assert final["review_status"] == "approved"
-        ok(f"完全承認: review_status={final['review_status']}")
+        assert final["approval_status"] == "approved"
+        ok(f"完全承認: approval_status={final['approval_status']}")
     except Exception as e:
         fail("完全承認", e)
 
@@ -200,7 +200,7 @@ async def run_all():
                 "transactions": [{
                     "transaction_date": datetime.utcnow().strftime("%Y-%m-%d"),
                     "description": "マッチングテスト株式会社",
-                    "amount": 33000, "direction": "debit",
+                    "amount": 33000, "transaction_type": "debit",
                 }],
             })
             cr = await ac.post("/api/v1/receipts", json={

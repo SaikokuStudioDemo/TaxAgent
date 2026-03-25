@@ -190,13 +190,13 @@ def test_approval_step1_progression():
 
         updated = await db["receipts"].find_one({"_id": ObjectId(receipt_id)})
         assert updated["current_step"] == 2
-        assert updated["review_status"] == "unreviewed"
+        assert updated["approval_status"] == "pending_approval"
         print(f"\n✅ Step1承認OK: current_step={updated['current_step']}")
 
     asyncio.run(run())
 
 
-# ─────────── 9: step1 + step2 → review_status = approved ───────────
+# ─────────── 9: step1 + step2 → approval_status = approved ───────────
 
 def test_approval_fully_approved():
     override_auth(CORP_A_UID)
@@ -226,8 +226,8 @@ def test_approval_fully_approved():
             })
 
         final = await db["receipts"].find_one({"_id": ObjectId(receipt_id)})
-        assert final["review_status"] == "approved"
-        print(f"\n✅ 完全承認OK: review_status={final['review_status']}")
+        assert final["approval_status"] == "approved"
+        print(f"\n✅ 完全承認OK: approval_status={final['approval_status']}")
 
     asyncio.run(run())
 
