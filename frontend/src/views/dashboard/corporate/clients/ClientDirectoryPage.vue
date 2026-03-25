@@ -21,7 +21,7 @@ interface ClientDisplay {
 }
 
 // --- COMPOSABLE ---
-const { clients: apiClients, fetchClients, createClient, updateClient, deleteClient } = useClients();
+const { clients: apiClients, fetchClients, deleteClient } = useClients();
 
 const mapToDisplay = (c: any): ClientDisplay => ({
   id: c.id ?? c._id,
@@ -70,25 +70,8 @@ const openEditModal = (client: ClientDisplay) => {
   isModalOpen.value = true;
 };
 
-const handleSave = async (clientData: any) => {
-  const payload = {
-    name: clientData.name,
-    registration_number: clientData.companyRegistrationNumber,
-    department: clientData.department,
-    contact_person: clientData.contactPerson,
-    email: clientData.email,
-    phone: clientData.phone,
-    postal_code: clientData.postalCode,
-    address: clientData.address,
-    payment_terms: clientData.paymentTerms,
-    internal_notes: clientData.internalNotes,
-  };
-  if (editingClient.value?.id) {
-    await updateClient(editingClient.value.id, payload);
-  } else {
-    await createClient(payload as any);
-  }
-  isModalOpen.value = false;
+const handleSaved = () => {
+  fetchClients();
 };
 
 const handleDelete = async (id: string, name: string) => {
@@ -260,7 +243,7 @@ const openBankModal = (client: ClientDisplay) => {
       :show="isModalOpen"
       :editData="editingClient"
       @close="isModalOpen = false"
-      @save="handleSave"
+      @saved="handleSaved"
     />
 
     <!-- Bank Account Modal -->
