@@ -11,6 +11,7 @@ test_integration_seed.py - シードデータを使った結合テスト
 または pytest.ini を参照して:
     PYTHONPATH=. venv/bin/pytest tests/test_integration_seed.py -v
 """
+import os
 import pytest
 import asyncio
 from httpx import AsyncClient, ASGITransport
@@ -21,8 +22,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from app.main import app
 from app.api.deps import get_current_user
 
-MONGO_URI = "mongodb://localhost:27017"
-DB_NAME = "tax_agent"
+MONGO_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("MONGODB_DB_NAME", "tax_agent_test")
 CORP_A_UID = "seed_corp_a_uid"
 CORP_B_UID = "seed_corp_b_uid"
 
