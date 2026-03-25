@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { 
     Search, 
     Filter, 
@@ -17,6 +17,7 @@ import {
 } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import { useInvoices } from '@/composables/useInvoices';
+import { api } from '@/lib/api';
 import InvoiceDetailModal from '@/components/invoices/InvoiceDetailModal.vue';
 import { buildApprovalHistory, type ApprovalHistory } from '@/composables/useApprovalHistory';
 import { formatNumber as formatCurrency } from '@/lib/utils/formatters';
@@ -49,9 +50,9 @@ const mapToModalData = (inv: any): InvoiceItem => {
     category: inv.category || '未分類',
     paymentMethod: inv.paymentMethod || '請求書払い',
     memo: inv.memo || '',
-    status: inv.reviewStatus === 'approved' ? 'approved' : inv.reviewStatus === 'rejected' ? 'rejected' : 'pending',
+    status: inv.approvalStatus === 'approved' || inv.approvalStatus === 'auto_approved' ? 'approved' : inv.approvalStatus === 'rejected' ? 'rejected' : 'pending',
     currentStepIndex: inv.current_step ? inv.current_step - 1 : 0,
-    approvalHistory: buildApprovalHistory(inv.approval_steps, inv.approval_history, inv.reviewStatus),
+    approvalHistory: buildApprovalHistory(inv.approval_steps, inv.approval_history, inv.approvalStatus),
     imageUrl: inv.image_url || ((inv.attachments && inv.attachments.length > 0) ? inv.attachments[0] : ''),
   };
 };
@@ -61,6 +62,7 @@ const router = useRouter();
 // Tabs: 'issued' (発行), 'received' (受領), 'pending_approval' (承認待ち), 'drafts' (下書き)
 const activeTab = ref<'issued' | 'received' | 'pending_approval' | 'drafts'>('issued');
 const searchQuery = ref('');
+const tabCounts = ref({ issued: 0, received: 0, pending_approval: 0, drafts: 0 });
 
 const { invoices, fetchInvoices, bulkAction, deleteInvoice } = useInvoices();
 const expandedInvoiceIds = ref<string[]>([]);
@@ -110,10 +112,10 @@ const handleBulkSend = () => {
     if (!selectedInvoiceIds.value.length) return;
 
     // Evaluate approval requirements
-    const unapproved = invoices.value.filter(i => 
-        selectedInvoiceIds.value.includes(i.id) && 
-        i.approval_rule_id && 
-        i.review_status !== 'approved'
+    const unapproved = invoices.value.filter(i =>
+        selectedInvoiceIds.value.includes(i.id) &&
+        i.approval_rule_id &&
+        i.approval_status !== 'approved' && i.approval_status !== 'auto_approved'
     );
 
     if (unapproved.length > 0) {
@@ -167,27 +169,56 @@ const handleModalActionCompleted = async () => {
     await loadInvoices();
 };
 
-// Fetch all invoices to calculate counts and allow filtering
+// Fetch invoices filtered by active tab via API parameters
 const loadInvoices = async () => {
-    await fetchInvoices();
+    if (activeTab.value === 'issued') {
+        await fetchInvoices({ document_type: 'issued', approval_status: 'approved' });
+    } else if (activeTab.value === 'received') {
+        await fetchInvoices({ document_type: 'received' });
+    } else if (activeTab.value === 'pending_approval') {
+        await fetchInvoices({ approval_status: 'pending_approval' });
+    } else if (activeTab.value === 'drafts') {
+        await fetchInvoices({ approval_status: 'draft' });
+    }
+    tabCounts.value[activeTab.value] = invoices.value.length;
 };
 
-onMounted(loadInvoices);
-// No need to watch activeTab if we fetch all once, but we can keep it if we want to refresh
+const loadAllTabCounts = async () => {
+    const [issued, received, pending, drafts] = await Promise.all([
+        api.get<any[]>('/invoices?document_type=issued&approval_status=approved'),
+        api.get<any[]>('/invoices?document_type=received'),
+        api.get<any[]>('/invoices?approval_status=pending_approval'),
+        api.get<any[]>('/invoices?approval_status=draft'),
+    ]);
+    tabCounts.value = {
+        issued: issued.length,
+        received: received.length,
+        pending_approval: pending.length,
+        drafts: drafts.length,
+    };
+};
+
+onMounted(async () => {
+    await Promise.all([loadInvoices(), loadAllTabCounts()]);
+});
+watch(activeTab, async () => {
+    await Promise.all([loadInvoices(), loadAllTabCounts()]);
+});
 
 // Map API invoice to display format
-type InvoiceStatus = 'draft' | 'pending_approval' | 'pending_send' | 'sent_unmatched' | 'matched' | 'overdue_unmatched' | 'received_unmatched' | 'received_matched';
+type InvoiceStatus = 'draft' | 'pending_approval' | 'pending_send' | 'sent_unmatched' | 'reconciled' | 'overdue_unmatched' | 'received_unmatched' | 'received_reconciled';
 
 const mapStatus = (inv: any): InvoiceStatus => {
-    if (inv.status === 'draft') return 'draft';
-    if (inv.status === 'pending_approval') return 'pending_approval';
-    if (inv.status === 'matched') return inv.direction === 'received' ? 'received_matched' : 'matched';
-    if (inv.direction === 'received') return 'received_unmatched';
-    if (inv.status === 'sent') return 'sent_unmatched';
+    if (inv.approval_status === 'draft') return 'draft';
+    if (inv.approval_status === 'pending_approval') return 'pending_approval';
+    if (inv.reconciliation_status === 'reconciled') return inv.document_type === 'received' ? 'received_reconciled' : 'reconciled';
+    if (inv.document_type === 'received') return 'received_unmatched';
+    if (inv.delivery_status === 'sent') return 'sent_unmatched';
     return 'pending_send';
 };
 
 const filteredInvoices = computed(() => {
+    // API already filtered by tab; apply only search filter here
     let list = invoices.value.map(inv => ({
         ...inv,
         displayStatus: mapStatus(inv),
@@ -198,27 +229,16 @@ const filteredInvoices = computed(() => {
         dueDate: inv.due_date,
         title: `${inv.invoice_number ?? ''} ${inv.client_name ?? ''}`.trim(),
         amount: inv.total_amount,
-        // Template compatibility fields
         clientType: 'corporate',
         type: 'single',
         recurringDetails: undefined,
         projectName: undefined,
-        reviewStatus: inv.review_status,
+        approvalStatus: inv.approval_status,
         approval_history: (inv as any).approval_history || [],
         extra_approval_steps: (inv as any).extra_approval_steps || [],
         current_step_index: (inv as any).current_step_index || 0,
         lineItems: inv.line_items,
     }));
-
-    if (activeTab.value === 'issued') {
-        list = list.filter(i => i.direction === 'issued' && i.status !== 'draft' && i.status !== 'pending_approval');
-    } else if (activeTab.value === 'received') {
-        list = list.filter(i => i.direction === 'received');
-    } else if (activeTab.value === 'pending_approval') {
-        list = list.filter(i => i.status === 'pending_approval');
-    } else if (activeTab.value === 'drafts') {
-        list = list.filter(i => i.status === 'draft');
-    }
 
     if (searchQuery.value) {
         const q = searchQuery.value.toLowerCase();
@@ -231,10 +251,10 @@ const filteredInvoices = computed(() => {
     return list;
 });
 
-const issuedCount = computed(() => invoices.value.filter(i => i.direction === 'issued' && i.status !== 'draft' && i.status !== 'pending_approval').length);
-const receivedCount = computed(() => invoices.value.filter(i => i.direction === 'received').length);
-const pendingApprovalCount = computed(() => invoices.value.filter(i => i.status === 'pending_approval').length);
-const draftsCount = computed(() => invoices.value.filter(i => i.status === 'draft').length);
+const issuedCount = computed(() => tabCounts.value.issued);
+const receivedCount = computed(() => tabCounts.value.received);
+const pendingApprovalCount = computed(() => tabCounts.value.pending_approval);
+const draftsCount = computed(() => tabCounts.value.drafts);
 
 const toggleExpansion = (id: string) => {
     const idx = expandedInvoiceIds.value.indexOf(id);
@@ -247,12 +267,12 @@ const toggleExpansion = (id: string) => {
 
 const currentMonth = new Date().toISOString().slice(0, 7);
 const issuedSummary = computed(() => {
-    const list = invoices.value.filter(i => i.direction === 'issued');
+    const list = invoices.value.filter(i => i.document_type === 'issued');
     const thisMonth = list.filter(i => i.issue_date?.startsWith(currentMonth));
-    const matched = list.filter(i => i.status === 'matched');
-    const unmatched = list.filter(i => i.status !== 'matched' && i.status !== 'draft');
+    const matched = list.filter(i => i.reconciliation_status === 'reconciled');
+    const unmatched = list.filter(i => i.reconciliation_status !== 'reconciled' && i.approval_status !== 'draft');
     const overdue = list.filter(i =>
-        i.status !== 'matched' &&
+        i.reconciliation_status !== 'reconciled' &&
         i.due_date && new Date(i.due_date) < new Date()
     );
     return {
@@ -265,10 +285,10 @@ const issuedSummary = computed(() => {
 });
 
 const receivedSummary = computed(() => {
-    const list = invoices.value.filter(i => i.direction === 'received');
+    const list = invoices.value.filter(i => i.document_type === 'received');
     const thisMonth = list.filter(i => i.issue_date?.startsWith(currentMonth));
-    const matched = list.filter(i => i.status === 'matched' || i.status === 'received_matched');
-    const unmatched = list.filter(i => i.status !== 'matched' && i.status !== 'received_matched' && i.status !== 'draft');
+    const matched = list.filter(i => i.reconciliation_status === 'reconciled');
+    const unmatched = list.filter(i => i.reconciliation_status !== 'reconciled' && i.approval_status !== 'draft');
     
     return {
         totalPlanned: thisMonth.reduce((s, i) => s + (i.total_amount || 0), 0),
@@ -280,13 +300,13 @@ const receivedSummary = computed(() => {
 const getStatusBadge = (status: InvoiceStatus) => {
     switch(status) {
         case 'sent_unmatched': return { label: '未消込 (送付済)', classes: 'bg-blue-50 text-blue-700 border-blue-200', icon: Send };
-        case 'matched': return { label: '消込済 (入金済)', classes: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle };
+        case 'reconciled': return { label: '消込済 (入金済)', classes: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle };
         case 'pending_send': return { label: '未消込 (未送付)', classes: 'bg-amber-50 text-amber-700 border-amber-200', icon: FileText };
         case 'overdue_unmatched': return { label: '未消込 (期限超過)', classes: 'bg-red-50 text-red-700 border-red-200', icon: Clock };
         case 'draft': return { label: '下書き', classes: 'bg-gray-100 text-gray-700 border-gray-200', icon: FileText };
         case 'pending_approval': return { label: '承認待ち', classes: 'bg-orange-100 text-orange-700 border-orange-200', icon: Clock };
         case 'received_unmatched': return { label: '未消込 (支払待ち)', classes: 'bg-amber-50 text-amber-700 border-amber-200', icon: Clock };
-        case 'received_matched': return { label: '消込済 (支払完了)', classes: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle };
+        case 'received_reconciled': return { label: '消込済 (支払完了)', classes: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle };
         default: return { label: '不明', classes: 'bg-gray-100 text-gray-700 border-gray-200', icon: FileText };
     }
 };
@@ -493,8 +513,8 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
                     </span>
                 </td>
                 <td v-if="activeTab === 'received'" class="hidden md:table-cell px-4 py-4 whitespace-nowrap text-center">
-                    <span class="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold border" :class="getReviewBadge(invoice.reviewStatus).classes">
-                        {{ getReviewBadge(invoice.reviewStatus).label }}
+                    <span class="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold border" :class="getReviewBadge(invoice.approval_status).classes">
+                        {{ getReviewBadge(invoice.approval_status).label }}
                     </span>
                 </td>
                 <td class="px-4 py-4 whitespace-nowrap text-center sticky right-0 bg-white/90 group-hover:bg-blue-50/90 transition-colors backdrop-blur shadow-[-4px_0_10px_-4px_rgba(0,0,0,0.1)]">
@@ -657,7 +677,7 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
     <InvoiceDetailModal
         :show="isPreviewModalOpen"
         :invoice="selectedPreviewInvoice"
-        :direction="activeTab === 'received' ? 'received' : 'issued'"
+        :document_type="activeTab === 'received' ? 'received' : 'issued'"
         @close="closePreview"
         @action-completed="handleModalActionCompleted"
     />

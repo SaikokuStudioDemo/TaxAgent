@@ -13,7 +13,7 @@ import {
 } from 'lucide-vue-next';
 import { useInvoices } from '@/composables/useInvoices';
 import InvoiceDetailModal from '@/components/invoices/InvoiceDetailModal.vue';
-import { buildApprovalHistory, roleLabel, type ApprovalHistory } from '@/composables/useApprovalHistory';
+import { buildApprovalHistory, type ApprovalHistory } from '@/composables/useApprovalHistory';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
 interface InvoiceItem {
@@ -49,26 +49,26 @@ const mapApiInvoice = (inv: any): InvoiceItem => {
     category: inv.category ?? '未分類',
     paymentMethod: inv.payment_method ?? '請求書払い',
     memo: inv.memo ?? '',
-    status: inv.review_status === 'approved' ? 'approved' : inv.review_status === 'rejected' ? 'rejected' : 'pending',
-    isAutoApproved: inv.is_auto_approved === true,
+    status: inv.approval_status === 'approved' || inv.approval_status === 'auto_approved' ? 'approved' : inv.approval_status === 'rejected' ? 'rejected' : 'pending',
+    isAutoApproved: inv.approval_status === 'auto_approved',
     currentStepIndex: inv.current_step ? inv.current_step - 1 : 0,
-    approvalHistory: buildApprovalHistory(inv.approval_steps, inv.approval_history, inv.review_status),
+    approvalHistory: buildApprovalHistory(inv.approval_steps, inv.approval_history, inv.approval_status),
     imageUrl: (inv.attachments && inv.attachments.length > 0) ? inv.attachments[0] : (inv.image_url ?? ''),
   };
 };
 
 const loadData = async () => {
     const requestedDirection = activeDirection.value;
-    await fetchInvoices({ direction: requestedDirection });
+    await fetchInvoices({ document_type: requestedDirection });
     // Prevent race condition if user rapid-clicked tabs
     if (activeDirection.value !== requestedDirection) return;
 
     // 承認フロー対象のみ：pending_approval / 承認済（手動・自動） / 差戻し
     const approvalRelevant = (apiInvoices.value as any[]).filter(inv =>
-        inv.status === 'pending_approval' ||
-        inv.review_status === 'approved' ||
-        inv.review_status === 'rejected' ||
-        inv.is_auto_approved === true
+        inv.approval_status === 'pending_approval' ||
+        inv.approval_status === 'approved' ||
+        inv.approval_status === 'auto_approved' ||
+        inv.approval_status === 'rejected'
     );
     mockInvoices.value = approvalRelevant.map(mapApiInvoice);
 };
@@ -347,7 +347,7 @@ const handleActionCompleted = async () => {
     <InvoiceDetailModal
         :show="isDetailModalOpen"
         :invoice="selectedInvoice"
-        :direction="activeDirection"
+        :document_type="activeDirection"
         @close="closeDetail"
         @action-completed="handleActionCompleted"
     />

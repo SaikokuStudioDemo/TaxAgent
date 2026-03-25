@@ -13,7 +13,7 @@ import {
     ChevronUp
 } from 'lucide-vue-next';
 import { useInvoices } from '@/composables/useInvoices';
-import { useBankTransactions } from '@/composables/useBankTransactions';
+import { useTransactions } from '@/composables/useTransactions';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
 // --- TYPES (template-compatible) ---
@@ -39,7 +39,7 @@ interface TransactionDisplay {
 
 // --- COMPOSABLES ---
 const { invoices: apiInvoices, fetchInvoices } = useInvoices();
-const { transactions: apiTransactions, matches, fetchTransactions, fetchMatches, createMatch, deleteMatch } = useBankTransactions();
+const { transactions: apiTransactions, matches, fetchTransactions, fetchMatches, createMatch, deleteMatch } = useTransactions();
 
 // --- LOCAL STATE (built from API) ---
 const rawInvoices = ref<InvoiceDisplay[]>([]);
@@ -91,7 +91,7 @@ const applyMatchStatus = () => {
 
 onMounted(async () => {
     await Promise.all([
-        fetchInvoices({ direction: 'issued' }),
+        fetchInvoices({ document_type: 'issued' }),
         fetchTransactions({ source_type: 'bank' }),
         fetchMatches({ match_type: 'invoice' }),
     ]);

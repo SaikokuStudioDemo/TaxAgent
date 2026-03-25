@@ -12,14 +12,14 @@ import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { Doughnut } from 'vue-chartjs';
 import { useInvoices } from '@/composables/useInvoices';
 import { useReceipts } from '@/composables/useReceipts';
-import { useBankTransactions } from '@/composables/useBankTransactions';
+import { useTransactions } from '@/composables/useTransactions';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
 // --- KPI DATA ---
 const { invoices, fetchInvoices } = useInvoices();
 const { receipts, fetchReceipts } = useReceipts();
-const { transactions, matches, fetchTransactions, fetchMatches } = useBankTransactions();
+const { transactions, matches, fetchTransactions, fetchMatches } = useTransactions();
 
 onMounted(() => {
     Promise.all([

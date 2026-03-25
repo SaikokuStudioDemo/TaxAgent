@@ -9,15 +9,11 @@ import { auth } from '@/lib/firebase/config';
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 
 async function getAuthToken(): Promise<string> {
-    // Dev bypass mode
-    if (localStorage.getItem('DEV_BYPASS_AUTH') === 'true') {
-        return 'test-token';
-    }
+    const devToken = localStorage.getItem('DEV_AUTH_TOKEN');
+    if (devToken) return devToken;
     const user = auth.currentUser;
-    if (user) {
-        return await user.getIdToken();
-    }
-    return 'test-token';
+    if (user) return await user.getIdToken();
+    return '';
 }
 
 async function request<T>(

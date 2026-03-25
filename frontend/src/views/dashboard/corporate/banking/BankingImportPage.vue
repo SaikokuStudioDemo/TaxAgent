@@ -7,7 +7,7 @@ import {
   CheckCircle,
   FileSpreadsheet
 } from 'lucide-vue-next';
-import { useBankTransactions } from '@/composables/useBankTransactions';
+import { useTransactions } from '@/composables/useTransactions';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
 // --- TYPES ---
@@ -21,7 +21,7 @@ interface StagedTransaction {
 }
 
 // --- COMPOSABLE ---
-const { fetchTransactions, importTransactions } = useBankTransactions();
+const { fetchTransactions, importTransactions } = useTransactions();
 
 // --- STATE ---
 const stagedTransactions = ref<StagedTransaction[]>([]);
@@ -96,7 +96,7 @@ const handleRegister = async () => {
         transaction_date: t.date,
         description: t.description,
         amount: t.amount,
-        direction: 'debit' as const,
+        transaction_type: 'debit' as const,
         fiscal_period: period,
       })),
     });

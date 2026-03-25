@@ -137,7 +137,7 @@ const submitSelected = async () => {
     const fiscal_period = new Date().toISOString().slice(0, 7);
     for (const inv of selectedToSubmit) {
       const result = await createInvoice({
-        direction: 'received',
+        document_type: 'received',
         invoice_number: `REC-${Date.now().toString().slice(-6)}`, // Generated number for received doc
         client_name: inv.issuer,
         recipient_email: 'finance@example.com', // Placeholder

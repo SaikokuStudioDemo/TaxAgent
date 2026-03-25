@@ -44,7 +44,7 @@ interface InvoiceItem {
 const props = defineProps<{
   show: boolean;
   invoice: InvoiceItem | null;
-  direction?: 'issued' | 'received'; // Default to received if not specified
+  document_type?: 'issued' | 'received'; // Default to received if not specified
 }>();
 
 const emit = defineEmits<{
@@ -58,7 +58,7 @@ const actionComment = ref('');
 const isAddingApprover = ref(false);
 const selectedExtraApproverId = ref('');
 
-const docType = computed(() => props.direction === 'issued' ? 'issued_invoice' : 'received_invoice');
+const docType = computed(() => props.document_type === 'issued' ? 'issued_invoice' : 'received_invoice');
 
 const availableApproversToAdd = computed(() => {
   if (!props.invoice || props.invoice.approvalHistory.length === 0) return [];
@@ -151,8 +151,8 @@ const handleReject = async () => {
         <!-- Header -->
         <div class="px-6 py-4 pr-20 bg-white border-b border-gray-200 flex items-center justify-between sticky top-0 z-10 shadow-sm">
           <div>
-            <h2 class="text-lg font-bold text-gray-900">{{ direction === 'issued' ? '発行' : '受領' }}請求書詳細 : {{ invoice.id }}</h2>
-            <p class="text-xs text-gray-500 mt-1">{{ direction === 'issued' ? '取引先' : '仕入先' }}: <span class="font-medium text-gray-700">{{ invoice.vendorName }}</span></p>
+            <h2 class="text-lg font-bold text-gray-900">{{ document_type === 'issued' ? '発行' : '受領' }}請求書詳細 : {{ invoice.id }}</h2>
+            <p class="text-xs text-gray-500 mt-1">{{ document_type === 'issued' ? '取引先' : '仕入先' }}: <span class="font-medium text-gray-700">{{ invoice.vendorName }}</span></p>
           </div>
           <button @click="handleClose" class="rounded-full p-2 bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500">
             <XCircle class="h-6 w-6" aria-hidden="true" />
@@ -175,12 +175,12 @@ const handleReject = async () => {
                   </div>
                   <div class="grid grid-cols-2 gap-4">
                     <div>
-                      <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">{{ direction === 'issued' ? '発行日' : '発行元記載日' }}</dt>
+                      <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">{{ document_type === 'issued' ? '発行日' : '発行元記載日' }}</dt>
                       <dd class="font-medium text-gray-900">{{ invoice.issuedDate }}</dd>
                     </div>
                     <div>
-                      <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5" :class="direction === 'received' ? 'text-red-600' : ''">支払期限</dt>
-                      <dd class="font-bold" :class="direction === 'received' ? 'text-red-700' : 'text-gray-900'">{{ invoice.dueDate }}</dd>
+                      <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5" :class="document_type === 'received' ? 'text-red-600' : ''">支払期限</dt>
+                      <dd class="font-bold" :class="document_type === 'received' ? 'text-red-700' : 'text-gray-900'">{{ invoice.dueDate }}</dd>
                     </div>
                     <div>
                       <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">勘定科目</dt>
@@ -191,10 +191,10 @@ const handleReject = async () => {
                       <dd class="font-medium text-gray-900">{{ invoice.paymentMethod }}</dd>
                     </div>
                     <div class="col-span-2">
-                        <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">{{ direction === 'issued' ? '件名 / 取引内容' : '仕入元' }}</dt>
+                        <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">{{ document_type === 'issued' ? '件名 / 取引内容' : '仕入元' }}</dt>
                         <dd class="font-medium text-gray-900 bg-gray-50 px-2 py-1 rounded inline-block w-full flex items-center gap-2">
                             <Building2 class="w-3 h-3 text-gray-400" />
-                            {{ direction === 'issued' ? invoice.title : invoice.vendorName }}
+                            {{ document_type === 'issued' ? invoice.title : invoice.vendorName }}
                         </dd>
                     </div>
                   </div>
@@ -295,7 +295,7 @@ const handleReject = async () => {
                       <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
                     <CheckCircle v-if="!isSubmitting" class="w-4 h-4" />
-                    {{ isSubmitting ? '処理中...' : (direction === 'issued' ? '承認して次へ' : '支払承認する') }}
+                    {{ isSubmitting ? '処理中...' : (document_type === 'issued' ? '承認して次へ' : '支払承認する') }}
                   </button>
                 </div>
                 <p v-if="error" class="mt-2 text-xs text-red-600 font-medium">{{ error }}</p>

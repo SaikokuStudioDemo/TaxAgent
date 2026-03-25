@@ -95,9 +95,9 @@ const router = createRouter({
 
 router.beforeEach(async (to, _from, next) => {
     const requiresAuth = to.matched.some(record => record.meta.requiresAuth);
-    const isLocalBypass = localStorage.getItem('DEV_BYPASS_AUTH') === 'true';
+    const isDevLogin = !!localStorage.getItem('DEV_AUTH_TOKEN');
 
-    if (requiresAuth && !auth.currentUser && !isLocalBypass) {
+    if (requiresAuth && !auth.currentUser && !isDevLogin) {
         next('/');
     } else {
         next();

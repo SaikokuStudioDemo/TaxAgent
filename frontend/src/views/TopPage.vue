@@ -7,7 +7,7 @@ import { useAuth } from '@/composables/useAuth';
 import { Building2, Landmark, LogIn, Loader2, Eye, EyeOff } from 'lucide-vue-next';
 
 const router = useRouter();
-const { userProfile, isLoading, initAuth, enableLocalBypass } = useAuth();
+const { userProfile, isLoading, initAuth, devLogin } = useAuth();
 const isDevMode = import.meta.env.DEV;
 
 const email = ref('');
@@ -160,13 +160,13 @@ onMounted(() => {
              </p>
              <div class="flex flex-col gap-2">
                  <button 
-                  @click="enableLocalBypass('corporate')"
+                  @click="devLogin('corporate')"
                   class="w-full text-xs bg-white text-emerald-700 font-semibold border border-emerald-200 hover:bg-emerald-50 py-2 rounded-lg transition-colors"
                  >
                    一般法人として入る
                  </button>
                  <button 
-                  @click="enableLocalBypass('tax_firm')"
+                  @click="devLogin('tax_firm')"
                   class="w-full text-xs bg-white text-indigo-700 font-semibold border border-indigo-200 hover:bg-indigo-50 py-2 rounded-lg transition-colors"
                  >
                    税理士法人として入る

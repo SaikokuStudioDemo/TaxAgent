@@ -120,12 +120,7 @@ const handleSingleInvite = async (userId: string) => {
         const res = await fetch(`${apiUrl}/users/employees`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify([{
-                email: targetUser.email,
-                name: targetUser.name,
-                role: targetUser.role,
-                permissions: targetUser.permissions
-            }])
+            body: JSON.stringify([targetUser])
         });
 
         if (!res.ok) {

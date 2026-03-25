@@ -1,10 +1,10 @@
 /**
- * useBankTransactions.ts - Bank transactions and matching composable
+ * useTransactions.ts - Transactions (Bank/Card) and matching composable
  */
 import { ref } from 'vue';
 import { api } from '@/lib/api';
 
-export interface BankTransaction {
+export interface Transaction {
     id: string;
     source_type: 'bank' | 'card';
     account_name: string;
@@ -35,8 +35,8 @@ export interface Match {
     matched_at: string;
 }
 
-export function useBankTransactions() {
-    const transactions = ref<BankTransaction[]>([]);
+export function useTransactions() {
+    const transactions = ref<Transaction[]>([]);
     const matches = ref<Match[]>([]);
     const isLoading = ref(false);
     const error = ref<string | null>(null);
@@ -54,7 +54,7 @@ export function useBankTransactions() {
             if (params?.status) query.append('status', params.status);
             if (params?.fiscal_period) query.append('fiscal_period', params.fiscal_period);
             const qs = query.toString();
-            transactions.value = await api.get<BankTransaction[]>(`/bank-transactions${qs ? '?' + qs : ''}`);
+            transactions.value = await api.get<Transaction[]>(`/transactions${qs ? '?' + qs : ''}`);
         } catch (e: any) {
             error.value = e.message;
         } finally {
@@ -65,10 +65,10 @@ export function useBankTransactions() {
     const importTransactions = async (data: {
         source_type: 'bank' | 'card';
         account_name: string;
-        transactions: Partial<BankTransaction>[];
+        transactions: Partial<Transaction>[];
     }) => {
         try {
-            return await api.post('/bank-transactions', data);
+            return await api.post('/transactions', data);
         } catch (e: any) {
             error.value = e.message;
             return null;

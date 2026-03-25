@@ -1,37 +1,19 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { Plus, Users, FolderKanban, Edit2, Trash2, Building2, Check, X, Loader2 } from 'lucide-vue-next';
-import { api } from '@/lib/api';
-
-interface Group {
-  id: string;
-  name: string;
-}
-
-interface Department {
-  id: string;
-  name: string;
-  groups: Group[];
-}
-
-interface SubProject {
-  id: string;
-  name: string;
-  subPmName: string;
-  status: 'active' | 'completed';
-}
-
-interface Project {
-  id: string;
-  name: string;
-  pmName: string;
-  status: 'active' | 'completed';
-  subProjects?: SubProject[];
-}
+import { Plus, Users, FolderKanban, Edit2, Trash2, Building2, Check, X, Loader2, ChevronUp, ChevronDown, UserPlus } from 'lucide-vue-next';
+import { useDepartments, type Department } from '@/composables/useDepartments';
+import { useProjects, type Project } from '@/composables/useProjects';
+import { useEmployees } from '@/composables/useEmployees';
 
 const activeTab = ref<'departments' | 'projects'>('departments');
-const departments = ref<Department[]>([]);
-const isLoading = ref(false);
+
+// ─── Departments ───
+const {
+  departments, isLoading, error: deptError,
+  fetchDepartments, createDepartment, updateDepartment, deleteDepartment,
+  createGroup, updateGroup, deleteGroup,
+} = useDepartments();
+
 const errorMsg = ref('');
 
 // Editing state
@@ -50,26 +32,10 @@ const newGroupForms = ref<Record<string, string>>({});
 const showGroupFormFor = ref<string | null>(null);
 const isAddingGroup = ref<string | null>(null);
 
-const fetchDepartments = async () => {
-  isLoading.value = true;
-  errorMsg.value = '';
-  try {
-    const data = await api.get<any[]>('/departments');
-    departments.value = data.map((d: any) => ({
-      id: d.id,
-      name: d.name,
-      groups: (d.groups || []).map((g: any) => ({ id: g.id, name: g.name })),
-    }));
-  } catch (e: any) {
-    errorMsg.value = 'データの取得に失敗しました。';
-    console.error(e);
-  } finally {
-    isLoading.value = false;
-  }
-};
-
 onMounted(() => {
   fetchDepartments();
+  fetchProjects();
+  fetchEmployees();
 });
 
 // --- Department CRUD ---
@@ -88,44 +54,34 @@ const cancelEditDept = () => {
 const saveDept = async (dept: Department) => {
   const name = editingDeptName.value.trim();
   if (!name) return;
-  try {
-    await api.patch(`/departments/${dept.id}`, { name });
-    dept.name = name;
-    cancelEditDept();
-  } catch (e: any) {
-    errorMsg.value = '部門名の更新に失敗しました。';
-  }
+  const ok = await updateDepartment(dept.id, name);
+  if (ok) cancelEditDept();
+  else errorMsg.value = deptError.value || '部門名の更新に失敗しました。';
 };
 
 const deleteDept = async (deptId: string) => {
   if (!confirm('この部門を削除してもよろしいですか？')) return;
-  try {
-    await api.delete(`/departments/${deptId}`);
-    departments.value = departments.value.filter(d => d.id !== deptId);
-  } catch (e: any) {
-    errorMsg.value = '部門の削除に失敗しました。';
-  }
+  const ok = await deleteDepartment(deptId);
+  if (!ok) errorMsg.value = deptError.value || '部門の削除に失敗しました。';
 };
 
 const addDepartment = async () => {
   const name = newDeptName.value.trim();
   if (!name) return;
   isAddingDept.value = true;
-  try {
-    const created = await api.post<any>('/departments', { name });
-    departments.value.push({ id: created.id, name: created.name, groups: created.groups || [] });
+  const created = await createDepartment(name);
+  isAddingDept.value = false;
+  if (created) {
     newDeptName.value = '';
     showNewDeptForm.value = false;
-  } catch (e: any) {
-    errorMsg.value = '部門の作成に失敗しました。';
-  } finally {
-    isAddingDept.value = false;
+  } else {
+    errorMsg.value = deptError.value || '部門の作成に失敗しました。';
   }
 };
 
 // --- Group CRUD ---
 
-const startEditGroup = (deptId: string, group: Group) => {
+const startEditGroup = (deptId: string, group: { id: string; name: string }) => {
   editingGroupKey.value = `${deptId}:${group.id}`;
   editingGroupName.value = group.name;
   editingDeptId.value = null;
@@ -136,26 +92,18 @@ const cancelEditGroup = () => {
   editingGroupName.value = '';
 };
 
-const saveGroup = async (dept: Department, group: Group) => {
+const saveGroup = async (dept: Department, group: { id: string; name: string }) => {
   const name = editingGroupName.value.trim();
   if (!name) return;
-  try {
-    await api.patch(`/departments/${dept.id}/groups/${group.id}`, { name });
-    group.name = name;
-    cancelEditGroup();
-  } catch (e: any) {
-    errorMsg.value = 'グループ名の更新に失敗しました。';
-  }
+  const ok = await updateGroup(dept.id, group.id, name);
+  if (ok) cancelEditGroup();
+  else errorMsg.value = deptError.value || 'グループ名の更新に失敗しました。';
 };
 
-const deleteGroup = async (dept: Department, groupId: string) => {
+const handleDeleteGroup = async (dept: Department, groupId: string) => {
   if (!confirm('このグループを削除してもよろしいですか？')) return;
-  try {
-    await api.delete(`/departments/${dept.id}/groups/${groupId}`);
-    dept.groups = dept.groups.filter(g => g.id !== groupId);
-  } catch (e: any) {
-    errorMsg.value = 'グループの削除に失敗しました。';
-  }
+  const ok = await deleteGroup(dept.id, groupId);
+  if (!ok) errorMsg.value = deptError.value || 'グループの削除に失敗しました。';
 };
 
 const toggleGroupForm = (deptId: string) => {
@@ -171,33 +119,100 @@ const addGroup = async (dept: Department) => {
   const name = (newGroupForms.value[dept.id] || '').trim();
   if (!name) return;
   isAddingGroup.value = dept.id;
-  try {
-    const updated = await api.post<any>(`/departments/${dept.id}/groups`, { name });
-    dept.groups = updated.groups || [];
+  const ok = await createGroup(dept.id, name);
+  isAddingGroup.value = null;
+  if (ok) {
     newGroupForms.value[dept.id] = '';
     showGroupFormFor.value = null;
-  } catch (e: any) {
-    errorMsg.value = 'グループの追加に失敗しました。';
-  } finally {
-    isAddingGroup.value = null;
+  } else {
+    errorMsg.value = deptError.value || 'グループの追加に失敗しました。';
   }
 };
 
-// --- Projects (mock data) ---
-const projects = ref<Project[]>([
-  {
-    id: 'proj-1',
-    name: '社内基幹システムリプレイス',
-    pmName: '鈴木 一郎',
-    status: 'active',
-    subProjects: [
-      { id: 'sub-1-1', name: '要件定義フェーズ', subPmName: '渡辺 翔太', status: 'completed' },
-      { id: 'sub-1-2', name: '開発フェーズ', subPmName: '小林 さくら', status: 'active' }
-    ]
-  },
-  { id: 'proj-2', name: '〇〇株式会社様 Webサイト制作', pmName: '高橋 健太', status: 'active' },
-  { id: 'proj-3', name: '2025年 新卒採用プロジェクト', pmName: '佐藤 花子', status: 'completed' }
-]);
+// ─── Projects ───
+const {
+  projects, isLoading: projLoading, error: projError,
+  fetchProjects, createProject, updateProject, deleteProject,
+} = useProjects();
+
+const { employees, fetchEmployees } = useEmployees();
+
+// Project modal state
+const showProjModal = ref(false);
+const editingProject = ref<Partial<Project> | null>(null);
+const projForm = ref({ name: '', description: '' });
+const projApprovers = ref<{ user_id: string; name: string; order: number }[]>([]);
+const isSavingProj = ref(false);
+
+const openNewProjModal = () => {
+  editingProject.value = null;
+  projForm.value = { name: '', description: '' };
+  projApprovers.value = [];
+  showProjModal.value = true;
+};
+
+const openEditProjModal = (proj: Project) => {
+  editingProject.value = proj;
+  projForm.value = { name: proj.name, description: proj.description || '' };
+  projApprovers.value = [...proj.approvers].sort((a, b) => a.order - b.order);
+  showProjModal.value = true;
+};
+
+const closeProjModal = () => {
+  showProjModal.value = false;
+  editingProject.value = null;
+};
+
+const addApproverToProjForm = () => {
+  projApprovers.value.push({ user_id: '', name: '', order: projApprovers.value.length + 1 });
+};
+
+const removeApproverFromProjForm = (index: number) => {
+  projApprovers.value.splice(index, 1);
+  projApprovers.value.forEach((a, i) => { a.order = i + 1; });
+};
+
+const moveApprover = (index: number, dir: 'up' | 'down') => {
+  const arr = projApprovers.value;
+  const swap = dir === 'up' ? index - 1 : index + 1;
+  if (swap < 0 || swap >= arr.length) return;
+  [arr[index], arr[swap]] = [arr[swap], arr[index]];
+  arr.forEach((a, i) => { a.order = i + 1; });
+};
+
+const onApproverEmployeeChange = (index: number, userId: string) => {
+  const emp = employees.value.find(e => e.id === userId);
+  if (emp) {
+    projApprovers.value[index].user_id = userId;
+    projApprovers.value[index].name = emp.name;
+  }
+};
+
+const saveProjModal = async () => {
+  const name = projForm.value.name.trim();
+  if (!name) return;
+  isSavingProj.value = true;
+  const payload = {
+    name,
+    description: projForm.value.description.trim() || null,
+    approvers: projApprovers.value.filter(a => a.user_id),
+  };
+  let ok = false;
+  if (editingProject.value?.id) {
+    ok = !!(await updateProject(editingProject.value.id, payload));
+  } else {
+    ok = !!(await createProject(payload));
+  }
+  isSavingProj.value = false;
+  if (ok) closeProjModal();
+  else errorMsg.value = projError.value || 'プロジェクトの保存に失敗しました。';
+};
+
+const handleDeleteProj = async (id: string, name: string) => {
+  if (!confirm(`「${name}」を削除しますか？`)) return;
+  const ok = await deleteProject(id);
+  if (!ok) errorMsg.value = projError.value || 'プロジェクトの削除に失敗しました。';
+};
 </script>
 
 <template>
@@ -373,7 +388,7 @@ const projects = ref<Project[]>([
                 </td>
                 <td class="py-2.5 px-4 text-right space-x-2">
                   <button @click="startEditGroup(dept.id, group)" class="text-gray-400 hover:text-indigo-600 p-1"><Edit2 :size="14" /></button>
-                  <button @click="deleteGroup(dept, group.id)" class="text-gray-400 hover:text-red-600 p-1"><Trash2 :size="14" /></button>
+                  <button @click="handleDeleteGroup(dept, group.id)" class="text-gray-400 hover:text-red-600 p-1"><Trash2 :size="14" /></button>
                 </td>
               </tr>
             </template>
@@ -389,86 +404,126 @@ const projects = ref<Project[]>([
       </div>
     </div>
 
-    <!-- Projects Tab (mock data, read-only) -->
+    <!-- Projects Tab -->
     <div v-if="activeTab === 'projects'" class="space-y-4">
       <div class="flex justify-between items-center bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-        <p class="text-sm text-gray-600">プロジェクトを作成し、その「プロジェクトマネージャー (PM)」を指定します。</p>
-        <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+        <p class="text-sm text-gray-600">プロジェクトを作成し、承認者を設定します。領収書・請求書にプロジェクトを紐づけると、ここで設定した承認者が自動適用されます。</p>
+        <button @click="openNewProjModal" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
           <Plus :size="16" />
           新規プロジェクトを作成
         </button>
       </div>
 
-      <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+      <div v-if="projLoading" class="flex items-center justify-center py-12 text-indigo-500 gap-3">
+        <Loader2 class="animate-spin" :size="32" />
+        <span class="font-medium">読み込み中...</span>
+      </div>
+
+      <div v-else class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         <table class="w-full text-left border-collapse">
           <thead>
             <tr class="bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-500">
               <th class="py-3 px-4 w-5/12">プロジェクト名</th>
-              <th class="py-3 px-4 w-1/3">責任者 (PM / Leader)</th>
-              <th class="py-3 px-4 text-center">ステータス</th>
+              <th class="py-3 px-4">承認者</th>
               <th class="py-3 px-4 text-right">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <template v-for="proj in projects" :key="proj.id">
-              <tr class="hover:bg-gray-50 transition-colors bg-white">
-                <td class="py-3 px-4 font-bold text-gray-900 border-l-4 border-indigo-500 flex items-center gap-2">
-                  <FolderKanban :size="16" class="text-indigo-500" />
-                  {{ proj.name }}
-                </td>
-                <td class="py-3 px-4">
-                  <div class="flex items-center gap-2">
-                    <div class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold shadow-sm">
-                      {{ proj.pmName.charAt(0) }}
-                    </div>
-                    <span class="text-sm font-medium text-gray-800">{{ proj.pmName }} <span class="text-xs text-gray-500 font-normal border border-gray-200 rounded px-1 ml-1 bg-white">PM</span></span>
+            <tr v-for="proj in projects" :key="proj.id" class="hover:bg-gray-50 transition-colors">
+              <td class="py-3 px-4 border-l-4 border-indigo-500">
+                <div class="flex items-center gap-2">
+                  <FolderKanban :size="16" class="text-indigo-500 shrink-0" />
+                  <div>
+                    <div class="font-bold text-gray-900">{{ proj.name }}</div>
+                    <div v-if="proj.description" class="text-xs text-gray-400 mt-0.5">{{ proj.description }}</div>
                   </div>
-                </td>
-                <td class="py-3 px-4 text-center">
-                  <span v-if="proj.status === 'active'" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
-                    進行中
+                </div>
+              </td>
+              <td class="py-3 px-4">
+                <div v-if="proj.approvers.length === 0" class="text-xs text-gray-400">承認者未設定</div>
+                <div v-else class="flex flex-wrap gap-1">
+                  <span v-for="(a, i) in [...proj.approvers].sort((x,y)=>x.order-y.order)" :key="a.user_id" class="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded text-xs font-medium">
+                    <span class="w-4 h-4 bg-indigo-200 text-indigo-800 rounded-full flex items-center justify-center text-[9px] font-bold">{{ i+1 }}</span>
+                    {{ a.name }}
                   </span>
-                  <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200">
-                    完了
-                  </span>
-                </td>
-                <td class="py-3 px-4 text-right space-x-2">
-                  <button class="text-gray-400 hover:text-indigo-600 p-1 bg-white rounded shadow-sm border border-gray-100"><Edit2 :size="14" /></button>
-                  <button class="text-gray-400 hover:text-red-600 p-1 bg-white rounded shadow-sm border border-gray-100"><Trash2 :size="14" /></button>
-                </td>
-              </tr>
-              <!-- Sub Projects -->
-              <tr v-for="sub in proj.subProjects" :key="sub.id" class="hover:bg-gray-100 transition-colors bg-gray-50/50">
-                <td class="py-2.5 px-4 text-sm text-gray-700 pl-10 flex items-center gap-2">
-                  <div class="w-1.5 h-1.5 rounded-full bg-teal-400"></div>
-                  {{ sub.name }}
-                </td>
-                <td class="py-2.5 px-4">
-                  <div class="flex items-center gap-2">
-                    <div class="w-5 h-5 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-[10px] font-bold">
-                      {{ sub.subPmName.charAt(0) }}
-                    </div>
-                    <span class="text-sm text-gray-600">{{ sub.subPmName }} <span class="text-xs text-gray-400 font-normal ml-1">Sub-PM</span></span>
-                  </div>
-                </td>
-                <td class="py-2.5 px-4 text-center">
-                  <span v-if="sub.status === 'active'" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium text-emerald-600">
-                    進行中
-                  </span>
-                  <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium text-gray-500">
-                    完了
-                  </span>
-                </td>
-                <td class="py-2.5 px-4 text-right space-x-2">
-                  <button class="text-gray-400 hover:text-teal-600 p-1"><Edit2 :size="14" /></button>
-                  <button class="text-gray-400 hover:text-red-600 p-1"><Trash2 :size="14" /></button>
-                </td>
-              </tr>
-            </template>
+                </div>
+              </td>
+              <td class="py-3 px-4 text-right space-x-2">
+                <button @click="openEditProjModal(proj)" class="text-gray-400 hover:text-indigo-600 p-1 bg-white rounded shadow-sm border border-gray-100"><Edit2 :size="14" /></button>
+                <button @click="handleDeleteProj(proj.id, proj.name)" class="text-gray-400 hover:text-red-600 p-1 bg-white rounded shadow-sm border border-gray-100"><Trash2 :size="14" /></button>
+              </td>
+            </tr>
+            <tr v-if="!projLoading && projects.length === 0">
+              <td colspan="3" class="py-12 text-center text-gray-500 text-sm">
+                プロジェクトが登録されていません。「新規プロジェクトを作成」ボタンから追加してください。
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
     </div>
+
+    <!-- Project Modal -->
+    <Teleport to="body">
+      <div v-if="showProjModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/50" @click="closeProjModal"></div>
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg relative z-10 flex flex-col max-h-[85vh]">
+          <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+            <h2 class="font-bold text-slate-800">{{ editingProject?.id ? 'プロジェクト編集' : '新規プロジェクト作成' }}</h2>
+            <button @click="closeProjModal" class="p-1 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100"><X :size="18" /></button>
+          </div>
+          <div class="p-6 overflow-y-auto flex-1 space-y-5">
+            <!-- Name -->
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1">プロジェクト名 <span class="text-red-500">*</span></label>
+              <input v-model="projForm.name" type="text" placeholder="プロジェクト名を入力" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" />
+            </div>
+            <!-- Description -->
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1">説明（任意）</label>
+              <input v-model="projForm.description" type="text" placeholder="プロジェクトの概要" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" />
+            </div>
+            <!-- Approvers -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="block text-sm font-semibold text-gray-700">承認者（順番に承認）</label>
+                <button @click="addApproverToProjForm" class="text-indigo-600 hover:text-indigo-800 text-xs font-medium flex items-center gap-1">
+                  <UserPlus :size="14" /> 承認者を追加
+                </button>
+              </div>
+              <div class="space-y-2">
+                <div v-for="(approver, idx) in projApprovers" :key="idx" class="flex items-center gap-2 bg-indigo-50/50 border border-indigo-100 rounded-lg p-2">
+                  <span class="w-6 h-6 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center text-xs font-bold shrink-0">{{ idx + 1 }}</span>
+                  <select
+                    :value="approver.user_id"
+                    @change="onApproverEmployeeChange(idx, ($event.target as HTMLSelectElement).value)"
+                    class="flex-1 bg-white border border-indigo-200 rounded px-2 py-1.5 text-sm focus:ring-1 focus:ring-indigo-500"
+                  >
+                    <option value="">従業員を選択...</option>
+                    <option v-for="emp in employees" :key="emp.id" :value="emp.id">{{ emp.name }}</option>
+                  </select>
+                  <div class="flex flex-col gap-0.5">
+                    <button @click="moveApprover(idx, 'up')" :disabled="idx === 0" class="text-gray-400 hover:text-indigo-600 disabled:opacity-30"><ChevronUp :size="14" /></button>
+                    <button @click="moveApprover(idx, 'down')" :disabled="idx === projApprovers.length - 1" class="text-gray-400 hover:text-indigo-600 disabled:opacity-30"><ChevronDown :size="14" /></button>
+                  </div>
+                  <button @click="removeApproverFromProjForm(idx)" class="text-gray-400 hover:text-red-500 p-1"><X :size="14" /></button>
+                </div>
+                <div v-if="projApprovers.length === 0" class="text-xs text-gray-400 text-center py-3 border border-dashed border-gray-200 rounded-lg">
+                  承認者が設定されていません（approval_rules が適用されます）
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 shrink-0">
+            <button @click="closeProjModal" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">キャンセル</button>
+            <button @click="saveProjModal" :disabled="!projForm.name.trim() || isSavingProj" class="px-6 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
+              <Loader2 v-if="isSavingProj" :size="14" class="animate-spin" />
+              保存する
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
   </div>
 </template>

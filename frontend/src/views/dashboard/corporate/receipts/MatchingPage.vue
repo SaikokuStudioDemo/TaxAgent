@@ -10,7 +10,7 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-vue-next';
-import { useBankTransactions } from '@/composables/useBankTransactions';
+import { useTransactions, type Transaction as ApiTransaction } from '@/composables/useTransactions';
 import { useReceipts } from '@/composables/useReceipts';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
@@ -46,19 +46,19 @@ interface MatchingReceipt {
 }
 
 // --- COMPOSABLES ---
-const { transactions: apiTransactions, matches, fetchTransactions, fetchMatches, createMatch, deleteMatch } = useBankTransactions();
+const { transactions: apiTransactions, matches, fetchTransactions, fetchMatches, createMatch, deleteMatch } = useTransactions();
 const { receipts: apiReceipts, fetchReceipts } = useReceipts();
 
 // --- LOCAL STATE (computed from API data) ---
 const transactions = ref<Transaction[]>([]);
 const receiptsMock = ref<MatchingReceipt[]>([]);
 
-const mapApiToTransaction = (t: any): Transaction => ({
-  id: t.id ?? t._id,
-  date: t.transaction_date ?? t.date,
+const mapApiToTransaction = (t: ApiTransaction): Transaction => ({
+  id: t.id,
+  date: t.transaction_date,
   description: t.description,
   amount: t.amount,
-  type: t.source_type === 'card' ? 'card' : 'bank',
+  type: t.source_type,
   status: 'unmatched',
   matchedReceiptId: undefined,
 });
@@ -70,7 +70,7 @@ const mapApiToReceipt = (r: any): MatchingReceipt => ({
   issuer: r.payee ?? r.issuer ?? '不明',
   amount: r.amount,
   paymentMethod: r.payment_method ?? '法人カード',
-  status: r.status === 'approved' ? 'approved' : r.status === 'rejected' ? 'rejected' : 'pending',
+  status: r.approval_status === 'approved' || r.approval_status === 'auto_approved' ? 'approved' : r.approval_status === 'rejected' ? 'rejected' : 'pending',
   matchStatus: 'unmatched',
   matchedTransactionId: undefined,
   lineItems: r.line_items?.map((li: any) => ({

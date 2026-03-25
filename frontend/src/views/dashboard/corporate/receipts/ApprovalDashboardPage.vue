@@ -91,11 +91,11 @@ const mapApiReceipt = (r: any): ReceiptItem => {
     category: r.category ?? '未分類',
     paymentMethod: r.payment_method ?? '不明',
     memo: r.memo ?? '',
-    status: r.status === 'approved' ? 'approved' : r.status === 'rejected' ? 'rejected' : 'pending',
+    status: r.approval_status === 'approved' || r.approval_status === 'auto_approved' ? 'approved' : r.approval_status === 'rejected' ? 'rejected' : 'pending',
     currentStepIndex: r.current_step ? r.current_step - 1 : 0,
-    approvalHistory: combinedHistory.length > 0 
-      ? combinedHistory 
-      : [{ id: 'h_default', step: 1, roleId: 'manager', roleName: '管理者', status: r.status === 'approved' ? 'approved' : r.status === 'rejected' ? 'rejected' : 'pending' as any }],
+    approvalHistory: combinedHistory.length > 0
+      ? combinedHistory
+      : [{ id: 'h_default', step: 1, roleId: 'manager', roleName: '管理者', status: r.approval_status === 'approved' || r.approval_status === 'auto_approved' ? 'approved' : r.approval_status === 'rejected' ? 'rejected' : 'pending' as any }],
     imageUrl: r.imageUrl ?? r.image_url ?? '',
   };
 };
