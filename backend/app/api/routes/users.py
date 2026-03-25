@@ -74,7 +74,13 @@ async def _sync_employees_internal(parent_uid: str, payload: list[dict]):
     from firebase_admin import auth, firestore
     from app.core.config import settings
     import httpx
-    
+
+    # Resolve corporate_id (ObjectId string) from the parent's firebase_uid
+    parent_corp = await db["corporates"].find_one({"firebase_uid": parent_uid}, {"_id": 1})
+    if not parent_corp:
+        raise HTTPException(status_code=404, detail="Parent corporate not found")
+    corporate_id = str(parent_corp["_id"])
+
     fs_db = firestore.client()
     processed = []
 
@@ -100,7 +106,7 @@ async def _sync_employees_internal(parent_uid: str, payload: list[dict]):
             fs_db.collection("employees").document(emp_uid).set({
                 "name": emp_data["name"],
                 "email": emp_email,
-                "parent_corporate_id": parent_uid,
+                "corporate_id": corporate_id,
                 "updatedAt": firestore.SERVER_TIMESTAMP
             }, merge=True)
 
@@ -112,11 +118,11 @@ async def _sync_employees_internal(parent_uid: str, payload: list[dict]):
                     permissions = json.loads(permissions)
                 except:
                     permissions = {}
-                    
+
             await db["employees"].update_one(
                 {"firebase_uid": emp_uid},
                 {"$set": {
-                    "parent_corporate_id": parent_uid,
+                    "corporate_id": corporate_id,
                     "role": emp_data.get("role", "staff"),
                     "permissions": permissions,
                     "usageFee": emp_data.get("usageFee", 0)
@@ -160,14 +166,19 @@ async def get_employees(
     if not firebase_uid:
         raise HTTPException(status_code=400, detail="Invalid auth token format")
 
-    # Resolve effective UID (for employees, use parent ID so they can see colleagues)
-    effective_uid = firebase_uid
-    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
-    if employee and employee.get("parent_corporate_id"):
-        effective_uid = employee.get("parent_corporate_id")
+    # Resolve corporate_id to query colleagues
+    from bson import ObjectId as BsonObjectId
+    calling_employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    if calling_employee and calling_employee.get("corporate_id"):
+        corporate_id = calling_employee.get("corporate_id")
+    else:
+        corp = await db["corporates"].find_one({"firebase_uid": firebase_uid}, {"_id": 1})
+        if not corp:
+            return []
+        corporate_id = str(corp["_id"])
 
-    # Fetch employees from MongoDB matching the effective parent ID
-    cursor = db["employees"].find({"parent_corporate_id": effective_uid})
+    # Fetch employees from MongoDB matching the corporate_id
+    cursor = db["employees"].find({"corporate_id": corporate_id})
     employees = await cursor.to_list(length=1000)
     
     emp_data = []
@@ -207,18 +218,19 @@ async def delete_employee(
     if not parent_firebase_uid:
         raise HTTPException(status_code=400, detail="Invalid auth token format")
 
-    # Resolve effective UID (for employees, use parent ID so they can manage colleagues)
-    effective_uid = parent_firebase_uid
+    # Resolve corporate_id for ownership check
+    from bson import ObjectId as BsonObjectId
     current_employee = await db["employees"].find_one({"firebase_uid": parent_firebase_uid})
-    if current_employee and current_employee.get("parent_corporate_id"):
-        effective_uid = current_employee.get("parent_corporate_id")
+    if current_employee and current_employee.get("corporate_id"):
+        corporate_id = current_employee.get("corporate_id")
+    else:
+        corp = await db["corporates"].find_one({"firebase_uid": parent_firebase_uid}, {"_id": 1})
+        corporate_id = str(corp["_id"]) if corp else None
 
-    # 1. Verify the employee belongs to this parent
-    # Note: frontend passes the email/id as the ID for existing users, but our true ID is firebase_uid
-    # We'll check both email and firebase_uid
+    # 1. Verify the employee belongs to this corporate
     target_emp = await db["employees"].find_one({
         "$or": [{"firebase_uid": employee_id}, {"email": employee_id}],
-        "parent_corporate_id": effective_uid
+        "corporate_id": corporate_id
     })
     
     if not target_emp:
@@ -285,7 +297,9 @@ async def get_my_profile(
         employee["_id"] = str(employee["_id"])
         
         # We might need to know parent's corporateType to route correctly too
-        parent = await db["corporates"].find_one({"firebase_uid": employee.get("parent_corporate_id")})
+        from bson import ObjectId as BsonObjectId
+        corp_id = employee.get("corporate_id")
+        parent = await db["corporates"].find_one({"_id": BsonObjectId(corp_id)}) if corp_id else None
         parent_type = parent.get("corporateType") if parent else "corporate"
         
         from firebase_admin import firestore
@@ -324,11 +338,16 @@ async def get_clients(
     if not firebase_uid:
         raise HTTPException(status_code=400, detail="Invalid auth token format")
 
-    # Resolve effective UID (for employees, use parent ID)
+    # Resolve effective firebase_uid (for employees, resolve via corporate_id → parent corporate)
+    from bson import ObjectId as BsonObjectId
     effective_uid = firebase_uid
-    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
-    if employee and employee.get("parent_corporate_id"):
-        effective_uid = employee.get("parent_corporate_id")
+    calling_emp = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    if calling_emp and calling_emp.get("corporate_id"):
+        parent_corp = await db["corporates"].find_one(
+            {"_id": BsonObjectId(calling_emp["corporate_id"])}, {"firebase_uid": 1}
+        )
+        if parent_corp:
+            effective_uid = parent_corp["firebase_uid"]
 
     # 1. Fetch matching clients from MongoDB
     clients_cursor = db["corporates"].find({
@@ -366,15 +385,18 @@ async def get_clients(
     enriched_clients = []
     
     # 3.1 Fetch all employees for these clients to aggregate usage fees
-    employees_cursor = db["employees"].find({"parent_corporate_id": {"$in": client_uids}})
+    # Map: corporate ObjectId string → firebase_uid (for fee_map key lookup)
+    corp_id_to_uid = {str(c["_id"]): c["firebase_uid"] for c in clients}
+    client_corporate_ids = list(corp_id_to_uid.keys())
+    employees_cursor = db["employees"].find({"corporate_id": {"$in": client_corporate_ids}})
     all_employees = await employees_cursor.to_list(length=10000)
-    
+
     fee_map = {uid: 0 for uid in client_uids}
     user_count_map = {uid: 0 for uid in client_uids}
-    
+
     for emp in all_employees:
-        p_uid = emp.get("parent_corporate_id")
-        if p_uid in fee_map:
+        p_uid = corp_id_to_uid.get(emp.get("corporate_id"))
+        if p_uid and p_uid in fee_map:
             fee_map[p_uid] += emp.get("usageFee", 0)
             user_count_map[p_uid] += 1
 
@@ -414,11 +436,16 @@ async def update_client(
     db = get_database()
     firebase_uid = current_user.get("uid")
     
-    # Resolve effective UID
+    # Resolve effective firebase_uid
+    from bson import ObjectId as BsonObjectId
     effective_uid = firebase_uid
-    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
-    if employee and employee.get("parent_corporate_id"):
-        effective_uid = employee.get("parent_corporate_id")
+    calling_emp = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    if calling_emp and calling_emp.get("corporate_id"):
+        parent_corp = await db["corporates"].find_one(
+            {"_id": BsonObjectId(calling_emp["corporate_id"])}, {"firebase_uid": 1}
+        )
+        if parent_corp:
+            effective_uid = parent_corp["firebase_uid"]
 
     try:
         obj_id = ObjectId(client_id)
@@ -427,8 +454,8 @@ async def update_client(
 
     # Verify ownership
     target_corporate = await db["corporates"].find_one({
-        "_id": obj_id, 
-        "corporateType": "corporate", 
+        "_id": obj_id,
+        "corporateType": "corporate",
         "advising_tax_firm_id": effective_uid
     })
 
@@ -478,11 +505,16 @@ async def update_client_employees(
     db = get_database()
     firebase_uid = current_user.get("uid")
     
-    # Resolve effective UID
+    # Resolve effective firebase_uid
+    from bson import ObjectId as BsonObjectId
     effective_uid = firebase_uid
-    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
-    if employee and employee.get("parent_corporate_id"):
-        effective_uid = employee.get("parent_corporate_id")
+    calling_emp = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    if calling_emp and calling_emp.get("corporate_id"):
+        parent_corp = await db["corporates"].find_one(
+            {"_id": BsonObjectId(calling_emp["corporate_id"])}, {"firebase_uid": 1}
+        )
+        if parent_corp:
+            effective_uid = parent_corp["firebase_uid"]
 
     try:
         obj_id = ObjectId(client_id)
@@ -491,8 +523,8 @@ async def update_client_employees(
 
     # Verify ownership
     target_corporate = await db["corporates"].find_one({
-        "_id": obj_id, 
-        "corporateType": "corporate", 
+        "_id": obj_id,
+        "corporateType": "corporate",
         "advising_tax_firm_id": effective_uid
     })
 
@@ -526,11 +558,16 @@ async def get_client_detail(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid client ID format")
 
-    # Resolve effective UID
+    # Resolve effective firebase_uid
+    from bson import ObjectId as BsonObjectId
     effective_uid = firebase_uid
-    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
-    if employee and employee.get("parent_corporate_id"):
-        effective_uid = employee.get("parent_corporate_id")
+    calling_emp = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    if calling_emp and calling_emp.get("corporate_id"):
+        parent_corp = await db["corporates"].find_one(
+            {"_id": BsonObjectId(calling_emp["corporate_id"])}, {"firebase_uid": 1}
+        )
+        if parent_corp:
+            effective_uid = parent_corp["firebase_uid"]
 
     # 1. Fetch matching client from MongoDB by ObjectID
     client_doc = await db["corporates"].find_one({
@@ -542,8 +579,9 @@ async def get_client_detail(
     if not client_doc:
         raise HTTPException(status_code=404, detail="Client not found or access denied")
 
+    client_corporate_id = str(client_doc["_id"])
     client_uid = client_doc["firebase_uid"]
-    client_doc["_id"] = str(client_doc["_id"])
+    client_doc["_id"] = client_corporate_id
 
     # 2. Fetch PII from Firestore
     from firebase_admin import firestore
@@ -560,7 +598,7 @@ async def get_client_detail(
         client_doc["loginEmail"] = pii.get("loginEmail", "")
         
     # 3. Fetch Employees for this client
-    employees_cursor = db["employees"].find({"parent_corporate_id": client_uid})
+    employees_cursor = db["employees"].find({"corporate_id": client_corporate_id})
     employees = await employees_cursor.to_list(length=100)
     emp_data = []
     
@@ -672,11 +710,21 @@ async def sync_client_employees(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid client ID format")
 
+        from bson import ObjectId as BsonObjectId
+        effective_uid = firebase_uid
+        calling_emp = await db["employees"].find_one({"firebase_uid": firebase_uid})
+        if calling_emp and calling_emp.get("corporate_id"):
+            parent_corp = await db["corporates"].find_one(
+                {"_id": BsonObjectId(calling_emp["corporate_id"])}, {"firebase_uid": 1}
+            )
+            if parent_corp:
+                effective_uid = parent_corp["firebase_uid"]
+
         client_doc = await db["corporates"].find_one({
             "_id": obj_id,
-            "advising_tax_firm_id": firebase_uid
+            "advising_tax_firm_id": effective_uid
         })
-        
+
         if not client_doc:
             raise HTTPException(status_code=404, detail="Client not found or access denied")
 
