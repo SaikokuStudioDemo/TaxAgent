@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { api } from '@/lib/api';
 import { auth, db } from '@/lib/firebase/config';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
@@ -18,6 +19,25 @@ const selectedPlanId = ref<string>('plan-standard');
 const selectedOptions = ref<string[]>([]);
 const isSubmitting = ref(false);
 const users = ref<UserData[]>([]);
+const departments = ref<any[]>([]);
+
+const fetchDepartments = async () => {
+  try {
+    const data = await api.get<any[]>('/departments');
+    departments.value = data.map((d: any) => ({
+      id: d.id,
+      label: d.name,
+      groups: (d.groups || []).map((g: any) => ({ id: g.id, label: g.name }))
+    }));
+  } catch (e) {
+    // During registration the corporate doesn't exist yet, empty is fine
+    console.warn('Could not fetch departments (expected during registration):', e);
+  }
+};
+
+onMounted(() => {
+  fetchDepartments();
+});
 
 const formState = ref<Partial<ContractFormValues>>({
   companyName: '',
@@ -175,7 +195,7 @@ const handleToggleOption = (id: string) => {
           @selectPlan="selectedPlanId = $event"
           @toggleOption="handleToggleOption"
         />
-        <UserPermissionList v-model:users="users" />
+        <UserPermissionList v-model:users="users" :departments="departments" />
 
         <!-- Mobile Submit Button -->
         <div class="mt-8 lg:hidden block">

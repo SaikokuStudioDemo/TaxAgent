@@ -64,7 +64,9 @@ class EmployeeUserInDB(BaseModel):
     role: str
     permissions: dict
     usageFee: Optional[int] = 0
-    
+    departmentId: Optional[str] = ""
+    groupId: Optional[str] = ""
+
     created_at: datetime = datetime.utcnow()
     is_active: bool = True
 

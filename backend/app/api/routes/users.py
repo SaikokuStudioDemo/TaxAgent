@@ -125,7 +125,12 @@ async def _sync_employees_internal(parent_uid: str, payload: list[dict]):
                     "corporate_id": corporate_id,
                     "role": emp_data.get("role", "staff"),
                     "permissions": permissions,
-                    "usageFee": emp_data.get("usageFee", 0)
+                    "usageFee": emp_data.get("usageFee", 0),
+                    "departmentId": emp_data.get("departmentId", ""),
+                    "groupId": emp_data.get("groupId", ""),
+                    # also save name and email to MongoDB for dev fallback
+                    "name": emp_data.get("name", ""),
+                    "email": emp_data.get("email", ""),
                 }},
                 upsert=True
             )

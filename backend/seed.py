@@ -64,6 +64,7 @@ async def seed():
                 "employees", "receipts", "invoices", "approval_rules",
                 "clients", "company_profiles", "notifications",
                 "bank_transactions", "matches", "approval_events",
+                "departments",
             ]:
                 await db[col].delete_many({"corporate_id": cid})
     await db["corporates"].delete_many({"firebase_uid": {"$in": ALL_CORP_UIDS}})
@@ -88,6 +89,7 @@ async def seed():
         {
             "firebase_uid": EMP_TAX_STAFF_UID,
             "corporate_id": tax_id,
+            "name": "鈴木 誠",
             "role": "staff",
             "email": "staff@aoyama-tax.co.jp",
             "is_active": True,
@@ -96,6 +98,7 @@ async def seed():
         {
             "firebase_uid": EMP_TAX_MANAGER_UID,
             "corporate_id": tax_id,
+            "name": "田中 克彦",
             "role": "dept_manager",
             "email": "manager@aoyama-tax.co.jp",
             "is_active": True,
@@ -247,10 +250,25 @@ async def seed():
     corp_a_id = str(res_a.inserted_id)
     print(f"✅ 一般法人A 作成: {corp_a_id}")
 
+    # 部門データ（法人A）
+    dept_res = await db["departments"].insert_many([
+        {"corporate_id": corp_a_id, "name": "経営陣", "groups": [], "created_at": today},
+        {"corporate_id": corp_a_id, "name": "営業部", "groups": [
+            {"id": "grp-sales-1", "name": "営業1課"},
+            {"id": "grp-sales-2", "name": "営業2課"},
+        ], "created_at": today},
+        {"corporate_id": corp_a_id, "name": "システム開発部", "groups": [
+            {"id": "grp-dev-1", "name": "フロントエンドチーム"},
+            {"id": "grp-dev-2", "name": "バックエンドチーム"},
+        ], "created_at": today},
+    ])
+    print("✅ 一般法人A 部門3件作成")
+
     await db["employees"].insert_many([
         {
             "firebase_uid": EMP_A_STAFF_UID,
             "corporate_id": corp_a_id,
+            "name": "山田 太郎",
             "role": "staff",
             "email": "staff@alpha.co.jp",
             "is_active": True,
@@ -259,6 +277,7 @@ async def seed():
         {
             "firebase_uid": EMP_A_MANAGER_UID,
             "corporate_id": corp_a_id,
+            "name": "佐藤 花子",
             "role": "dept_manager",
             "email": "manager@alpha.co.jp",
             "is_active": True,
@@ -469,6 +488,7 @@ async def seed():
         {
             "firebase_uid": EMP_B_STAFF_UID,
             "corporate_id": corp_b_id,
+            "name": "伊藤 翔太",
             "role": "staff",
             "email": "staff@beta.co.jp",
             "is_active": True,
@@ -477,6 +497,7 @@ async def seed():
         {
             "firebase_uid": EMP_B_MANAGER_UID,
             "corporate_id": corp_b_id,
+            "name": "渡辺 美咲",
             "role": "dept_manager",
             "email": "manager@beta.co.jp",
             "is_active": True,

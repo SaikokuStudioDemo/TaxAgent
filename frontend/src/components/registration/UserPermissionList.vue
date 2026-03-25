@@ -25,12 +25,14 @@ const props = withDefaults(defineProps<{
   inlineMode?: boolean;
   isInvitingId?: string | null;
   isDeletingId?: string | null;
+  departments?: Array<{id: string; label: string; groups?: Array<{id: string; label: string}>}>;
 }>(), {
   showUsageFee: false,
   hidePermissions: false,
   inlineMode: false,
   isInvitingId: null,
-  isDeletingId: null
+  isDeletingId: null,
+  departments: () => []
 });
 
 const emit = defineEmits<{
@@ -67,7 +69,7 @@ const handleAddUser = () => {
     },
     usageFee: parseInt(bulkFee.value, 10) || 0
   };
-  emit('update:users', [...props.users, newUser]);
+  emit('update:users', [newUser, ...props.users]);
 };
 
 const handleRemoveUser = (id: string) => {
@@ -98,6 +100,13 @@ const handleUpdateUser = (id: string, field: string, value: string | boolean | n
   emit('update:users', updatedUsers);
 };
 
+const handleDepartmentChange = (id: string, departmentId: string) => {
+  const updatedUsers = props.users.map(u =>
+    u.id === id ? { ...u, departmentId, groupId: '' } : u
+  );
+  emit('update:users', updatedUsers);
+};
+
 const handleSendInvite = (id: string) => {
   if (props.inlineMode) {
     emit('invite', id);
@@ -112,27 +121,7 @@ const hasEmptyUser = computed(() => {
   return props.users.some(u => u.status === 'draft' && (u.name.trim() === '' || u.email.trim() === ''));
 });
 
-// Mock Departments to match OrganizationPage.vue
-const DEPARTMENTS = [
-  { id: '', label: '未設定 (部門指定なし)' },
-  { id: 'dept-1', label: '経営陣', groups: [] },
-  { 
-    id: 'dept-2', 
-    label: '営業部', 
-    groups: [
-      { id: 'grp-2-1', label: '営業1課' },
-      { id: 'grp-2-2', label: '営業2課' }
-    ]
-  },
-  { 
-    id: 'dept-3', 
-    label: 'システム開発部', 
-    groups: [
-      { id: 'grp-3-1', label: 'フロントエンドチーム' },
-      { id: 'grp-3-2', label: 'バックエンドチーム' }
-    ]
-  }
-];
+// departments are provided via props from the parent (fetched from API)
 </script>
 
 <template>
@@ -228,22 +217,23 @@ const DEPARTMENTS = [
                 <div class="space-y-1.5">
                   <select
                     :value="user.departmentId"
-                    @change="handleUpdateUser(user.id, 'departmentId', ($event.target as HTMLSelectElement).value); handleUpdateUser(user.id, 'groupId', '')"
+                    @change="handleDepartmentChange(user.id, ($event.target as HTMLSelectElement).value)"
                     class="w-full px-2 py-1.5 border border-gray-200 rounded-md focus:ring-1 focus:ring-indigo-500 bg-white text-gray-700 font-medium text-xs"
                   >
-                    <option v-for="dept in DEPARTMENTS" :key="dept.id" :value="dept.id">
+                    <option value="">未設定 (部門指定なし)</option>
+                    <option v-for="dept in props.departments" :key="dept.id" :value="dept.id">
                       {{ dept.label }}
                     </option>
                   </select>
 
                   <select
-                    v-if="user.departmentId && DEPARTMENTS.find(d => d.id === user.departmentId)?.groups?.length"
+                    v-if="user.departmentId && props.departments.find(d => d.id === user.departmentId)?.groups?.length"
                     :value="user.groupId"
                      @change="handleUpdateUser(user.id, 'groupId', ($event.target as HTMLSelectElement).value)"
                     class="w-full px-2 py-1.5 border border-gray-200 rounded-md focus:ring-1 focus:ring-indigo-500 bg-gray-50 text-gray-700 font-medium text-xs"
                   >
                     <option value="">(チームを選択)</option>
-                    <option v-for="group in DEPARTMENTS.find(d => d.id === user.departmentId)?.groups" :key="group.id" :value="group.id">
+                    <option v-for="group in props.departments.find(d => d.id === user.departmentId)?.groups" :key="group.id" :value="group.id">
                       {{ group.label }}
                     </option>
                   </select>
