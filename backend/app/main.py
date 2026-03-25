@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
-from app.api.routes import users, receipts, invoices, approvals, clients, company_profiles, bank_transactions, matches, admin, advisor, departments, bank_accounts
+from app.api.routes import users, receipts, invoices, approvals, clients, company_profiles, transactions, matches, admin, advisor, departments, bank_accounts, projects
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,12 +37,13 @@ app.include_router(invoices.router, prefix=f"{settings.API_V1_STR}/invoices", ta
 app.include_router(approvals.router, prefix=f"{settings.API_V1_STR}/approvals", tags=["approvals"])
 app.include_router(clients.router, prefix=f"{settings.API_V1_STR}/clients", tags=["clients"])
 app.include_router(company_profiles.router, prefix=f"{settings.API_V1_STR}/company-profiles", tags=["company-profiles"])
-app.include_router(bank_transactions.router, prefix=f"{settings.API_V1_STR}/bank-transactions", tags=["bank-transactions"])
+app.include_router(transactions.router, prefix=f"{settings.API_V1_STR}/transactions", tags=["transactions"])
 app.include_router(matches.router, prefix=f"{settings.API_V1_STR}/matches", tags=["matches"])
 app.include_router(admin.router, prefix=f"{settings.API_V1_STR}/admin", tags=["admin"])
 app.include_router(advisor.router, prefix=f"{settings.API_V1_STR}/advisor", tags=["advisor"])
 app.include_router(departments.router, prefix=f"{settings.API_V1_STR}/departments", tags=["departments"])
 app.include_router(bank_accounts.router, prefix=f"{settings.API_V1_STR}/bank-accounts", tags=["bank-accounts"])
+app.include_router(projects.router, prefix=f"{settings.API_V1_STR}/projects", tags=["projects"])
 
 
 @app.get("/")
