@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed, watch, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
 import { Loader2, AlertCircle, CheckCircle2 } from 'lucide-vue-next';
 import UserPermissionList, { UserData } from '@/components/registration/UserPermissionList.vue';
@@ -74,24 +74,45 @@ onMounted(() => {
 
 // Auto-save existing (invited) users when their fields change
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingUsers: UserData[] = [];
+
+const flushSave = async (usersToSave: UserData[]) => {
+    if (localStorage.getItem('DEV_BYPASS_AUTH') === 'true') return;
+    const token = await getToken();
+    if (!token) return;
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+    for (const u of usersToSave) {
+        fetch(`${apiUrl}/users/employees/${u.id}`, {
+            method: 'PATCH',
+            keepalive: true, // completes even if page navigates away
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: u.role, permissions: u.permissions, usageFee: u.usageFee }),
+        }).catch(() => {});
+    }
+};
+
 watch(users, (newUsers) => {
     const existingUsers = newUsers.filter(u => !u.id.startsWith('user-') && u.status === 'invited');
     if (existingUsers.length === 0) return;
+    pendingUsers = existingUsers;
 
     if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-        const token = await getToken();
-        if (!token) return;
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
-        for (const u of existingUsers) {
-            await fetch(`${apiUrl}/users/employees/${u.id}`, {
-                method: 'PATCH',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ role: u.role, permissions: u.permissions, usageFee: u.usageFee }),
-            }).catch(() => {}); // silent fail
-        }
+    saveTimer = setTimeout(() => {
+        flushSave(pendingUsers);
+        pendingUsers = [];
+        saveTimer = null;
     }, 800);
 }, { deep: true });
+
+// Flush unsaved changes immediately when navigating away
+onBeforeUnmount(() => {
+    if (saveTimer && pendingUsers.length > 0) {
+        clearTimeout(saveTimer);
+        flushSave(pendingUsers);
+        pendingUsers = [];
+        saveTimer = null;
+    }
+});
 
 const handleSingleInvite = async (userId: string) => {
     isInvitingId.value = userId;
