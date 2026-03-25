@@ -42,7 +42,13 @@ async def get_client(
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     doc = await get_doc_or_404(ctx.db, "clients", client_id, ctx.corporate_id, "client")
-    return _serialize(doc)
+    client_doc = _serialize(doc)
+    bank_accounts = await ctx.db["bank_accounts"].find(
+        {"corporate_id": ctx.corporate_id, "client_id": client_id, "is_active": True}
+    ).to_list(50)
+    for a in bank_accounts:
+        a["id"] = str(a.pop("_id"))
+    return {**client_doc, "bank_accounts": bank_accounts}
 
 
 @router.patch("/{client_id}", summary="取引先を更新する")
