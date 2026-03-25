@@ -9,7 +9,7 @@ class ClientCreate(BaseModel):
     phone: Optional[str] = None
     address: Optional[str] = None
     payment_terms: Optional[str] = None
-    department: Optional[str] = None
+    department_id: Optional[str] = None
     contact_person: Optional[str] = None
     postal_code: Optional[str] = None
     internal_notes: Optional[str] = None
