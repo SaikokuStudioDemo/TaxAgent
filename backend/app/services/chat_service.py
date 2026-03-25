@@ -30,7 +30,7 @@ class ChatService:
         })
         
         # 3. Bank Transactions Status
-        unmatched_tx = await db["bank_transactions"].count_documents({
+        unmatched_tx = await db["transactions"].count_documents({
             "corporate_id": corporate_id,
             "status": "unmatched"
         })

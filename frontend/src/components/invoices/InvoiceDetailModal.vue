@@ -8,38 +8,11 @@ import {
   Building2
 } from 'lucide-vue-next';
 import { useApprovals, type AddedStep } from '@/composables/useApprovals';
-import { MASTER_APPROVERS, getRankFromRoleId } from '@/lib/constants/mockData';
+import { APPROVAL_LEVELS, getRankFromRoleId } from '@/lib/constants/mockData';
 import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
+import type { InvoiceItem } from '@/lib/types/approvalTypes';
 
-// --- TYPES ---
-interface ApprovalHistory {
-  id: string;
-  step: number;
-  roleId: string;
-  roleName: string;
-  approverId?: string;
-  approverName?: string;
-  status: 'pending' | 'approved' | 'rejected' | 'skipped';
-  actionDate?: string;
-  comment?: string;
-}
-
-interface InvoiceItem {
-  id: string;
-  vendorName: string;
-  title: string;
-  amount: number;
-  issuedDate: string;
-  dueDate: string;
-  category: string;
-  paymentMethod: string;
-  memo: string;
-  status: 'pending' | 'approved' | 'rejected';
-  currentStepIndex: number;
-  approvalHistory: ApprovalHistory[];
-  imageUrl: string;
-}
 
 const props = defineProps<{
   show: boolean;
@@ -64,10 +37,12 @@ const availableApproversToAdd = computed(() => {
   if (!props.invoice || props.invoice.approvalHistory.length === 0) return [];
   
   const currentHistory = props.invoice.approvalHistory[props.invoice.currentStepIndex];
-  if (!currentHistory) return MASTER_APPROVERS;
+  if (!currentHistory) return APPROVAL_LEVELS.map(l => ({ id: l.value, roleId: l.value, roleName: l.label, name: l.label, rank: getRankFromRoleId(l.value) }));
   
   const currentRank = getRankFromRoleId(currentHistory.roleId);
-  return MASTER_APPROVERS.filter(a => a.rank > currentRank);
+  return APPROVAL_LEVELS
+    .map(l => ({ id: l.value, roleId: l.value, roleName: l.label, name: l.label, rank: getRankFromRoleId(l.value) }))
+    .filter(a => a.rank > currentRank);
 });
 
 // --- ACTIONS ---
@@ -80,7 +55,8 @@ const handleClose = () => {
 
 const handleAddApprover = () => {
   if (!selectedExtraApproverId.value || !props.invoice) return;
-  const approver = MASTER_APPROVERS.find(a => a.id === selectedExtraApproverId.value);
+  const level = APPROVAL_LEVELS.find(l => l.value === selectedExtraApproverId.value);
+  const approver = level ? { id: level.value, roleId: level.value, roleName: level.label, name: level.label, rank: getRankFromRoleId(level.value) } : null;
   if (approver) {
     const newStepIndex = props.invoice.approvalHistory.length;
     props.invoice.approvalHistory.push({

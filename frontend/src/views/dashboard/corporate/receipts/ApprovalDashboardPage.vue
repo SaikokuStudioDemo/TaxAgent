@@ -14,43 +14,14 @@ import {
 import { useReceipts } from '@/composables/useReceipts';
 import ReceiptDetailModal from '@/components/receipts/ReceiptDetailModal.vue';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
+import type { ReceiptItem } from '@/lib/types/approvalTypes';
 
-// --- MOCK DATA ---
-interface ApprovalHistory {
-  id: string;
-  step: number;
-  roleId: string;
-  roleName: string;
-  approverId?: string;
-  approverName?: string;
-  status: 'pending' | 'approved' | 'rejected' | 'skipped';
-  actionDate?: string;
-  comment?: string;
-}
-
-interface ReceiptItem {
-  id: string;
-  submitterName: string;
-  departmentName: string;
-  groupName?: string;
-  projectName?: string;
-  date: string;
-  issuer: string;
-  amount: number;
-  taxRate: string;
-  category: string;
-  paymentMethod: string;
-  memo: string;
-  status: 'pending' | 'approved' | 'rejected';
-  currentStepIndex: number;
-  approvalHistory: ApprovalHistory[];
-  imageUrl: string;
-}
 
 // Fetch real receipts and map to ReceiptItem shape for the template
-const { receipts: apiReceipts, fetchReceipts } = useReceipts();
+const { receipts: apiReceipts, fetchReceipts, pendingForMe, fetchPendingForMe } = useReceipts();
 
-const mockReceipts = ref<ReceiptItem[]>([]);
+const allReceipts = ref<ReceiptItem[]>([]);
+const myPendingReceipts = ref<ReceiptItem[]>([]);
 
 const mapApiReceipt = (r: any): ReceiptItem => {
   const history = (r.approval_history && r.approval_history.length > 0)
@@ -101,8 +72,9 @@ const mapApiReceipt = (r: any): ReceiptItem => {
 };
 
 const loadData = async () => {
-    await fetchReceipts({});
-    mockReceipts.value = apiReceipts.value.map(mapApiReceipt);
+    await Promise.all([fetchReceipts({}), fetchPendingForMe()]);
+    allReceipts.value = apiReceipts.value.map(mapApiReceipt);
+    myPendingReceipts.value = pendingForMe.value.map(mapApiReceipt);
 };
 
 onMounted(loadData);
@@ -115,10 +87,10 @@ const selectedReceipt = ref<ReceiptItem | null>(null);
 const isDetailModalOpen = ref(false);
 
 // Computed Filters
-const pendingReceipts = computed(() => mockReceipts.value.filter(r => r.status === 'pending' && r.approvalHistory[r.currentStepIndex]?.approverName !== '鈴木次郎'));
-const pendingAllReceipts = computed(() => mockReceipts.value.filter(r => r.status === 'pending')); 
-const approvedReceipts = computed(() => mockReceipts.value.filter(r => r.status === 'approved'));
-const rejectedReceipts = computed(() => mockReceipts.value.filter(r => r.status === 'rejected'));
+const pendingReceipts = computed(() => myPendingReceipts.value.filter(r => r.status === 'pending'));
+const pendingAllReceipts = computed(() => allReceipts.value.filter(r => r.status === 'pending'));
+const approvedReceipts = computed(() => allReceipts.value.filter(r => r.status === 'approved'));
+const rejectedReceipts = computed(() => allReceipts.value.filter(r => r.status === 'rejected'));
 
 const displayedReceipts = computed(() => {
   switch (activeTab.value) {

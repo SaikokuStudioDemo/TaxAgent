@@ -3,46 +3,15 @@ import { ref, computed } from 'vue';
 import {
   XCircle,
   FileText,
-  Clock,
   Plus,
   CheckCircle
 } from 'lucide-vue-next';
 import { useApprovals, type AddedStep } from '@/composables/useApprovals';
-import { MASTER_APPROVERS, getRankFromRoleId } from '@/lib/constants/mockData';
+import { APPROVAL_LEVELS, getRankFromRoleId } from '@/lib/constants/mockData';
 import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
+import type { ReceiptItem } from '@/lib/types/approvalTypes';
 
-// --- TYPES ---
-interface ApprovalHistory {
-  id: string;
-  step: number;
-  roleId: string;
-  roleName: string;
-  approverId?: string;
-  approverName?: string;
-  status: 'pending' | 'approved' | 'rejected' | 'skipped';
-  actionDate?: string;
-  comment?: string;
-}
-
-interface ReceiptItem {
-  id: string;
-  submitterName: string;
-  departmentName: string;
-  groupName?: string;
-  projectName?: string;
-  date: string;
-  issuer: string;
-  amount: number;
-  taxRate: string;
-  category: string;
-  paymentMethod: string;
-  memo: string;
-  status: 'pending' | 'approved' | 'rejected';
-  currentStepIndex: number;
-  approvalHistory: ApprovalHistory[];
-  imageUrl: string;
-}
 
 const props = defineProps<{
   show: boolean;
@@ -64,10 +33,12 @@ const availableApproversToAdd = computed(() => {
   if (!props.receipt || props.receipt.approvalHistory.length === 0) return [];
   
   const currentHistory = props.receipt.approvalHistory[props.receipt.currentStepIndex];
-  if (!currentHistory) return MASTER_APPROVERS;
+  if (!currentHistory) return APPROVAL_LEVELS.map(l => ({ id: l.value, roleId: l.value, roleName: l.label, name: l.label, rank: getRankFromRoleId(l.value) }));
   
   const currentRank = getRankFromRoleId(currentHistory.roleId);
-  return MASTER_APPROVERS.filter(a => a.rank > currentRank);
+  return APPROVAL_LEVELS
+    .map(l => ({ id: l.value, roleId: l.value, roleName: l.label, name: l.label, rank: getRankFromRoleId(l.value) }))
+    .filter(a => a.rank > currentRank);
 });
 
 // --- ACTIONS ---
@@ -80,7 +51,8 @@ const handleClose = () => {
 
 const handleAddApprover = () => {
   if (!selectedExtraApproverId.value || !props.receipt) return;
-  const approver = MASTER_APPROVERS.find(a => a.id === selectedExtraApproverId.value);
+  const level = APPROVAL_LEVELS.find(l => l.value === selectedExtraApproverId.value);
+  const approver = level ? { id: level.value, roleId: level.value, roleName: level.label, name: level.label, rank: getRankFromRoleId(level.value) } : null;
   if (approver) {
     const newStepIndex = props.receipt.approvalHistory.length;
     props.receipt.approvalHistory.push({
@@ -259,11 +231,7 @@ const handleReject = async () => {
               <div v-if="receipt.status === 'pending'" class="bg-white border text-center relative border-gray-200 rounded-xl p-5 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.1)]">
                 <!-- Check if wait for another approver (simplified check for this mock/context) -->
                 <!-- In a real app, we would check if the current user matches the current step's role -->
-                <div v-if="receipt.approvalHistory[receipt.currentStepIndex]?.approverName === '鈴木次郎'" class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 text-left">
-                  <h4 class="text-sm font-bold text-blue-800 flex items-center gap-2"><Clock class="w-4 h-4"/> 別の担当者の承認待ち</h4>
-                  <p class="text-xs text-blue-700 mt-1">現在は <strong>{{ receipt.approvalHistory[receipt.currentStepIndex].roleName }} ({{ receipt.approvalHistory[receipt.currentStepIndex].approverName }})</strong> の承認を待っています。</p>
-                </div>
-                <div v-else>
+                <div>
                   <div class="mb-4">
                     <h3 class="text-sm font-bold text-gray-900 mb-2 text-left">承認用コメント（任意）</h3>
                     <textarea 

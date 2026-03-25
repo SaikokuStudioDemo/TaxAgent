@@ -13,25 +13,10 @@ import {
 } from 'lucide-vue-next';
 import { useInvoices } from '@/composables/useInvoices';
 import InvoiceDetailModal from '@/components/invoices/InvoiceDetailModal.vue';
-import { buildApprovalHistory, type ApprovalHistory } from '@/composables/useApprovalHistory';
+import { buildApprovalHistory } from '@/composables/useApprovalHistory';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
+import type { InvoiceItem } from '@/lib/types/approvalTypes';
 
-interface InvoiceItem {
-  id: string;
-  vendorName: string;
-  title: string;
-  amount: number;
-  issuedDate: string;
-  dueDate: string;
-  category: string;
-  paymentMethod: string;
-  memo: string;
-  status: 'pending' | 'approved' | 'rejected';
-  isAutoApproved: boolean;
-  currentStepIndex: number;
-  approvalHistory: ApprovalHistory[];
-  imageUrl: string;
-}
 
 // --- STATE ---
 const { invoices: apiInvoices, fetchInvoices } = useInvoices();

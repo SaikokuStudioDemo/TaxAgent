@@ -121,10 +121,6 @@ async def update_invoice(
             steps = await get_rule_steps(rule_id)
             update_data["approval_steps"] = steps
 
-    # 承認ルールなしで sent に遷移する場合は自動承認扱いにセット
-    if update_data.get("approval_status") == "sent":
-        if existing and not existing.get("approval_rule_id"):
-            update_data["approval_status"] = "auto_approved"
 
     result = await ctx.db["invoices"].update_one(
         {"_id": oid, "corporate_id": ctx.corporate_id},
@@ -167,7 +163,7 @@ async def send_invoice(
 
     await ctx.db["invoices"].update_one(
         {"_id": invoice["_id"]},
-        {"$set": {"approval_status": "sent"}},
+        {"$set": {"delivery_status": "sent"}},
     )
     return {"status": "sent", "invoice_id": invoice_id}
 
@@ -199,8 +195,8 @@ async def bulk_action(
         )
     elif action == "send":
         await ctx.db["invoices"].update_many(
-            {"_id": {"$in": oids}, "corporate_id": ctx.corporate_id, "document_type": "issued", "approval_status": "draft"},
-            {"$set": {"approval_status": "sent"}}
+            {"_id": {"$in": oids}, "corporate_id": ctx.corporate_id, "document_type": "issued"},
+            {"$set": {"delivery_status": "sent"}}
         )
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")

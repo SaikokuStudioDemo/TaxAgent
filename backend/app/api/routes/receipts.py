@@ -185,7 +185,7 @@ async def update_receipt(
 
     # Re-evaluate approval rule if amount changed
     if "amount" in payload:
-        new_rule_id = await _find_matching_rule(ctx.db, ctx.corporate_id, payload["amount"])
+        new_rule_id, _ = await evaluate_approval_rules(ctx.corporate_id, "receipt", payload)
         payload["approval_rule_id"] = new_rule_id
 
     forbidden = {"corporate_id", "submitted_by", "created_at", "_id"}

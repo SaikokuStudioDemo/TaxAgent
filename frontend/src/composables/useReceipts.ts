@@ -58,6 +58,20 @@ export function useReceipts() {
         }
     };
 
+    const pendingForMe = ref<Receipt[]>([]);
+
+    const fetchPendingForMe = async () => {
+        isLoading.value = true;
+        error.value = null;
+        try {
+            pendingForMe.value = await api.get<Receipt[]>('/receipts/pending-for-me');
+        } catch (e: any) {
+            error.value = e.message;
+        } finally {
+            isLoading.value = false;
+        }
+    };
+
     const getReceipt = async (id: string): Promise<Receipt | null> => {
         try {
             return await api.get<Receipt>(`/receipts/${id}`);
@@ -103,9 +117,11 @@ export function useReceipts() {
 
     return {
         receipts,
+        pendingForMe,
         isLoading,
         error,
         fetchReceipts,
+        fetchPendingForMe,
         getReceipt,
         createReceipt,
         updateReceipt,

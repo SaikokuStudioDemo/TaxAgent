@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("", summary="銀行・カード明細を一括インポートする")
+@router.post("", summary="明細を一括インポートする")
 async def import_transactions(
     payload: dict,
     ctx: CorporateContext = Depends(get_corporate_context),
@@ -48,19 +48,13 @@ async def import_transactions(
             "imported_at": datetime.utcnow(),
         })
 
-    result = await ctx.db["bank_transactions"].insert_many(docs)
+    result = await ctx.db["transactions"].insert_many(docs)
 
     # AI Matching Hook: Fetch candidates for fuzzy matching
     try:
         clients_cursor = ctx.db["clients"].find({"corporate_id": ctx.corporate_id})
         clients = await clients_cursor.to_list(length=1000)
         client_names = [c.get("name") for c in clients if c.get("name")]
-
-        # Note: In a real background task, we would run AI matching here
-        # for doc in docs:
-        #    match = await AIService.fuzzy_match_names(doc["description"], client_names)
-        #    if match and match["confidence"] > 0.8:
-        #        ... flag as candidate ...
     except Exception as e:
         logger.error(f"Post-import AI analysis failed: {e}")
 
@@ -70,7 +64,7 @@ async def import_transactions(
     }
 
 
-@router.get("", summary="銀行・カード明細一覧を取得する")
+@router.get("", summary="明細一覧を取得する")
 async def list_transactions(
     source_type: Optional[str] = None,
     status: Optional[str] = None,
@@ -85,7 +79,7 @@ async def list_transactions(
     if fiscal_period:
         query["fiscal_period"] = fiscal_period
 
-    cursor = ctx.db["bank_transactions"].find(query).sort("transaction_date", -1)
+    cursor = ctx.db["transactions"].find(query).sort("transaction_date", -1)
     docs = await cursor.to_list(length=1000)
     return [_serialize(doc) for doc in docs]
 
@@ -97,7 +91,7 @@ async def delete_transaction(
 ):
     oid = parse_oid(transaction_id, "transaction")
 
-    result = await ctx.db["bank_transactions"].delete_one({
+    result = await ctx.db["transactions"].delete_one({
         "_id": oid,
         "corporate_id": ctx.corporate_id,
     })

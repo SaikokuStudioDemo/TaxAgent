@@ -4,17 +4,9 @@
  * InvoiceListPage / InvoiceApprovalPage / ApprovalDashboardPage で共有
  */
 
-export interface ApprovalHistory {
-  id: string;
-  step: number;
-  roleId: string;
-  roleName: string;
-  approverId?: string;
-  approverName?: string;
-  status: 'pending' | 'approved' | 'rejected' | 'skipped';
-  actionDate?: string;
-  comment?: string;
-}
+// Re-export the canonical ApprovalHistory type from the shared types file
+export type { ApprovalHistory } from '@/lib/types/approvalTypes';
+import type { ApprovalHistory } from '@/lib/types/approvalTypes';
 
 export const roleLabel: Record<string, string> = {
   accounting:     '経理担当',
