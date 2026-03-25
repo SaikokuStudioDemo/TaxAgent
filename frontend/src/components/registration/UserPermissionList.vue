@@ -109,7 +109,7 @@ const handleSendInvite = (id: string) => {
 };
 
 const hasEmptyUser = computed(() => {
-  return props.users.some(u => u.name.trim() === '' || u.email.trim() === '');
+  return props.users.some(u => u.status === 'draft' && (u.name.trim() === '' || u.email.trim() === ''));
 });
 
 // Mock Departments to match OrganizationPage.vue

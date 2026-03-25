@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Loader2, AlertCircle, CheckCircle2 } from 'lucide-vue-next';
 import UserPermissionList, { UserData } from '@/components/registration/UserPermissionList.vue';
@@ -53,7 +53,7 @@ const fetchUsers = async () => {
         const data = await res.json();
         // Map backend response to frontend UserData format
         users.value = data.map((emp: any) => ({
-            id: emp.id || emp.email,
+            id: emp._id || emp.email,
             name: emp.name,
             email: emp.email,
             role: emp.role || 'staff',
@@ -71,6 +71,27 @@ const fetchUsers = async () => {
 onMounted(() => {
     fetchUsers();
 });
+
+// Auto-save existing (invited) users when their fields change
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+watch(users, (newUsers) => {
+    const existingUsers = newUsers.filter(u => !u.id.startsWith('user-') && u.status === 'invited');
+    if (existingUsers.length === 0) return;
+
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+        const token = await getToken();
+        if (!token) return;
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+        for (const u of existingUsers) {
+            await fetch(`${apiUrl}/users/employees/${u.id}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role: u.role, permissions: u.permissions, usageFee: u.usageFee }),
+            }).catch(() => {}); // silent fail
+        }
+    }, 800);
+}, { deep: true });
 
 const handleSingleInvite = async (userId: string) => {
     isInvitingId.value = userId;

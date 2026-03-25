@@ -203,6 +203,51 @@ async def get_employees(
 
     return emp_data
 
+@router.patch("/employees/{employee_id}", status_code=status.HTTP_200_OK)
+async def update_employee(
+    employee_id: str,
+    payload: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update an employee's operational fields (role, permissions, usageFee) in MongoDB only.
+    Does not touch Firebase Auth or Firestore PII.
+    """
+    from bson import ObjectId as BsonObjectId
+    db = get_database()
+    caller_uid = current_user.get("uid")
+
+    if not caller_uid:
+        raise HTTPException(status_code=400, detail="Invalid auth token format")
+
+    # Resolve corporate_id
+    caller_emp = await db["employees"].find_one({"firebase_uid": caller_uid})
+    if caller_emp and caller_emp.get("corporate_id"):
+        corporate_id = caller_emp.get("corporate_id")
+    else:
+        corp = await db["corporates"].find_one({"firebase_uid": caller_uid}, {"_id": 1})
+        corporate_id = str(corp["_id"]) if corp else None
+
+    # Verify the target employee belongs to this corporate
+    try:
+        oid = BsonObjectId(employee_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid employee ID format")
+
+    target = await db["employees"].find_one({"_id": oid, "corporate_id": corporate_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Employee not found or access denied")
+
+    # Only allow updating safe operational fields
+    allowed = {"role", "permissions", "usageFee"}
+    update_data = {k: v for k, v in payload.items() if k in allowed}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    await db["employees"].update_one({"_id": oid}, {"$set": update_data})
+    return {"status": "updated", "employee_id": employee_id}
+
+
 @router.delete("/employees/{employee_id}", status_code=status.HTTP_200_OK)
 async def delete_employee(
     employee_id: str,
