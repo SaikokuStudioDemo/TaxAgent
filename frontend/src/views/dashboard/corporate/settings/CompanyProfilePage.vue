@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { Plus, Edit2, Trash2, Building2, CheckCircle, CreditCard, Star, Loader2, Search } from 'lucide-vue-next';
+import { Plus, Edit2, Trash2, Building2, CheckCircle } from 'lucide-vue-next';
 import { useCompanyProfiles, type CompanyProfile } from '@/composables/useCompanyProfiles';
-import { useBankAccounts, type BankAccount } from '@/composables/useBankAccounts';
+import BankAccountSection from '@/components/shared/BankAccountSection.vue';
 
 const { profiles, isLoading: profilesLoading, fetchProfiles, createProfile, updateProfile, deleteProfile } = useCompanyProfiles();
-const { accounts, isLoading: accountsLoading, fetchBankAccounts, createBankAccount, updateBankAccount, deleteBankAccount, setDefaultBankAccount, lookupBank, lookupBranch } = useBankAccounts();
 
 // Profile modal state
 const isProfileModalOpen = ref(false);
@@ -21,71 +20,8 @@ const profileForm = ref({
   is_default: false,
 });
 
-// Bank account modal state
-const isBankModalOpen = ref(false);
-const editingAccountId = ref<string | null>(null);
-const currentProfileId = ref<string | null>(null);
-const isSavingAccount = ref(false);
-const isLookingUpBank = ref(false);
-const isLookingUpBranch = ref(false);
-const bankLookupError = ref('');
-const branchLookupError = ref('');
+onMounted(fetchProfiles);
 
-const bankForm = ref({
-  bank_code: '',
-  bank_name: '',
-  branch_code: '',
-  branch_name: '',
-  account_type: 'ordinary' as 'ordinary' | 'checking',
-  account_number: '',
-  account_holder: '',
-  is_default: false,
-});
-
-const handleBankCodeInput = async () => {
-  bankLookupError.value = '';
-  const code = bankForm.value.bank_code.trim();
-  if (code.length !== 4) return;
-  isLookingUpBank.value = true;
-  const result = await lookupBank(code);
-  isLookingUpBank.value = false;
-  if (result) {
-    bankForm.value.bank_name = result.bank_name;
-    // Reset branch when bank changes
-    bankForm.value.branch_code = '';
-    bankForm.value.branch_name = '';
-    branchLookupError.value = '';
-  } else {
-    bankLookupError.value = '該当する金融機関が見つかりませんでした';
-  }
-};
-
-const handleBranchCodeInput = async () => {
-  branchLookupError.value = '';
-  const bankCode = bankForm.value.bank_code.trim();
-  const branchCode = bankForm.value.branch_code.trim();
-  if (!bankCode || branchCode.length !== 3) return;
-  isLookingUpBranch.value = true;
-  const result = await lookupBranch(bankCode, branchCode);
-  isLookingUpBranch.value = false;
-  if (result) {
-    bankForm.value.branch_name = result.branch_name;
-  } else {
-    branchLookupError.value = '該当する支店が見つかりませんでした';
-  }
-};
-
-onMounted(async () => {
-  await fetchProfiles();
-  await fetchBankAccounts();
-});
-
-const accountsForProfile = (profileId: string) =>
-  accounts.value.filter(a => a.profile_id === profileId);
-
-const accountTypeLabel = (type: string) => type === 'ordinary' ? '普通' : '当座';
-
-// Profile actions
 const openCreateProfileModal = () => {
   editingProfileId.value = null;
   profileForm.value = { profile_name: '', company_name: '', phone: '', address: '', registration_number: '', is_default: false };
@@ -131,59 +67,6 @@ const removeProfile = async (id: string) => {
   if (confirm('この自社プロファイルを削除してもよろしいですか？')) {
     await deleteProfile(id);
   }
-};
-
-// Bank account actions
-const openCreateBankModal = (profileId: string) => {
-  currentProfileId.value = profileId;
-  editingAccountId.value = null;
-  bankForm.value = { bank_code: '', bank_name: '', branch_code: '', branch_name: '', account_type: 'ordinary', account_number: '', account_holder: '', is_default: false };
-  bankLookupError.value = '';
-  branchLookupError.value = '';
-  isBankModalOpen.value = true;
-};
-
-const openEditBankModal = (account: BankAccount) => {
-  currentProfileId.value = account.profile_id ?? null;
-  editingAccountId.value = account.id;
-  bankForm.value = {
-    bank_code: account.bank_code ?? '',
-    bank_name: account.bank_name,
-    branch_code: account.branch_code ?? '',
-    branch_name: account.branch_name,
-    account_type: account.account_type,
-    account_number: account.account_number,
-    account_holder: account.account_holder,
-    is_default: account.is_default,
-  };
-  bankLookupError.value = '';
-  branchLookupError.value = '';
-  isBankModalOpen.value = true;
-};
-
-const saveBankAccount = async () => {
-  if (!currentProfileId.value) return;
-  isSavingAccount.value = true;
-  try {
-    if (editingAccountId.value) {
-      await updateBankAccount(editingAccountId.value, bankForm.value);
-    } else {
-      await createBankAccount({ ...bankForm.value, profile_id: currentProfileId.value });
-    }
-    isBankModalOpen.value = false;
-  } finally {
-    isSavingAccount.value = false;
-  }
-};
-
-const removeAccount = async (id: string) => {
-  if (confirm('この銀行口座を削除してもよろしいですか？')) {
-    await deleteBankAccount(id);
-  }
-};
-
-const handleSetDefault = async (id: string) => {
-  await setDefaultBankAccount(id);
 };
 </script>
 
@@ -255,55 +138,7 @@ const handleSetDefault = async (id: string) => {
 
         <!-- Bank Accounts Section -->
         <div class="p-5">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-2">
-              <CreditCard :size="16" class="text-gray-500" />
-              <span class="text-sm font-bold text-gray-700">振込先口座</span>
-              <span class="text-xs text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">{{ accountsForProfile(profile.id).length }}件</span>
-            </div>
-            <button @click="openCreateBankModal(profile.id)" class="text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-3 py-1 rounded-lg transition-colors flex items-center gap-1">
-              <Plus :size="12" /> 口座を追加
-            </button>
-          </div>
-
-          <div v-if="accountsLoading" class="text-center text-gray-400 text-sm py-4">読み込み中...</div>
-          <div v-else-if="accountsForProfile(profile.id).length === 0" class="text-center text-gray-400 text-sm py-4 border border-dashed border-gray-200 rounded-lg">
-            銀行口座が登録されていません
-          </div>
-          <div v-else class="space-y-2">
-            <div
-              v-for="account in accountsForProfile(profile.id)"
-              :key="account.id"
-              class="flex items-center justify-between p-3 rounded-lg border transition-colors"
-              :class="account.is_default ? 'border-indigo-200 bg-indigo-50/30' : 'border-gray-100 bg-gray-50/50 hover:bg-gray-50'"
-            >
-              <div class="flex items-center gap-3 min-w-0">
-                <div class="shrink-0">
-                  <span v-if="account.is_default" class="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-100 border border-indigo-200 rounded-full px-2 py-0.5">
-                    <Star :size="9" /> デフォルト
-                  </span>
-                </div>
-                <div class="min-w-0">
-                  <p class="text-sm font-bold text-gray-800 truncate">
-                    {{ account.bank_name }} {{ account.branch_name }}
-                    <span class="font-normal text-gray-500 ml-1">{{ accountTypeLabel(account.account_type) }} {{ account.account_number }}</span>
-                  </p>
-                  <p class="text-xs text-gray-500">{{ account.account_holder }}</p>
-                </div>
-              </div>
-              <div class="flex items-center gap-1 shrink-0 ml-2">
-                <button v-if="!account.is_default" @click="handleSetDefault(account.id)" class="text-xs text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded transition-colors font-medium border border-transparent hover:border-indigo-200">
-                  デフォルトに設定
-                </button>
-                <button @click="openEditBankModal(account)" class="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-white rounded transition-colors border border-transparent hover:border-gray-200">
-                  <Edit2 :size="13" />
-                </button>
-                <button @click="removeAccount(account.id)" class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-white rounded transition-colors border border-transparent hover:border-gray-200">
-                  <Trash2 :size="13" />
-                </button>
-              </div>
-            </div>
-          </div>
+          <BankAccountSection owner-type="corporate" :profile-id="profile.id" />
         </div>
       </div>
     </div>
@@ -354,111 +189,6 @@ const handleSetDefault = async (id: string) => {
           <button @click="isProfileModalOpen = false" class="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors">キャンセル</button>
           <button @click="saveProfile" :disabled="isSavingProfile || !profileForm.profile_name || !profileForm.company_name" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm disabled:bg-indigo-300 disabled:cursor-not-allowed">
             {{ editingProfileId ? '保存する' : '作成する' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Bank Account Modal -->
-    <div v-if="isBankModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div class="absolute inset-0 bg-gray-900/50 backdrop-blur-sm" @click="isBankModalOpen = false"></div>
-      <div class="bg-white rounded-xl shadow-xl w-full max-w-md relative z-10 overflow-hidden flex flex-col max-h-[90vh]">
-        <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-          <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
-            <CreditCard :size="18" class="text-indigo-600" />
-            {{ editingAccountId ? '銀行口座を編集' : '口座を追加' }}
-          </h3>
-          <button @click="isBankModalOpen = false" class="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none">&times;</button>
-        </div>
-        <div class="p-6 overflow-y-auto space-y-4">
-          <!-- Bank Code + Name -->
-          <div>
-            <label class="block text-xs font-bold text-gray-700 mb-1">金融機関コード（4桁）</label>
-            <div class="flex gap-2">
-              <div class="relative w-28 shrink-0">
-                <input
-                  v-model="bankForm.bank_code"
-                  type="text"
-                  maxlength="4"
-                  placeholder="0001"
-                  @input="handleBankCodeInput"
-                  class="w-full border border-gray-300 rounded-lg p-2.5 text-sm font-mono focus:ring-indigo-500 focus:border-indigo-500 pr-8"
-                />
-                <Loader2 v-if="isLookingUpBank" :size="14" class="absolute right-2 top-1/2 -translate-y-1/2 text-indigo-400 animate-spin" />
-                <Search v-else :size="14" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300" />
-              </div>
-              <div class="flex-1">
-                <input
-                  v-model="bankForm.bank_name"
-                  type="text"
-                  placeholder="銀行名（コード入力で自動補完）"
-                  class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-indigo-500 focus:border-indigo-500"
-                  :class="{ 'bg-indigo-50 border-indigo-200': bankForm.bank_name && bankForm.bank_code }"
-                />
-              </div>
-            </div>
-            <p v-if="bankLookupError" class="text-xs text-red-500 mt-1">{{ bankLookupError }}</p>
-            <p v-else class="text-[10px] text-gray-400 mt-1">コード不明の場合は銀行名を直接入力してください</p>
-          </div>
-
-          <!-- Branch Code + Name -->
-          <div>
-            <label class="block text-xs font-bold text-gray-700 mb-1">支店コード（3桁）</label>
-            <div class="flex gap-2">
-              <div class="relative w-28 shrink-0">
-                <input
-                  v-model="bankForm.branch_code"
-                  type="text"
-                  maxlength="3"
-                  placeholder="001"
-                  @input="handleBranchCodeInput"
-                  :disabled="!bankForm.bank_code"
-                  class="w-full border border-gray-300 rounded-lg p-2.5 text-sm font-mono focus:ring-indigo-500 focus:border-indigo-500 pr-8 disabled:bg-gray-50 disabled:text-gray-400"
-                />
-                <Loader2 v-if="isLookingUpBranch" :size="14" class="absolute right-2 top-1/2 -translate-y-1/2 text-indigo-400 animate-spin" />
-                <Search v-else :size="14" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300" />
-              </div>
-              <div class="flex-1">
-                <input
-                  v-model="bankForm.branch_name"
-                  type="text"
-                  placeholder="支店名（コード入力で自動補完）"
-                  class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-indigo-500 focus:border-indigo-500"
-                  :class="{ 'bg-indigo-50 border-indigo-200': bankForm.branch_name && bankForm.branch_code }"
-                />
-              </div>
-            </div>
-            <p v-if="branchLookupError" class="text-xs text-red-500 mt-1">{{ branchLookupError }}</p>
-            <p v-else class="text-[10px] text-gray-400 mt-1">コード不明の場合は支店名を直接入力してください</p>
-          </div>
-          <div>
-            <label class="block text-xs font-bold text-gray-700 mb-1">口座種別</label>
-            <select v-model="bankForm.account_type" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-indigo-500 focus:border-indigo-500">
-              <option value="ordinary">普通</option>
-              <option value="checking">当座</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-bold text-gray-700 mb-1">口座番号 <span class="text-red-500">*</span></label>
-            <input v-model="bankForm.account_number" type="text" placeholder="例: 1234567" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-indigo-500 focus:border-indigo-500 font-mono" />
-          </div>
-          <div>
-            <label class="block text-xs font-bold text-gray-700 mb-1">口座名義 <span class="text-red-500">*</span></label>
-            <input v-model="bankForm.account_holder" type="text" placeholder="例: カブシキガイシャタックスエージェント" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-indigo-500 focus:border-indigo-500 font-mono" />
-          </div>
-          <div class="flex items-center">
-            <input id="bankIsDefault" v-model="bankForm.is_default" type="checkbox" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded" />
-            <label for="bankIsDefault" class="ml-2 block text-sm text-gray-900 font-medium">デフォルト口座として使用する</label>
-          </div>
-        </div>
-        <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3 shrink-0">
-          <button @click="isBankModalOpen = false" class="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors">キャンセル</button>
-          <button
-            @click="saveBankAccount"
-            :disabled="isSavingAccount || !bankForm.bank_name || !bankForm.branch_name || !bankForm.account_number || !bankForm.account_holder"
-            class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm disabled:bg-indigo-300 disabled:cursor-not-allowed"
-          >
-            {{ editingAccountId ? '保存する' : '追加する' }}
           </button>
         </div>
       </div>
