@@ -70,7 +70,7 @@ async def seed():
                 "employees", "receipts", "invoices", "approval_rules",
                 "clients", "company_profiles", "bank_accounts", "notifications",
                 "bank_transactions", "matches", "approval_events",
-                "departments",
+                "departments", "projects",
             ]:
                 await db[col].delete_many({"corporate_id": cid})
     await db["corporates"].delete_many({"firebase_uid": {"$in": ALL_CORP_UIDS}})
@@ -338,6 +338,7 @@ async def seed():
             {"id": "grp-dev-2", "name": "バックエンドチーム"},
         ], "created_at": today},
     ])
+    dept_a_ids = [str(i) for i in dept_res.inserted_ids]
     print("✅ 一般法人A 部門3件作成")
 
     await db["employees"].insert_many([
@@ -360,7 +361,40 @@ async def seed():
             "created_at": today,
         },
     ])
+    emp_a_staff_res  = await db["employees"].find_one({"firebase_uid": EMP_A_STAFF_UID})
+    emp_a_manager_res = await db["employees"].find_one({"firebase_uid": EMP_A_MANAGER_UID})
+    emp_a_staff_id   = str(emp_a_staff_res["_id"])  if emp_a_staff_res  else ""
+    emp_a_manager_id = str(emp_a_manager_res["_id"]) if emp_a_manager_res else ""
     print("✅ 一般法人A 従業員2名作成")
+
+    # プロジェクト（法人A）
+    proj_a_res = await db["projects"].insert_many([
+        {
+            "corporate_id": corp_a_id,
+            "name": "社内基幹システムリプレイス",
+            "description": "ERP刷新プロジェクト（2025年度）",
+            "approvers": [
+                {"user_id": emp_a_manager_id, "name": "佐藤 花子", "order": 1},
+                {"user_id": emp_a_staff_id,   "name": "山田 太郎", "order": 2},
+            ],
+            "is_active": True,
+            "created_at": today,
+            "updated_at": today,
+        },
+        {
+            "corporate_id": corp_a_id,
+            "name": "Webサイト制作プロジェクト",
+            "description": "コーポレートサイトリニューアル",
+            "approvers": [
+                {"user_id": emp_a_manager_id, "name": "佐藤 花子", "order": 1},
+            ],
+            "is_active": True,
+            "created_at": today,
+            "updated_at": today,
+        },
+    ])
+    proj_a_ids = [str(i) for i in proj_a_res.inserted_ids]
+    print("✅ 一般法人A プロジェクト2件作成")
 
     # 取引先（法人A）
     corp_a_client_res = await db["clients"].insert_many([
@@ -372,7 +406,7 @@ async def seed():
             "phone": "03-1111-1111",
             "postal_code": "150-0001",
             "address": "東京都渋谷区神宮前1-1-1",
-            "department": "経理部",
+            "department_id": dept_a_ids[0],
             "contact_person": "田中 誠",
             "payment_terms": "月末締め翌月末払い",
             "internal_notes": "メインの取引先",
@@ -386,7 +420,7 @@ async def seed():
             "phone": "03-2222-2222",
             "postal_code": "160-0022",
             "address": "東京都新宿区新宿3-3-3",
-            "department": "制作部",
+            "department_id": dept_a_ids[1],
             "contact_person": "鈴木 美穂",
             "payment_terms": "納品後30日以内",
             "internal_notes": "ロゴ・デザイン担当",
@@ -400,7 +434,7 @@ async def seed():
             "phone": "03-3333-3333",
             "postal_code": "100-0005",
             "address": "東京都千代田区丸の内1-1-1",
-            "department": "営業部",
+            "department_id": dept_a_ids[2],
             "contact_person": "山本 健太",
             "payment_terms": "月末締め翌々月払い",
             "internal_notes": "サーバー・SaaS費用",
@@ -494,6 +528,7 @@ async def seed():
             "current_step": 1,
             "approval_rule_id": a_base_rule_id,
             "approval_history": [{"step": 1, "roleId": "direct_manager", "roleName": "直属の部門長", "status": "pending"}],
+            "project_id": proj_a_ids[0],
             "fiscal_period": "2024-03",
             "created_by": corp_a_id,
             "created_at": today,
@@ -519,6 +554,7 @@ async def seed():
                 {"step": 1, "roleId": "accounting", "roleName": "経理担当", "status": "pending"},
                 {"step": 2, "roleId": "direct_manager", "roleName": "直属の部門長", "status": "pending"},
             ],
+            "project_id": proj_a_ids[1],
             "fiscal_period": "2024-03",
             "created_by": corp_a_id,
             "created_at": today,
@@ -571,6 +607,7 @@ async def seed():
             "current_step": 1,
             "approval_rule_id": a_base_rule_id,
             "approval_history": [{"step": 1, "roleId": "direct_manager", "roleName": "直属の部門長", "status": "pending"}],
+            "project_id": proj_a_ids[0],
             "created_at": today,
         },
         {
@@ -701,7 +738,40 @@ async def seed():
             "created_at": today,
         },
     ])
+    emp_b_staff_res   = await db["employees"].find_one({"firebase_uid": EMP_B_STAFF_UID})
+    emp_b_manager_res = await db["employees"].find_one({"firebase_uid": EMP_B_MANAGER_UID})
+    emp_b_staff_id    = str(emp_b_staff_res["_id"])   if emp_b_staff_res   else ""
+    emp_b_manager_id  = str(emp_b_manager_res["_id"]) if emp_b_manager_res else ""
     print("✅ 一般法人B 従業員2名作成")
+
+    # プロジェクト（法人B）
+    proj_b_res = await db["projects"].insert_many([
+        {
+            "corporate_id": corp_b_id,
+            "name": "新規事業立ち上げプロジェクト",
+            "description": "B社 新規事業開発（2025年度）",
+            "approvers": [
+                {"user_id": emp_b_manager_id, "name": "渡辺 美咲", "order": 1},
+                {"user_id": emp_b_staff_id,   "name": "伊藤 翔太", "order": 2},
+            ],
+            "is_active": True,
+            "created_at": today,
+            "updated_at": today,
+        },
+        {
+            "corporate_id": corp_b_id,
+            "name": "マーケティングキャンペーン",
+            "description": "Q2広告戦略プロジェクト",
+            "approvers": [
+                {"user_id": emp_b_manager_id, "name": "渡辺 美咲", "order": 1},
+            ],
+            "is_active": True,
+            "created_at": today,
+            "updated_at": today,
+        },
+    ])
+    proj_b_ids = [str(i) for i in proj_b_res.inserted_ids]
+    print("✅ 一般法人B プロジェクト2件作成")
 
     # 取引先（法人B）
     corp_b_client_res = await db["clients"].insert_many([
@@ -713,7 +783,6 @@ async def seed():
             "phone": "03-4444-4444",
             "postal_code": "140-0002",
             "address": "東京都品川区東品川2-2-2",
-            "department": "購買部",
             "contact_person": "小林 直樹",
             "payment_terms": "末日締め翌月末払い",
             "internal_notes": "主要顧客",
@@ -727,7 +796,6 @@ async def seed():
             "phone": "03-5555-5555",
             "postal_code": "105-0011",
             "address": "東京都港区芝公園1-1-1",
-            "department": "営業部",
             "contact_person": "高橋 由美",
             "payment_terms": "納品後45日以内",
             "internal_notes": "広告・宣伝費担当",
@@ -741,7 +809,6 @@ async def seed():
             "phone": "03-6666-6666",
             "postal_code": "108-0075",
             "address": "東京都港区港南3-3-3",
-            "department": "総務部",
             "contact_person": "中村 朋子",
             "payment_terms": "月末締め翌々月払い",
             "internal_notes": "消耗品・備品の仕入先",
@@ -835,6 +902,7 @@ async def seed():
             "current_step": 1,
             "approval_rule_id": b_base_rule_id,
             "approval_history": [{"step": 1, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"}],
+            "project_id": proj_b_ids[0],
             "fiscal_period": today.strftime("%Y-%m"),
             "created_by": corp_b_id,
             "created_at": today,
@@ -888,6 +956,7 @@ async def seed():
             "current_step": 1,
             "approval_rule_id": b_base_rule_id,
             "approval_history": [{"step": 1, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"}],
+            "project_id": proj_b_ids[0],
             "created_at": today,
         },
         {
