@@ -21,11 +21,18 @@ seed.py - 開発・テスト用シードデータ投入スクリプト
 """
 
 import asyncio
+import os
 from datetime import datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 
-MONGO_URI = "mongodb://localhost:27017"
-DB_NAME = "tax_agent"
+MONGO_URI = os.getenv("MONGODB_URI", os.getenv("MONGODB_URL", "mongodb://localhost:27017"))
+DB_NAME = os.getenv("MONGODB_DB_NAME", "tax_agent")
+
+if "localhost" not in MONGO_URI and "127.0.0.1" not in MONGO_URI:
+    raise Exception(
+        "seed.py はローカル環境でのみ実行できます。"
+        f"現在の接続先: {MONGO_URI}"
+    )
 
 # Firebase UID（テスト環境用固定値）
 TAX_FIRM_UID   = "tax_firm_uid"
