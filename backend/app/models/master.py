@@ -18,9 +18,9 @@ class ClientInDB(ClientCreate):
 class CompanyProfileCreate(BaseModel):
     profile_name: str
     company_name: str
+    phone: Optional[str] = None
     registration_number: Optional[str] = None
     address: Optional[str] = None
-    bank_info: Optional[str] = None
     is_default: bool = False
 
 class CompanyProfileInDB(CompanyProfileCreate):
