@@ -6,6 +6,7 @@ import ClientFormModal from '@/components/invoices/ClientFormModal.vue';
 import TemplateEditorModal from '@/components/invoices/TemplateEditorModal.vue';
 import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
 import { useCompanyProfiles } from '@/composables/useCompanyProfiles';
+import { useBankAccounts } from '@/composables/useBankAccounts';
 import { api } from '@/lib/api';
 import { formatNumber as formatCurrency } from '@/lib/utils/formatters';
 
@@ -145,9 +146,10 @@ const availableClients = ref<{id: string, name: string, contactPerson: string, e
 const templateToDelete = ref<InvoiceTemplate | null>(null);
 
 // --- COMPOSABLES ---
-const { profiles: senderProfiles, formatProfileForTextarea } = useCompanyProfiles();
-const defaultProfile = senderProfiles.value.find(p => p.isDefault) || senderProfiles.value[0];
-const activeSenderProfile = ref(defaultProfile ? defaultProfile.id : '');
+const { profiles: senderProfiles, fetchProfiles, formatProfileForTextarea } = useCompanyProfiles();
+const { accounts: bankAccounts, fetchBankAccounts } = useBankAccounts();
+const activeSenderProfile = ref('');
+const activeBankAccountId = ref('');
 
 // --- COMPUTED ---
 const subtotal = computed(() => items.value.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0));
@@ -163,9 +165,17 @@ const canSubmit = computed(() =>
 );
 
 const senderInfo = computed(() => {
-    const profile = senderProfiles.value.find(p => p.id === activeSenderProfile.value);
+    const profile = senderProfiles.value.find((p: any) => p.id === activeSenderProfile.value);
     return profile ? formatProfileForTextarea(profile) : '';
 });
+
+const bankAccountOptions = computed(() =>
+    bankAccounts.value.map(a => ({
+        id: a.id,
+        label: `${a.bank_name} ${a.branch_name} ${a.account_type === 'ordinary' ? '普通' : '当座'} ${a.account_number} (${a.account_holder})`,
+        is_default: a.is_default,
+    }))
+);
 
 const clientDisplayName = computed(() => {
     const text = templateVariables.value[0]?.value || '';
@@ -426,8 +436,18 @@ const loadInvoiceData = async (id: string) => {
     }
 };
 
-onMounted(() => {
+onMounted(async () => {
     fetchTemplates();
+    await fetchProfiles();
+    // Set default sender profile
+    const defaultProfile = senderProfiles.value.find((p: any) => p.is_default) || senderProfiles.value[0];
+    if (defaultProfile) activeSenderProfile.value = defaultProfile.id;
+
+    await fetchBankAccounts();
+    // Set default bank account
+    const defaultAccount = bankAccounts.value.find(a => a.is_default) || bankAccounts.value[0];
+    if (defaultAccount) activeBankAccountId.value = defaultAccount.id;
+
     if (editingInvoiceId.value) {
         loadInvoiceData(editingInvoiceId.value);
     }
@@ -540,7 +560,7 @@ const buildPayload = () => {
     const clientText = templateVariables.value[0]?.value || '';
     const clientName = clientText.split('\n')[0].replace(' 御中', '') || '未設定';
     return {
-        direction: 'issued' as const,
+        document_type: 'issued' as const,
         invoice_number: invoiceNumber.value,
         client_id: activeClientId.value || undefined,
         client_name: clientName,
@@ -556,7 +576,8 @@ const buildPayload = () => {
             amount: item.quantity * item.unitPrice,
             tax_rate: Math.round(item.taxRate * 100)
         })),
-        template_id: selectedTemplateId.value || undefined
+        template_id: selectedTemplateId.value || undefined,
+        bank_account_id: activeBankAccountId.value || undefined,
     };
 };
 
@@ -592,10 +613,9 @@ const handleApprovalRequirement = (required: boolean) => {
 const submitInvoice = async () => {
     isSaving.value = true;
     try {
-        const payload = { 
-            ...buildPayload(), 
-            status: isApprovalRequired.value ? 'pending_approval' : 'sent',
-            // if approval is required, the backend will auto-set review_status
+        const payload = {
+            ...buildPayload(),
+            approval_status: isApprovalRequired.value ? 'pending_approval' : 'draft',
         };
         if (editingInvoiceId.value) {
             await api.patch(`/invoices/${editingInvoiceId.value}`, payload);
@@ -824,20 +844,32 @@ function handleClientSelection() {
                                  </p>
                                </div>
                            </div>
-                           <div v-if="detectedVariables.includes('sender_name') || detectedVariables.includes('sender_details')">
-                               <label class="block text-xs font-bold text-gray-700 mb-2">請求元情報</label>
-                               <div class="border border-gray-200 rounded-lg bg-gray-50 flex flex-col relative group overflow-hidden">
-                                   <div class="p-5 flex-1 relative">
-                                       <div class="mb-3">
-                                           <select v-model="activeSenderProfile" class="block w-full py-1.5 pl-3 pr-10 text-sm border-gray-300 focus:outline-none focus:ring-amber-500 focus:border-amber-500 rounded-md bg-white shadow-sm text-gray-700 font-medium">
-                                               <option v-for="profile in senderProfiles" :key="profile.id" :value="profile.id">自社プロファイル: {{ profile.name }}</option>
-                                           </select>
+                           <div v-if="detectedVariables.includes('sender_name') || detectedVariables.includes('sender_details')" class="space-y-4">
+                               <div>
+                                   <label class="block text-xs font-bold text-gray-700 mb-2">請求元情報</label>
+                                   <div class="border border-gray-200 rounded-lg bg-gray-50 flex flex-col relative group overflow-hidden">
+                                       <div class="p-5 flex-1 relative">
+                                           <div class="mb-3">
+                                               <select v-model="activeSenderProfile" class="block w-full py-1.5 pl-3 pr-10 text-sm border-gray-300 focus:outline-none focus:ring-amber-500 focus:border-amber-500 rounded-md bg-white shadow-sm text-gray-700 font-medium">
+                                                   <option v-for="profile in senderProfiles" :key="(profile as any).id" :value="(profile as any).id">自社プロファイル: {{ (profile as any).profile_name || (profile as any).company_name }}</option>
+                                               </select>
+                                           </div>
+                                           <textarea :value="senderInfo" class="w-full h-24 bg-transparent border-0 resize-none focus:ring-0 p-0 text-gray-600 text-sm leading-relaxed outline-none" readonly></textarea>
                                        </div>
-                                       <textarea :value="senderInfo" class="w-full h-24 bg-transparent border-0 resize-none focus:ring-0 p-0 text-gray-600 text-sm leading-relaxed outline-none" readonly></textarea>
+                                       <div class="bg-white border-t border-gray-200 px-4 py-2 flex justify-center shrink-0">
+                                           <router-link to="/dashboard/corporate/settings/company" class="text-xs font-bold text-gray-500 hover:text-gray-700 transition-colors flex items-center justify-center gap-1 py-1 px-2 hover:bg-gray-50 rounded w-full">自社マスター設定を開く</router-link>
+                                       </div>
                                    </div>
-                                   <div class="bg-white border-t border-gray-200 px-4 py-2 flex justify-center shrink-0">
-                                       <router-link to="/dashboard/corporate/settings/company" class="text-xs font-bold text-gray-500 hover:text-gray-700 transition-colors flex items-center justify-center gap-1 py-1 px-2 hover:bg-gray-50 rounded w-full">自社マスター設定を開く</router-link>
-                                   </div>
+                               </div>
+                               <!-- 振込先口座 -->
+                               <div>
+                                   <label class="block text-xs font-bold text-gray-700 mb-2">振込先口座</label>
+                                   <select v-model="activeBankAccountId" class="block w-full py-2 pl-3 pr-10 text-sm border border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 rounded-lg bg-white shadow-sm text-gray-700">
+                                       <option value="">口座を選択してください</option>
+                                       <option v-for="opt in bankAccountOptions" :key="opt.id" :value="opt.id">
+                                           {{ opt.label }}{{ opt.is_default ? ' ★' : '' }}
+                                       </option>
+                                   </select>
                                </div>
                            </div>
                        </div>
