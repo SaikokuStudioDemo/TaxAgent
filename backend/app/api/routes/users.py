@@ -197,8 +197,9 @@ async def get_employees(
         for e in employees:
             e["_id"] = str(e["_id"])
             pii = emp_pii_map.get(e["firebase_uid"], {})
-            e["name"] = pii.get("name", "")
-            e["email"] = pii.get("email", "")
+            # Firestore PII takes precedence; fall back to MongoDB fields (e.g. seed data)
+            e["name"] = pii.get("name") or e.get("name", "")
+            e["email"] = pii.get("email") or e.get("email", "")
             emp_data.append(e)
 
     return emp_data
@@ -239,7 +240,7 @@ async def update_employee(
         raise HTTPException(status_code=404, detail="Employee not found or access denied")
 
     # Only allow updating safe operational fields
-    allowed = {"role", "permissions", "usageFee"}
+    allowed = {"role", "permissions", "usageFee", "departmentId", "groupId"}
     update_data = {k: v for k, v in payload.items() if k in allowed}
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields to update")
@@ -537,52 +538,6 @@ async def update_client(
 
     return {"message": "Client updated successfully"}
 
-@router.put("/clients/{client_id}/employees", status_code=status.HTTP_200_OK)
-async def update_client_employees(
-    client_id: str,
-    payload: List[dict],
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Endpoint for Tax Firms to completely replace/sync the employee list of a client.
-    """
-    from bson import ObjectId
-    db = get_database()
-    firebase_uid = current_user.get("uid")
-    
-    # Resolve effective firebase_uid
-    from bson import ObjectId as BsonObjectId
-    effective_uid = firebase_uid
-    calling_emp = await db["employees"].find_one({"firebase_uid": firebase_uid})
-    if calling_emp and calling_emp.get("corporate_id"):
-        parent_corp = await db["corporates"].find_one(
-            {"_id": BsonObjectId(calling_emp["corporate_id"])}, {"firebase_uid": 1}
-        )
-        if parent_corp:
-            effective_uid = parent_corp["firebase_uid"]
-
-    try:
-        obj_id = ObjectId(client_id)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid client ID format")
-
-    # Verify ownership
-    target_corporate = await db["corporates"].find_one({
-        "_id": obj_id,
-        "corporateType": "corporate",
-        "advising_tax_firm_id": effective_uid
-    })
-
-    if not target_corporate:
-        raise HTTPException(status_code=404, detail="Client not found or access denied")
-
-    client_firebase_uid = target_corporate["firebase_uid"]
-
-    # Since we are overriding the employee list, we just pass this exact payload
-    # to our internal sync function, pretending the client themselves did it.
-    result = await _sync_employees_internal(client_firebase_uid, payload)
-    return result
-
 @router.get("/clients/{client_id}", status_code=status.HTTP_200_OK)
 async def get_client_detail(
     client_id: str,
@@ -660,8 +615,9 @@ async def get_client_detail(
         for e in employees:
             e["_id"] = str(e["_id"])
             pii = emp_pii_map.get(e["firebase_uid"], {})
-            e["name"] = pii.get("name", "")
-            e["email"] = pii.get("email", "")
+            # Firestore PII takes precedence; fall back to MongoDB fields (e.g. seed data)
+            e["name"] = pii.get("name") or e.get("name", "")
+            e["email"] = pii.get("email") or e.get("email", "")
             emp_data.append(e)
 
     return {
@@ -670,68 +626,6 @@ async def get_client_detail(
             "employees": emp_data
         }
     }
-
-@router.put("/clients/{client_id}", status_code=status.HTTP_200_OK)
-async def update_client_detail(
-    client_id: str,
-    payload: dict,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Endpoint for Tax Firms to update an existing client's info.
-    """
-    db = get_database()
-    firebase_uid = current_user.get("uid")
-
-    if not firebase_uid:
-        raise HTTPException(status_code=400, detail="Invalid auth token format")
-
-    from bson import ObjectId
-    try:
-        obj_id = ObjectId(client_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid client ID format")
-
-    client_doc = await db["corporates"].find_one({
-        "_id": obj_id,
-        "advising_tax_firm_id": firebase_uid
-    })
-    
-    if not client_doc:
-        raise HTTPException(status_code=404, detail="Client not found or access denied")
-
-    client_uid = client_doc["firebase_uid"]
-
-    # Update MongoDB operational data
-    mongo_update = {}
-    if "maIntent" in payload:
-        mongo_update["maIntent"] = payload["maIntent"]
-    if "companyUrl" in payload:
-        mongo_update["companyUrl"] = payload["companyUrl"]
-        
-    if mongo_update:
-        await db["corporates"].update_one(
-            {"_id": obj_id},
-            {"$set": mongo_update}
-        )
-
-    # Update Firestore PII
-    from firebase_admin import firestore
-    fs_db = firestore.client()
-    fs_update = {}
-    if "companyName" in payload:
-        fs_update["companyName"] = payload["companyName"]
-    if "address" in payload:
-        fs_update["address"] = payload["address"]
-    if "maIntent" in payload:
-        fs_update["maIntent"] = payload["maIntent"]
-    if "companyUrl" in payload:
-        fs_update["companyUrl"] = payload["companyUrl"]
-        
-    if fs_update:
-        fs_db.collection("corporates").document(client_uid).update(fs_update)
-
-    return {"message": "Client updated successfully"}
 
 @router.put("/clients/{client_id}/employees", status_code=status.HTTP_200_OK)
 async def sync_client_employees(

@@ -31,7 +31,8 @@ class InvoiceInDB(InvoiceCreate):
     id: Optional[str] = Field(None, alias="_id")
     corporate_id: str
     approval_status: str = "draft"
-    reconciliation_status: str = "unreconciled"
+    delivery_status: Literal["unsent", "sent"] = "unsent"
+    reconciliation_status: Literal["unreconciled", "reconciled"] = "unreconciled"
     current_step: int = 1
     approval_rule_id: Optional[str] = None
     approval_history: List[ApprovalHistoryItem] = []

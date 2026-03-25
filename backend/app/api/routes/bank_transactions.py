@@ -42,7 +42,7 @@ async def import_transactions(
             "description": t.get("description", ""),
             "normalized_name": t.get("normalized_name"),
             "amount": t.get("amount", 0),
-            "transaction_type": t.get("transaction_type", t.get("direction", "debit")),
+            "transaction_type": t.get("transaction_type", "debit"),
             "status": "unmatched",
             "fiscal_period": fiscal_period,
             "imported_at": datetime.utcnow(),

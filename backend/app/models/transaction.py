@@ -26,7 +26,7 @@ class ReceiptInDB(ReceiptCreate):
     corporate_id: str
     submitted_by: str
     approval_status: str = "pending_approval"
-    reconciliation_status: str = "unreconciled"
+    reconciliation_status: Literal["unreconciled", "reconciled"] = "unreconciled"
     approval_rule_id: Optional[str] = None
     approval_history: List[ApprovalHistoryItem] = []
     extra_approval_steps: List[AddedApprovalStep] = []
