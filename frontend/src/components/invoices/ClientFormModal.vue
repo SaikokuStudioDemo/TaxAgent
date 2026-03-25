@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import { X, Building2, User, Mail, Phone, MapPin, FileText, CheckCircle2 } from 'lucide-vue-next';
-import BankAccountSection from '@/components/shared/BankAccountSection.vue';
 
 const props = defineProps<{
   show: boolean;
@@ -30,9 +29,6 @@ const formData = ref({
 
 const isSaving = ref(false);
 const showSuccess = ref(false);
-
-// editData.id が存在する場合（編集モード）のみ銀行口座セクションを表示
-const existingClientId = computed(() => props.editData?.id ?? null);
 
 onMounted(() => {
   if (props.editData) {
@@ -216,20 +212,6 @@ const handleClose = () => {
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1">社内用メモ (請求書には印字されません)</label>
             <textarea v-model="formData.internalNotes" placeholder="特記事項や注意事項などがあれば入力..." rows="2" class="w-full px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all resize-none"></textarea>
-          </div>
-
-          <!-- Bank Accounts (edit mode only) -->
-          <template v-if="existingClientId">
-            <hr class="border-slate-100">
-            <div>
-              <h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>振込先口座
-              </h3>
-              <BankAccountSection owner-type="client" :client-id="existingClientId" />
-            </div>
-          </template>
-          <div v-else class="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500 text-center">
-            取引先を保存後、振込先口座を登録できます。
           </div>
 
         </div>

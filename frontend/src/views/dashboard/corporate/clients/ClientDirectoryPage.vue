@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { Plus, Search, Filter, Building2, User, MapPin, Mail, Phone, Edit2, Trash2 } from 'lucide-vue-next';
+import { Plus, Search, Filter, Building2, User, MapPin, Mail, Phone, Edit2, Trash2, CreditCard, X } from 'lucide-vue-next';
 import ClientFormModal from '@/components/invoices/ClientFormModal.vue';
+import BankAccountSection from '@/components/shared/BankAccountSection.vue';
 import { useClients } from '@/composables/useClients';
 
 // Template-compatible Client shape (adds display-only fields)
@@ -44,6 +45,7 @@ onMounted(fetchClients);
 const searchQuery = ref('');
 const isModalOpen = ref(false);
 const editingClient = ref<ClientDisplay | null>(null);
+const bankClient = ref<ClientDisplay | null>(null);
 
 // --- COMPUTED ---
 const filteredClients = computed(() => {
@@ -94,6 +96,10 @@ const handleDelete = async (id: string, name: string) => {
     await deleteClient(id);
   }
 };
+
+const openBankModal = (client: ClientDisplay) => {
+  bankClient.value = client;
+};
 </script>
 
 <template>
@@ -140,7 +146,7 @@ const handleDelete = async (id: string, name: string) => {
                 <th class="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-80">取引先 (会社名)</th>
                 <th class="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-56">担当者・連絡先</th>
                 <th class="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">所在地</th>
-                <th class="px-6 py-4 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-24">操作</th>
+                <th class="px-6 py-4 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-36">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
@@ -203,20 +209,27 @@ const handleDelete = async (id: string, name: string) => {
 
                 <!-- Actions -->
                 <td class="px-6 py-4 align-top text-center">
-                  <div class="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button 
+                  <div class="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      @click="openBankModal(client)"
+                      class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                      title="振込先口座"
+                    >
+                      <CreditCard :size="16" />
+                    </button>
+                    <button
                       @click="openEditModal(client)"
                       class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                       title="編集"
                     >
-                      <Edit2 :size="18" />
+                      <Edit2 :size="16" />
                     </button>
-                    <button 
+                    <button
                       @click="handleDelete(client.id, client.name)"
                       class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                       title="削除"
                     >
-                      <Trash2 :size="18" />
+                      <Trash2 :size="16" />
                     </button>
                   </div>
                 </td>
@@ -242,12 +255,40 @@ const handleDelete = async (id: string, name: string) => {
 
     </main>
 
-    <!-- Unified Form Modal -->
-    <ClientFormModal 
-      :show="isModalOpen" 
+    <!-- Client Form Modal -->
+    <ClientFormModal
+      :show="isModalOpen"
       :editData="editingClient"
       @close="isModalOpen = false"
       @save="handleSave"
     />
+
+    <!-- Bank Account Modal -->
+    <Teleport to="body">
+      <div v-if="bankClient" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" @click="bankClient = null"></div>
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg relative z-10 flex flex-col max-h-[85vh] overflow-hidden">
+          <!-- Header -->
+          <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 shrink-0">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center shrink-0">
+                <CreditCard :size="18" />
+              </div>
+              <div>
+                <p class="text-xs text-slate-500 font-medium">振込先口座</p>
+                <h2 class="text-base font-bold text-slate-800 leading-tight">{{ bankClient.name }}</h2>
+              </div>
+            </div>
+            <button @click="bankClient = null" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors">
+              <X :size="20" />
+            </button>
+          </div>
+          <!-- Body -->
+          <div class="p-6 overflow-y-auto flex-1">
+            <BankAccountSection owner-type="client" :client-id="bankClient.id" />
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
