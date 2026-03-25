@@ -12,6 +12,10 @@ export interface Client {
     phone?: string;
     address?: string;
     payment_terms?: string;
+    department?: string;
+    contact_person?: string;
+    postal_code?: string;
+    internal_notes?: string;
     created_at: string;
 }
 
