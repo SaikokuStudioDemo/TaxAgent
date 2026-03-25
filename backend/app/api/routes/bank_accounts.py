@@ -1,8 +1,8 @@
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import Optional
 from datetime import datetime
 from bson import ObjectId as BsonObjectId
+from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.api.helpers import (
     serialize_doc as _serialize,
@@ -11,48 +11,69 @@ from app.api.helpers import (
     parse_oid,
 )
 from app.models.bank_account import BankAccountCreate
+from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# In-memory cache: key -> (value, expires_at)
-_zengin_cache: dict = {}
-_CACHE_TTL = 86400  # 24 hours in seconds
+
+def _get_db():
+    client = AsyncIOMotorClient(settings.MONGODB_URI)
+    return client[settings.MONGODB_DB_NAME]
 
 
-async def _zengin_get(url: str) -> dict:
-    now = datetime.utcnow().timestamp()
-    if url in _zengin_cache:
-        val, expires = _zengin_cache[url]
-        if now < expires:
-            return val
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        data = resp.json()
-    _zengin_cache[url] = (data, now + _CACHE_TTL)
-    return data
+# ---------------------------------------------------------------------------
+# 全銀コード検索（ローカルDB）
+# ---------------------------------------------------------------------------
+
+@router.get("/zengin/banks/search", status_code=status.HTTP_200_OK)
+async def search_banks(q: str = Query(..., min_length=1)):
+    """銀行名・カナで前方一致検索"""
+    db = _get_db()
+    regex = {"$regex": f"^{q}", "$options": "i"}
+    cursor = db["zengin_banks"].find(
+        {"$or": [{"name": regex}, {"kana": regex}, {"hira": regex}]},
+        {"_id": 0, "code": 1, "name": 1, "kana": 1},
+    ).limit(20)
+    docs = await cursor.to_list(length=20)
+    return docs
 
 
-@router.get("/zengin/banks/{bank_code}", status_code=status.HTTP_200_OK)
-async def lookup_bank(bank_code: str):
-    """全銀協API: 金融機関名を取得"""
-    try:
-        data = await _zengin_get(f"https://bank.teraren.com/banks/{bank_code}.json")
-        return {"bank_code": bank_code, "bank_name": data.get("name", "")}
-    except Exception:
-        raise HTTPException(status_code=404, detail=f"Bank code {bank_code} not found")
+@router.get("/zengin/banks/{bank_code}/branches/search", status_code=status.HTTP_200_OK)
+async def search_branches(bank_code: str, q: str = Query(..., min_length=1)):
+    """支店名・カナで前方一致検索"""
+    db = _get_db()
+    regex = {"$regex": f"^{q}", "$options": "i"}
+    cursor = db["zengin_branches"].find(
+        {"bank_code": bank_code, "$or": [{"name": regex}, {"kana": regex}, {"hira": regex}]},
+        {"_id": 0, "code": 1, "name": 1, "kana": 1},
+    ).limit(20)
+    docs = await cursor.to_list(length=20)
+    return docs
 
 
 @router.get("/zengin/banks/{bank_code}/branches/{branch_code}", status_code=status.HTTP_200_OK)
 async def lookup_branch(bank_code: str, branch_code: str):
-    """全銀協API: 支店名を取得"""
-    try:
-        data = await _zengin_get(f"https://bank.teraren.com/banks/{bank_code}/branches/{branch_code}.json")
-        return {"branch_code": branch_code, "branch_name": data.get("name", "")}
-    except Exception:
-        raise HTTPException(status_code=404, detail=f"Branch code {branch_code} not found")
+    """支店コードから支店名を取得"""
+    db = _get_db()
+    doc = await db["zengin_branches"].find_one(
+        {"bank_code": bank_code, "code": branch_code},
+        {"_id": 0},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Branch {bank_code}/{branch_code} not found")
+    return {"branch_code": doc["code"], "branch_name": doc["name"], "kana": doc.get("kana", "")}
+
+
+@router.get("/zengin/banks/{bank_code}", status_code=status.HTTP_200_OK)
+async def lookup_bank(bank_code: str):
+    """銀行コードから銀行名を取得"""
+    db = _get_db()
+    doc = await db["zengin_banks"].find_one({"code": bank_code}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Bank code {bank_code} not found")
+    return {"bank_code": doc["code"], "bank_name": doc["name"], "kana": doc.get("kana", "")}
 
 
 def _scope_filter(doc: dict) -> dict:
