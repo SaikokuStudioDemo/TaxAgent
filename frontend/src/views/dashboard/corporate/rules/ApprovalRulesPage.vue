@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { Plus, Trash2, Save, GripVertical, AlertCircle, ArrowRight, X, Receipt, FileText, Send, Loader2 } from 'lucide-vue-next';
+import { Plus, Trash2, Save, GripVertical, AlertCircle, ArrowRight, X, Receipt, FileText, Send, Loader2, FolderKanban } from 'lucide-vue-next';
 import { useApprovalRules } from '@/composables/useApprovalRules';
+import { useProjects } from '@/composables/useProjects';
+import { useEmployees } from '@/composables/useEmployees';
 
 interface RuleCondition {
   id: string;
@@ -13,18 +15,21 @@ interface RuleCondition {
 interface RuleApprover {
   id: string;
   roleId: string;
+  userId?: string;       // for specific person (project rules)
+  approverName?: string; // display name for specific person
 }
 
 interface ApprovalRule {
   id: string;
   name: string;
-  appliesTo: ('receipt' | 'received_invoice' | 'issued_invoice')[];
+  appliesTo: ('receipt' | 'received_invoice' | 'issued_invoice' | 'project')[];
   conditions: RuleCondition[];
   approvers: RuleApprover[];
+  projectId?: string; // for project-specific rules
 }
 
 // Tab state: which document type to show
-type RuleTab = 'receipt' | 'received_invoice' | 'issued_invoice';
+type RuleTab = 'receipt' | 'received_invoice' | 'issued_invoice' | 'project';
 const activeRuleTab = ref<RuleTab>('receipt');
 
 const allRules = ref<ApprovalRule[]>([
@@ -91,15 +96,20 @@ const allRules = ref<ApprovalRule[]>([
 ]);
 
 const { rules: rulesFromApi, isLoading, fetchRules, createRule, updateRule, deleteRule } = useApprovalRules();
+const { projects, fetchProjects } = useProjects();
+const { employees, fetchEmployees } = useEmployees();
 const isSaving = ref(false);
 
 onMounted(async () => {
+  fetchProjects();
+  fetchEmployees();
   await fetchRules();
   if (rulesFromApi.value.length > 0) {
     allRules.value = rulesFromApi.value.map(r => ({
       id: r.id,
       name: r.name,
       appliesTo: r.applies_to as any,
+      projectId: r.project_id,
       conditions: (r.conditions && r.conditions.length > 0 ? r.conditions : [{ field: 'always', operator: '', value: '' }]).map((c: any, i: number) => ({
         id: `c-${r.id}-${i}`,
         field: c.field as any,
@@ -108,7 +118,9 @@ onMounted(async () => {
       })),
       approvers: (r.steps || []).map((s: any) => ({
         id: `a-${r.id}-${s.step}`,
-        roleId: s.role
+        roleId: s.role,
+        userId: s.user_id,
+        approverName: s.approver_name,
       }))
     }));
   }
@@ -122,6 +134,7 @@ const rules = computed(() =>
 const receiptCount = computed(() => allRules.value.filter(r => r.appliesTo.includes('receipt')).length);
 const receivedInvoiceCount = computed(() => allRules.value.filter(r => r.appliesTo.includes('received_invoice')).length);
 const issuedInvoiceCount = computed(() => allRules.value.filter(r => r.appliesTo.includes('issued_invoice')).length);
+const projectRuleCount = computed(() => allRules.value.filter(r => r.appliesTo.includes('project')).length);
 
 const categories = ['消耗品費', '交際費', '会議費', '通信費', '旅費交通費', '新聞図書費'];
 const approverRoles = [
@@ -134,13 +147,32 @@ const approverRoles = [
 ];
 
 const addRule = () => {
-  allRules.value.push({
-    id: `rule-${Date.now()}`,
-    name: '新しいルール',
-    appliesTo: [activeRuleTab.value],
-    conditions: [{ id: `c-${Date.now()}`, field: 'amount', operator: '>=', value: 0 }],
-    approvers: [{ id: `a-${Date.now()}`, roleId: activeRuleTab.value === 'received_invoice' ? 'accounting' : 'direct_manager' }]
-  });
+  if (activeRuleTab.value === 'project') {
+    allRules.value.push({
+      id: `rule-${Date.now()}`,
+      name: '新しいプロジェクトルール',
+      appliesTo: ['project'],
+      projectId: '',
+      conditions: [],
+      approvers: [{ id: `a-${Date.now()}`, roleId: 'specific_person', userId: '', approverName: '' }]
+    });
+  } else {
+    allRules.value.push({
+      id: `rule-${Date.now()}`,
+      name: '新しいルール',
+      appliesTo: [activeRuleTab.value],
+      conditions: [{ id: `c-${Date.now()}`, field: 'amount', operator: '>=', value: 0 }],
+      approvers: [{ id: `a-${Date.now()}`, roleId: activeRuleTab.value === 'received_invoice' ? 'accounting' : 'direct_manager' }]
+    });
+  }
+};
+
+const onProjectApproverChange = (rule: ApprovalRule, aIndex: number, userId: string) => {
+  const emp = employees.value.find(e => e.id === userId);
+  if (emp) {
+    rule.approvers[aIndex].userId = userId;
+    rule.approvers[aIndex].approverName = emp.name;
+  }
 };
 
 const removeRule = async (ruleId: string) => {
@@ -160,10 +192,12 @@ const saveRules = async () => {
   isSaving.value = true;
   try {
     for (const rule of allRules.value) {
+      const isProjectRule = rule.appliesTo.includes('project');
       const payload = {
         name: rule.name,
         applies_to: rule.appliesTo,
-        conditions: rule.conditions.map(c => ({
+        project_id: rule.projectId || null,
+        conditions: isProjectRule ? [] : rule.conditions.map(c => ({
           field: c.field,
           operator: c.operator,
           value: c.field === 'amount' ? Number(c.value) : c.value
@@ -171,7 +205,8 @@ const saveRules = async () => {
         steps: rule.approvers.map((a, idx) => ({
           step: idx + 1,
           role: a.roleId,
-          required: true
+          required: true,
+          ...(a.userId ? { user_id: a.userId, approver_name: a.approverName } : {}),
         })),
         active: true
       };
@@ -261,6 +296,18 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
           {{ issuedInvoiceCount }}
         </span>
       </button>
+      <button
+        @click="activeRuleTab = 'project'"
+        class="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold transition-all"
+        :class="activeRuleTab === 'project' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+      >
+        <FolderKanban :size="16" />
+        プロジェクト
+        <span class="ml-1 inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold rounded-full"
+          :class="activeRuleTab === 'project' ? 'bg-violet-100 text-violet-700' : 'bg-gray-200 text-gray-600'">
+          {{ projectRuleCount }}
+        </span>
+      </button>
     </div>
 
     <!-- Alert Context -->
@@ -273,6 +320,7 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
         <p class="mt-1 text-blue-700">
           <span v-if="activeRuleTab === 'receipt'">💡 経費領収書が提出されると、金額・科目に基づきこのルールが自動適用されます。</span>
           <span v-else-if="activeRuleTab === 'received_invoice'">💡 受領請求書がアップロードされると、このルールに基づき支払承認フローが開始されます。</span>
+          <span v-else-if="activeRuleTab === 'project'">💡 プロジェクトに紐づいた書類は、対象プロジェクトの承認者が自動的にアサインされます。条件設定は不要です。</span>
           <span v-else>💡 請求書を発行する際、金額に基づきこのルールに従った承認が必要になります。</span>
         </p>
       </div>
@@ -283,7 +331,9 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
       <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center shrink-0">
         <h2 class="font-bold text-gray-700">
           <span v-if="activeRuleTab === 'receipt'">領収書 承認ルール定義</span>
-          <span v-else>受領請求書 支払承認ルール定義</span>
+          <span v-else-if="activeRuleTab === 'received_invoice'">受領請求書 支払承認ルール定義</span>
+          <span v-else-if="activeRuleTab === 'project'">プロジェクト別 承認ルール定義</span>
+          <span v-else>発行請求書 承認ルール定義</span>
         </h2>
         <button @click="addRule" class="bg-blue-600 hover:bg-blue-700 text-white text-sm flex items-center gap-1.5 px-4 py-2 rounded-lg font-medium transition-colors shadow-sm">
           <Plus :size="16" />
@@ -316,15 +366,27 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
                   <span v-if="rule.appliesTo.includes('received_invoice')" class="flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded text-[10px] font-bold">
                     <FileText :size="10" /> 受領請求書
                   </span>
+                  <span v-if="rule.appliesTo.includes('project')" class="flex items-center gap-1 bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 rounded text-[10px] font-bold">
+                    <FolderKanban :size="10" /> プロジェクト
+                  </span>
                 </div>
               </div>
             </div>
 
+            <!-- Project selector (project rules only) -->
+            <div v-if="rule.appliesTo.includes('project')" class="bg-violet-50 border border-violet-100 rounded p-3">
+              <label class="block text-xs font-semibold text-violet-700 mb-1">対象プロジェクト</label>
+              <select v-model="rule.projectId" class="w-full bg-white border border-violet-200 rounded px-2 py-1.5 text-sm focus:ring-1 focus:ring-violet-500">
+                <option value="">プロジェクトを選択...</option>
+                <option v-for="proj in projects" :key="proj.id" :value="proj.id">{{ proj.name }}</option>
+              </select>
+            </div>
+
             <!-- Conditions & Approvers Grid -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              <!-- Left: Conditions (AND Logic) -->
-              <div class="bg-white p-4 rounded border border-gray-100 shadow-sm relative">
+            <div :class="rule.appliesTo.includes('project') ? '' : 'grid grid-cols-1 md:grid-cols-2 gap-6'">
+
+              <!-- Left: Conditions (AND Logic) — hidden for project rules -->
+              <div v-if="!rule.appliesTo.includes('project')" class="bg-white p-4 rounded border border-gray-100 shadow-sm relative">
                 <div class="flex justify-between items-center mb-3">
                   <label class="block text-xs font-bold text-gray-700">適用条件 (すべて満たす場合)</label>
                   <button @click="addCondition(rule)" class="text-blue-600 hover:text-blue-800 text-xs font-medium flex items-center gap-0.5">
@@ -378,27 +440,41 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
               </div>
 
               <!-- Right: Approvers (Sequential Logic) -->
-              <div class="bg-blue-50/50 p-4 rounded border border-blue-100 shadow-sm relative">
+              <div :class="rule.appliesTo.includes('project') ? 'bg-violet-50/50 p-4 rounded border border-violet-100 shadow-sm relative' : 'bg-blue-50/50 p-4 rounded border border-blue-100 shadow-sm relative'">
                 <div class="flex justify-between items-center mb-3">
-                  <label class="block text-xs font-bold text-blue-900">承認フロー (順番に承認)</label>
-                  <button @click="addApprover(rule)" class="text-blue-600 hover:text-blue-800 text-xs font-medium flex items-center gap-0.5">
+                  <label :class="rule.appliesTo.includes('project') ? 'block text-xs font-bold text-violet-900' : 'block text-xs font-bold text-blue-900'">承認フロー (順番に承認)</label>
+                  <button @click="addApprover(rule)" :class="rule.appliesTo.includes('project') ? 'text-violet-600 hover:text-violet-800 text-xs font-medium flex items-center gap-0.5' : 'text-blue-600 hover:text-blue-800 text-xs font-medium flex items-center gap-0.5'">
                     <Plus :size="14" /> ステップ追加
                   </button>
                 </div>
 
                 <div class="space-y-3">
                   <div v-for="(approver, aIndex) in rule.approvers" :key="approver.id" class="flex items-center gap-2 relative group/app">
-                    <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center border border-blue-200">
+                    <span :class="rule.appliesTo.includes('project') ? 'flex-shrink-0 w-6 h-6 rounded-full bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center border border-violet-200' : 'flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center border border-blue-200'">
                       {{ aIndex + 1 }}
                     </span>
-                    <select v-model="approver.roleId" class="flex-1 bg-white border border-blue-200 text-blue-900 font-medium rounded px-3 py-1.5 text-xs focus:ring-1 focus:ring-blue-500 shadow-sm">
-                      <option v-for="role in approverRoles" :key="role.id" :value="role.id">{{ role.name }}</option>
-                    </select>
-                    <button v-if="rule.approvers.length > 1" @click="removeApprover(rule, aIndex)" class="text-blue-300 hover:text-red-500 opacity-0 group-hover/app:opacity-100 transition-opacity">
+                    <!-- Project rules: show employee selector -->
+                    <template v-if="rule.appliesTo.includes('project')">
+                      <select
+                        :value="approver.userId"
+                        @change="onProjectApproverChange(rule, aIndex, ($event.target as HTMLSelectElement).value)"
+                        class="flex-1 bg-white border border-violet-200 text-violet-900 font-medium rounded px-3 py-1.5 text-xs focus:ring-1 focus:ring-violet-500 shadow-sm"
+                      >
+                        <option value="">従業員を選択...</option>
+                        <option v-for="emp in employees" :key="emp.id" :value="emp.id">{{ emp.name }}</option>
+                      </select>
+                    </template>
+                    <!-- Standard rules: show role selector -->
+                    <template v-else>
+                      <select v-model="approver.roleId" class="flex-1 bg-white border border-blue-200 text-blue-900 font-medium rounded px-3 py-1.5 text-xs focus:ring-1 focus:ring-blue-500 shadow-sm">
+                        <option v-for="role in approverRoles" :key="role.id" :value="role.id">{{ role.name }}</option>
+                      </select>
+                    </template>
+                    <button v-if="rule.approvers.length > 1" @click="removeApprover(rule, aIndex)" :class="rule.appliesTo.includes('project') ? 'text-violet-300 hover:text-red-500 opacity-0 group-hover/app:opacity-100 transition-opacity' : 'text-blue-300 hover:text-red-500 opacity-0 group-hover/app:opacity-100 transition-opacity'">
                       <X :size="16" />
                     </button>
                     <!-- Arrow down between steps -->
-                    <div v-if="aIndex < rule.approvers.length - 1" class="absolute -bottom-3 left-3 text-blue-300 z-10">
+                    <div v-if="aIndex < rule.approvers.length - 1" :class="rule.appliesTo.includes('project') ? 'absolute -bottom-3 left-3 text-violet-300 z-10' : 'absolute -bottom-3 left-3 text-blue-300 z-10'">
                       <ArrowRight :size="14" class="origin-center rotate-90" />
                     </div>
                   </div>
