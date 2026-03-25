@@ -1,19 +1,22 @@
 """
-seed_mock_data.py - 開発・テスト用シードデータ投入スクリプト
+seed.py - 開発・テスト用シードデータ投入スクリプト
 
 使用方法:
     cd backend
-    PYTHONPATH=. venv/bin/python seed_mock_data.py
-
-構成:
-    - 税理士法人1社 (firebase_uid: "tax_firm_uid")       + 従業員2名
-    - 一般法人A    (firebase_uid: "seed_corp_a_uid")    + 従業員2名
-    - 一般法人B    (firebase_uid: "seed_corp_b_uid")    + 従業員2名
-    - 各法人に invoices / receipts / approval_rules を最低2件ずつ
+    PYTHONPATH=. venv/bin/python seed.py
 
 フィールド設計:
-    - employees.corporate_id は MongoDB ObjectId 文字列で統一
-    - parent_corporate_firebase_uid / parent_corporate_id は使用しない
+    invoices:
+        - document_type: "issued" | "received"  (旧: direction)
+        - approval_status: "draft" | "pending_approval" | "approved" | "auto_approved" | "rejected" | "sent"
+          (旧: status + review_status を統合)
+        - reconciliation_status: "unreconciled" | "reconciled"  (新規)
+    receipts:
+        - document_type: "receipt"  (新規・統一)
+        - approval_status: 同上
+        - reconciliation_status: 同上
+    bank_transactions:
+        - transaction_type: "credit" | "debit"  (旧: direction)
 """
 
 import asyncio
@@ -131,7 +134,7 @@ async def seed():
     await db["invoices"].insert_many([
         {
             "corporate_id": tax_id,
-            "direction": "issued",
+            "document_type": "issued",
             "invoice_number": "TAX-INV-001",
             "client_name": "株式会社サンプル商事",
             "recipient_email": "contact@sample.co.jp",
@@ -141,8 +144,8 @@ async def seed():
             "tax_amount": 10000,
             "total_amount": 110000,
             "line_items": [{"description": "税務顧問料 3月分", "category": "売上", "amount": 100000, "tax_rate": 10}],
-            "status": "sent",
-            "review_status": "approved",
+            "approval_status": "approved",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": tax_base_rule_id,
             "approval_history": [{"step": 1, "roleId": "dept_manager", "roleName": "部門長", "status": "approved"}],
@@ -153,7 +156,7 @@ async def seed():
         },
         {
             "corporate_id": tax_id,
-            "direction": "received",
+            "document_type": "received",
             "invoice_number": "TAX-REC-001",
             "client_name": "クラウドサービス株式会社",
             "recipient_email": "billing@cloud.co.jp",
@@ -163,8 +166,8 @@ async def seed():
             "tax_amount": 15000,
             "total_amount": 165000,
             "line_items": [{"description": "サーバー利用料", "category": "通信費", "amount": 150000, "tax_rate": 10}],
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": tax_strict_rule_id,
             "approval_history": [
@@ -182,6 +185,7 @@ async def seed():
     await db["receipts"].insert_many([
         {
             "corporate_id": tax_id,
+            "document_type": "receipt",
             "date": today.strftime("%Y-%m-%d"),
             "amount": 5500,
             "tax_rate": 10,
@@ -193,8 +197,8 @@ async def seed():
             "fiscal_period": today.strftime("%Y-%m"),
             "ai_extracted": True,
             "submitted_by": tax_id,
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": tax_base_rule_id,
             "approval_history": [{"step": 1, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"}],
@@ -202,6 +206,7 @@ async def seed():
         },
         {
             "corporate_id": tax_id,
+            "document_type": "receipt",
             "date": today.strftime("%Y-%m-%d"),
             "amount": 120000,
             "tax_rate": 10,
@@ -213,8 +218,8 @@ async def seed():
             "fiscal_period": today.strftime("%Y-%m"),
             "ai_extracted": False,
             "submitted_by": tax_id,
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": tax_strict_rule_id,
             "approval_history": [
@@ -291,7 +296,7 @@ async def seed():
     await db["invoices"].insert_many([
         {
             "corporate_id": corp_a_id,
-            "direction": "issued",
+            "document_type": "issued",
             "invoice_number": "INV-MOCK-001",
             "client_name": "株式会社モックアルファ",
             "recipient_email": "alpha@example.com",
@@ -301,8 +306,8 @@ async def seed():
             "tax_amount": 5000,
             "total_amount": 55000,
             "line_items": [{"description": "コンサルティング費用", "category": "売上", "amount": 50000, "tax_rate": 10}],
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": a_base_rule_id,
             "approval_history": [{"step": 1, "roleId": "direct_manager", "roleName": "直属の部門長", "status": "pending"}],
@@ -313,7 +318,7 @@ async def seed():
         },
         {
             "corporate_id": corp_a_id,
-            "direction": "received",
+            "document_type": "received",
             "invoice_number": "REC-MOCK-001",
             "client_name": "（受領）デザイン事務所",
             "recipient_email": "design@example.com",
@@ -323,8 +328,8 @@ async def seed():
             "tax_amount": 15000,
             "total_amount": 165000,
             "line_items": [{"description": "ロゴデザイン費用", "category": "外注費", "amount": 150000, "tax_rate": 10}],
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": a_strict_rule_id,
             "approval_history": [
@@ -338,18 +343,18 @@ async def seed():
         },
         {
             "corporate_id": corp_a_id,
-            "direction": "received",
+            "document_type": "received",
             "invoice_number": "REC-MOCK-002",
             "client_name": "（受領）クラウドサービス",
             "recipient_email": "cloud@example.com",
             "issue_date": "2024-02-28",
-            "due_date": (today - timedelta(days=7)).strftime("%Y-%m-%d"),  # 期限切れ
+            "due_date": (today - timedelta(days=7)).strftime("%Y-%m-%d"),
             "subtotal": 80000,
             "tax_amount": 8000,
             "total_amount": 88000,
             "line_items": [{"description": "サーバー利用料", "category": "通信費", "amount": 80000, "tax_rate": 10}],
-            "status": "approved",
-            "review_status": "approved",
+            "approval_status": "approved",
+            "reconciliation_status": "unreconciled",
             "current_step": 2,
             "approval_rule_id": a_base_rule_id,
             "approval_history": [
@@ -366,6 +371,7 @@ async def seed():
     await db["receipts"].insert_many([
         {
             "corporate_id": corp_a_id,
+            "document_type": "receipt",
             "date": "2024-03-05",
             "amount": 5500,
             "tax_rate": 10,
@@ -377,8 +383,8 @@ async def seed():
             "fiscal_period": "2024-03",
             "ai_extracted": True,
             "submitted_by": corp_a_id,
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": a_base_rule_id,
             "approval_history": [{"step": 1, "roleId": "direct_manager", "roleName": "直属の部門長", "status": "pending"}],
@@ -386,6 +392,7 @@ async def seed():
         },
         {
             "corporate_id": corp_a_id,
+            "document_type": "receipt",
             "date": "2024-03-08",
             "amount": 110000,
             "tax_rate": 10,
@@ -397,8 +404,8 @@ async def seed():
             "fiscal_period": "2024-03",
             "ai_extracted": False,
             "submitted_by": corp_a_id,
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": a_strict_rule_id,
             "approval_history": [
@@ -408,7 +415,38 @@ async def seed():
             "created_at": today,
         },
     ])
-    print("✅ 一般法人A 承認ルール2件 / 請求書3件 / 領収書2件 作成")
+
+    # 銀行取引（法人A）
+    await db["bank_transactions"].insert_many([
+        {
+            "corporate_id": corp_a_id,
+            "source_type": "bank",
+            "account_name": "三井住友銀行 新宿支店",
+            "transaction_date": (today - timedelta(days=5)).strftime("%Y-%m-%d"),
+            "description": "モックアルファ 売上入金",
+            "normalized_name": "モックアルファ",
+            "amount": 55000,
+            "transaction_type": "credit",
+            "status": "unmatched",
+            "fiscal_period": today.strftime("%Y-%m"),
+            "imported_at": today,
+        },
+        {
+            "corporate_id": corp_a_id,
+            "source_type": "bank",
+            "account_name": "三井住友銀行 新宿支店",
+            "transaction_date": (today - timedelta(days=3)).strftime("%Y-%m-%d"),
+            "description": "デザイン事務所 支払",
+            "normalized_name": "デザイン事務所",
+            "amount": 165000,
+            "transaction_type": "debit",
+            "status": "unmatched",
+            "fiscal_period": today.strftime("%Y-%m"),
+            "imported_at": today,
+        },
+    ])
+
+    print("✅ 一般法人A 承認ルール2件 / 請求書3件 / 領収書2件 / 銀行取引2件 作成")
 
     # ═══════════════════════════════════════════
     # 一般法人B（データ分離テスト用）
@@ -475,7 +513,7 @@ async def seed():
     await db["invoices"].insert_many([
         {
             "corporate_id": corp_b_id,
-            "direction": "issued",
+            "document_type": "issued",
             "invoice_number": "B-INV-001",
             "client_name": "株式会社ガンマ",
             "recipient_email": "gamma@example.com",
@@ -485,8 +523,8 @@ async def seed():
             "tax_amount": 3000,
             "total_amount": 33000,
             "line_items": [{"description": "業務委託費", "category": "売上", "amount": 30000, "tax_rate": 10}],
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": b_base_rule_id,
             "approval_history": [{"step": 1, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"}],
@@ -497,7 +535,7 @@ async def seed():
         },
         {
             "corporate_id": corp_b_id,
-            "direction": "received",
+            "document_type": "received",
             "invoice_number": "B-REC-001",
             "client_name": "（受領）B社の取引先",
             "recipient_email": "vendor@example.com",
@@ -507,8 +545,8 @@ async def seed():
             "tax_amount": 7500,
             "total_amount": 82500,
             "line_items": [{"description": "広告費", "category": "広告宣伝費", "amount": 75000, "tax_rate": 10}],
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": b_strict_rule_id,
             "approval_history": [
@@ -526,6 +564,7 @@ async def seed():
     await db["receipts"].insert_many([
         {
             "corporate_id": corp_b_id,
+            "document_type": "receipt",
             "date": today.strftime("%Y-%m-%d"),
             "amount": 12000,
             "tax_rate": 10,
@@ -537,8 +576,8 @@ async def seed():
             "fiscal_period": today.strftime("%Y-%m"),
             "ai_extracted": False,
             "submitted_by": corp_b_id,
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": b_base_rule_id,
             "approval_history": [{"step": 1, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"}],
@@ -546,6 +585,7 @@ async def seed():
         },
         {
             "corporate_id": corp_b_id,
+            "document_type": "receipt",
             "date": today.strftime("%Y-%m-%d"),
             "amount": 68000,
             "tax_rate": 10,
@@ -557,8 +597,8 @@ async def seed():
             "fiscal_period": today.strftime("%Y-%m"),
             "ai_extracted": False,
             "submitted_by": corp_b_id,
-            "status": "pending_approval",
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
+            "reconciliation_status": "unreconciled",
             "current_step": 1,
             "approval_rule_id": b_strict_rule_id,
             "approval_history": [
