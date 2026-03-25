@@ -26,7 +26,7 @@ class ChatService:
         # 2. Invoices Status
         pending_invoices = await db["invoices"].count_documents({
             "corporate_id": corporate_id,
-            "status": "pending_approval"
+            "approval_status": "pending_approval"
         })
         
         # 3. Bank Transactions Status

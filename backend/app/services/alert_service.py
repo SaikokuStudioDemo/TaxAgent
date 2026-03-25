@@ -31,8 +31,9 @@ async def check_due_date_alerts() -> dict:
     sent_overdue = 0
 
     cursor = db["invoices"].find({
-        "direction": "received",
-        "status": {"$nin": ["matched", "approved"]},
+        "document_type": "received",
+        "approval_status": {"$nin": ["approved", "auto_approved", "rejected"]},
+        "reconciliation_status": {"$ne": "reconciled"},
         "due_date": {"$exists": True, "$ne": None},
     })
     invoices = await cursor.to_list(length=1000)
@@ -105,7 +106,7 @@ async def check_high_amount_alerts(threshold: int = HIGH_AMOUNT_THRESHOLD) -> di
     for collection_name, amount_field in [("receipts", "amount"), ("invoices", "total_amount")]:
         cursor = db[collection_name].find({
             amount_field: {"$gte": threshold},
-            "review_status": "unreviewed",
+            "approval_status": "pending_approval",
             "high_amount_alerted": {"$ne": True},
         })
         docs = await cursor.to_list(length=500)
