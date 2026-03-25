@@ -29,7 +29,7 @@ export const roleLabel: Record<string, string> = {
  *
  * @param approvalSteps  - DBの approval_steps（ルール定義ステップ配列）
  * @param approvalEvents - DBの approval_history（完了済みイベント配列）
- * @param reviewStatus   - DBの review_status（'approved' | 'rejected' | 'unreviewed'）
+ * @param approvalStatus - DBの approval_status（'approved' | 'rejected' | 'pending_approval'）
  */
 export function buildApprovalHistory(
   approvalSteps: any[],

@@ -126,7 +126,7 @@ async def record_approval_action(
     }
     await ctx.db["approval_events"].insert_one(event_doc)
 
-    # Update the parent document's review_status
+    # Update the parent document's approval_status
     collection = "receipts" if payload.document_type == "receipt" else "invoices"
     doc_oid = parse_oid(payload.document_id, "document")
 

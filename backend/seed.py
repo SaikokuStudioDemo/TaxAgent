@@ -9,7 +9,6 @@ seed.py - 開発・テスト用シードデータ投入スクリプト
     invoices:
         - document_type: "issued" | "received"  (旧: direction)
         - approval_status: "draft" | "pending_approval" | "approved" | "auto_approved" | "rejected"
-          (旧: status + review_status を統合)
         - delivery_status: "unsent" | "sent"  (旧: approval_status="sent")
         - reconciliation_status: "unreconciled" | "reconciled"  (新規)
     receipts:
