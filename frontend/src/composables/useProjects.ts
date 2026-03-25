@@ -4,17 +4,16 @@
 import { ref } from 'vue';
 import { api } from '@/lib/api';
 
-export interface ProjectApprover {
+export interface ProjectMember {
   user_id: string;
   name: string;
-  order: number;
 }
 
 export interface Project {
   id: string;
   name: string;
   description?: string;
-  approvers: ProjectApprover[];
+  members: ProjectMember[];
   is_active: boolean;
   created_at?: string;
   updated_at?: string;
@@ -34,7 +33,7 @@ export function useProjects() {
         id: p.id,
         name: p.name,
         description: p.description ?? '',
-        approvers: (p.approvers || []).sort((a: any, b: any) => a.order - b.order),
+        members: p.members || [],
         is_active: p.is_active,
         created_at: p.created_at,
         updated_at: p.updated_at,
@@ -46,14 +45,14 @@ export function useProjects() {
     }
   };
 
-  const createProject = async (data: { name: string; description?: string | null; approvers: ProjectApprover[] }): Promise<Project | null> => {
+  const createProject = async (data: { name: string; description?: string | null; members: ProjectMember[] }): Promise<Project | null> => {
     try {
       const created = await api.post<any>('/projects', data);
       const proj: Project = {
         id: created.id,
         name: created.name,
         description: created.description ?? '',
-        approvers: created.approvers || [],
+        members: created.members || [],
         is_active: created.is_active,
       };
       projects.value.unshift(proj);
@@ -64,14 +63,14 @@ export function useProjects() {
     }
   };
 
-  const updateProject = async (id: string, data: Partial<{ name: string; description: string | null; approvers: ProjectApprover[] }>): Promise<Project | null> => {
+  const updateProject = async (id: string, data: Partial<{ name: string; description: string | null; members: ProjectMember[] }>): Promise<Project | null> => {
     try {
       const updated = await api.patch<any>(`/projects/${id}`, data);
       const proj: Project = {
         id: updated.id,
         name: updated.name,
         description: updated.description ?? '',
-        approvers: updated.approvers || [],
+        members: updated.members || [],
         is_active: updated.is_active,
       };
       const idx = projects.value.findIndex(p => p.id === id);

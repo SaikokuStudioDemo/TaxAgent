@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { Plus, Users, FolderKanban, Edit2, Trash2, Building2, Check, X, Loader2, ChevronUp, ChevronDown, UserPlus } from 'lucide-vue-next';
+import { Plus, Users, FolderKanban, Edit2, Trash2, Building2, Check, X, Loader2, UserPlus } from 'lucide-vue-next';
 import { useDepartments, type Department } from '@/composables/useDepartments';
 import { useProjects, type Project } from '@/composables/useProjects';
 import { useEmployees } from '@/composables/useEmployees';
@@ -141,20 +141,20 @@ const { employees, fetchEmployees } = useEmployees();
 const showProjModal = ref(false);
 const editingProject = ref<Partial<Project> | null>(null);
 const projForm = ref({ name: '', description: '' });
-const projApprovers = ref<{ user_id: string; name: string; order: number }[]>([]);
+const projMembers = ref<{ user_id: string; name: string }[]>([]);
 const isSavingProj = ref(false);
 
 const openNewProjModal = () => {
   editingProject.value = null;
   projForm.value = { name: '', description: '' };
-  projApprovers.value = [];
+  projMembers.value = [];
   showProjModal.value = true;
 };
 
 const openEditProjModal = (proj: Project) => {
   editingProject.value = proj;
   projForm.value = { name: proj.name, description: proj.description || '' };
-  projApprovers.value = [...proj.approvers].sort((a, b) => a.order - b.order);
+  projMembers.value = [...proj.members];
   showProjModal.value = true;
 };
 
@@ -163,28 +163,19 @@ const closeProjModal = () => {
   editingProject.value = null;
 };
 
-const addApproverToProjForm = () => {
-  projApprovers.value.push({ user_id: '', name: '', order: projApprovers.value.length + 1 });
+const addMemberToProjForm = () => {
+  projMembers.value.push({ user_id: '', name: '' });
 };
 
-const removeApproverFromProjForm = (index: number) => {
-  projApprovers.value.splice(index, 1);
-  projApprovers.value.forEach((a, i) => { a.order = i + 1; });
+const removeMemberFromProjForm = (index: number) => {
+  projMembers.value.splice(index, 1);
 };
 
-const moveApprover = (index: number, dir: 'up' | 'down') => {
-  const arr = projApprovers.value;
-  const swap = dir === 'up' ? index - 1 : index + 1;
-  if (swap < 0 || swap >= arr.length) return;
-  [arr[index], arr[swap]] = [arr[swap], arr[index]];
-  arr.forEach((a, i) => { a.order = i + 1; });
-};
-
-const onApproverEmployeeChange = (index: number, userId: string) => {
+const onMemberEmployeeChange = (index: number, userId: string) => {
   const emp = employees.value.find(e => e.id === userId);
   if (emp) {
-    projApprovers.value[index].user_id = userId;
-    projApprovers.value[index].name = emp.name;
+    projMembers.value[index].user_id = userId;
+    projMembers.value[index].name = emp.name;
   }
 };
 
@@ -195,7 +186,7 @@ const saveProjModal = async () => {
   const payload = {
     name,
     description: projForm.value.description.trim() || null,
-    approvers: projApprovers.value.filter(a => a.user_id),
+    members: projMembers.value.filter(m => m.user_id),
   };
   let ok = false;
   if (editingProject.value?.id) {
@@ -222,7 +213,7 @@ const handleDeleteProj = async (id: string, name: string) => {
         <Building2 :size="24" class="text-blue-600" />
         部門・プロジェクト管理
       </h1>
-      <p class="text-gray-500 mt-2">部門・プロジェクト編成 / 承認者設定。ここで設定した責任者が、承認ワークフローのルーティング先として自動的に使用されます。</p>
+      <p class="text-gray-500 mt-2">部門・プロジェクト編成を管理します。承認フローは「承認ルール」画面でプロジェクトごとに設定します。</p>
     </div>
 
     <!-- Error message -->
@@ -407,7 +398,7 @@ const handleDeleteProj = async (id: string, name: string) => {
     <!-- Projects Tab -->
     <div v-if="activeTab === 'projects'" class="space-y-4">
       <div class="flex justify-between items-center bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-        <p class="text-sm text-gray-600">プロジェクトを作成し、承認者を設定します。領収書・請求書にプロジェクトを紐づけると、ここで設定した承認者が自動適用されます。</p>
+        <p class="text-sm text-gray-600">プロジェクトを作成し、関わる責任者を登録します。承認フローは「承認ルール」画面でプロジェクトごとに別途設定します。</p>
         <button @click="openNewProjModal" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
           <Plus :size="16" />
           新規プロジェクトを作成
@@ -424,7 +415,7 @@ const handleDeleteProj = async (id: string, name: string) => {
           <thead>
             <tr class="bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-500">
               <th class="py-3 px-4 w-5/12">プロジェクト名</th>
-              <th class="py-3 px-4">承認者</th>
+              <th class="py-3 px-4">責任者</th>
               <th class="py-3 px-4 text-right">操作</th>
             </tr>
           </thead>
@@ -440,11 +431,10 @@ const handleDeleteProj = async (id: string, name: string) => {
                 </div>
               </td>
               <td class="py-3 px-4">
-                <div v-if="proj.approvers.length === 0" class="text-xs text-gray-400">承認者未設定</div>
+                <div v-if="proj.members.length === 0" class="text-xs text-gray-400">責任者未設定</div>
                 <div v-else class="flex flex-wrap gap-1">
-                  <span v-for="(a, i) in [...proj.approvers].sort((x,y)=>x.order-y.order)" :key="a.user_id" class="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded text-xs font-medium">
-                    <span class="w-4 h-4 bg-indigo-200 text-indigo-800 rounded-full flex items-center justify-center text-[9px] font-bold">{{ i+1 }}</span>
-                    {{ a.name }}
+                  <span v-for="m in proj.members" :key="m.user_id" class="inline-flex items-center bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded text-xs font-medium">
+                    {{ m.name }}
                   </span>
                 </div>
               </td>
@@ -483,33 +473,31 @@ const handleDeleteProj = async (id: string, name: string) => {
               <label class="block text-sm font-semibold text-gray-700 mb-1">説明（任意）</label>
               <input v-model="projForm.description" type="text" placeholder="プロジェクトの概要" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" />
             </div>
-            <!-- Approvers -->
+            <!-- Members -->
             <div>
               <div class="flex items-center justify-between mb-2">
-                <label class="block text-sm font-semibold text-gray-700">承認者（順番に承認）</label>
-                <button @click="addApproverToProjForm" class="text-indigo-600 hover:text-indigo-800 text-xs font-medium flex items-center gap-1">
-                  <UserPlus :size="14" /> 承認者を追加
+                <div>
+                  <label class="block text-sm font-semibold text-gray-700">責任者</label>
+                  <p class="text-xs text-gray-400 mt-0.5">承認フローは「承認ルール」画面で設定します</p>
+                </div>
+                <button @click="addMemberToProjForm" class="text-indigo-600 hover:text-indigo-800 text-xs font-medium flex items-center gap-1">
+                  <UserPlus :size="14" /> 責任者を追加
                 </button>
               </div>
               <div class="space-y-2">
-                <div v-for="(approver, idx) in projApprovers" :key="idx" class="flex items-center gap-2 bg-indigo-50/50 border border-indigo-100 rounded-lg p-2">
-                  <span class="w-6 h-6 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center text-xs font-bold shrink-0">{{ idx + 1 }}</span>
+                <div v-for="(member, idx) in projMembers" :key="idx" class="flex items-center gap-2 bg-indigo-50/50 border border-indigo-100 rounded-lg p-2">
                   <select
-                    :value="approver.user_id"
-                    @change="onApproverEmployeeChange(idx, ($event.target as HTMLSelectElement).value)"
+                    :value="member.user_id"
+                    @change="onMemberEmployeeChange(idx, ($event.target as HTMLSelectElement).value)"
                     class="flex-1 bg-white border border-indigo-200 rounded px-2 py-1.5 text-sm focus:ring-1 focus:ring-indigo-500"
                   >
                     <option value="">従業員を選択...</option>
                     <option v-for="emp in employees" :key="emp.id" :value="emp.id">{{ emp.name }}</option>
                   </select>
-                  <div class="flex flex-col gap-0.5">
-                    <button @click="moveApprover(idx, 'up')" :disabled="idx === 0" class="text-gray-400 hover:text-indigo-600 disabled:opacity-30"><ChevronUp :size="14" /></button>
-                    <button @click="moveApprover(idx, 'down')" :disabled="idx === projApprovers.length - 1" class="text-gray-400 hover:text-indigo-600 disabled:opacity-30"><ChevronDown :size="14" /></button>
-                  </div>
-                  <button @click="removeApproverFromProjForm(idx)" class="text-gray-400 hover:text-red-500 p-1"><X :size="14" /></button>
+                  <button @click="removeMemberFromProjForm(idx)" class="text-gray-400 hover:text-red-500 p-1"><X :size="14" /></button>
                 </div>
-                <div v-if="projApprovers.length === 0" class="text-xs text-gray-400 text-center py-3 border border-dashed border-gray-200 rounded-lg">
-                  承認者が設定されていません（approval_rules が適用されます）
+                <div v-if="projMembers.length === 0" class="text-xs text-gray-400 text-center py-3 border border-dashed border-gray-200 rounded-lg">
+                  責任者が設定されていません
                 </div>
               </div>
             </div>

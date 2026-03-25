@@ -153,6 +153,11 @@ const { projects, fetchProjects } = useProjects();
 const activeSenderProfile = ref('');
 const activeBankAccountId = ref('');
 const activeProjectId = ref('');
+const approvalMode = ref<'department' | 'project'>('department');
+
+watch(approvalMode, (mode) => {
+    if (mode === 'department') activeProjectId.value = '';
+});
 
 // 請求元プロファイルが変わったら紐づく口座を再取得してデフォルトを選択
 watch(activeSenderProfile, async (profileId) => {
@@ -886,17 +891,6 @@ function handleClientSelection() {
                                        </option>
                                    </select>
                                </div>
-                               <!-- プロジェクト -->
-                               <div>
-                                   <label class="block text-xs font-bold text-gray-700 mb-2 flex items-center gap-1.5">
-                                     <FolderKanban class="w-3.5 h-3.5 text-indigo-400" />
-                                     プロジェクト（任意）
-                                   </label>
-                                   <select v-model="activeProjectId" class="block w-full py-2 pl-3 pr-10 text-sm border border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 rounded-lg bg-white shadow-sm text-gray-700">
-                                       <option value="">指定なし</option>
-                                       <option v-for="proj in projects" :key="proj.id" :value="proj.id">{{ proj.name }}</option>
-                                   </select>
-                               </div>
                            </div>
                        </div>
                    </div>
@@ -955,13 +949,40 @@ function handleClientSelection() {
                    </div>
                </div>
               
+              <!-- APPROVAL MODE TOGGLE -->
+              <div class="flex items-center gap-3 px-1">
+                <div class="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                  <button
+                    @click="approvalMode = 'department'"
+                    class="px-3 py-1 text-xs font-bold rounded-md transition-all"
+                    :class="approvalMode === 'department' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                  >部署ルール</button>
+                  <button
+                    @click="approvalMode = 'project'"
+                    class="px-3 py-1 text-xs font-bold rounded-md transition-all flex items-center gap-1"
+                    :class="approvalMode === 'project' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                  >
+                    <FolderKanban class="w-3 h-3" />
+                    プロジェクトルール
+                  </button>
+                </div>
+                <select
+                  v-if="approvalMode === 'project'"
+                  v-model="activeProjectId"
+                  class="flex-1 py-1.5 pl-3 pr-8 text-xs border border-indigo-200 focus:outline-none focus:ring-1 focus:ring-indigo-400 rounded-lg bg-white text-gray-700"
+                >
+                  <option value="">プロジェクトを選択...</option>
+                  <option v-for="proj in projects" :key="proj.id" :value="proj.id">{{ proj.name }}</option>
+                </select>
+              </div>
+
               <!-- APPROVAL PREVIEW -->
-              <ApprovalStepper 
+              <ApprovalStepper
                   document-type="issued_invoice"
                   mode="preview"
                   :amount="totalAmount"
                   @update:requires-approval="handleApprovalRequirement"
-                  :payload="{ client_id: activeClientId }"
+                  :payload="{ client_id: activeClientId, ...(approvalMode === 'project' && activeProjectId ? { project_id: activeProjectId } : {}) }"
               />
               
               <!-- PREVIEW -->

@@ -167,11 +167,17 @@ const addRule = () => {
   }
 };
 
+const getProjectMembers = (projectId: string) => {
+  const proj = projects.value.find(p => p.id === projectId);
+  return proj?.members || [];
+};
+
 const onProjectApproverChange = (rule: ApprovalRule, aIndex: number, userId: string) => {
-  const emp = employees.value.find(e => e.id === userId);
-  if (emp) {
+  const members = getProjectMembers(rule.projectId || '');
+  const member = members.find(m => m.user_id === userId);
+  if (member) {
     rule.approvers[aIndex].userId = userId;
-    rule.approvers[aIndex].approverName = emp.name;
+    rule.approvers[aIndex].approverName = member.name;
   }
 };
 
@@ -320,7 +326,7 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
         <p class="mt-1 text-blue-700">
           <span v-if="activeRuleTab === 'receipt'">💡 経費領収書が提出されると、金額・科目に基づきこのルールが自動適用されます。</span>
           <span v-else-if="activeRuleTab === 'received_invoice'">💡 受領請求書がアップロードされると、このルールに基づき支払承認フローが開始されます。</span>
-          <span v-else-if="activeRuleTab === 'project'">💡 プロジェクトに紐づいた書類は、対象プロジェクトの承認者が自動的にアサインされます。条件設定は不要です。</span>
+          <span v-else-if="activeRuleTab === 'project'">💡 プロジェクトを選択し、そのプロジェクトの責任者から承認者を指定します。プロジェクトに紐づいた書類はこのルートが優先適用されます。</span>
           <span v-else>💡 請求書を発行する際、金額に基づきこのルールに従った承認が必要になります。</span>
         </p>
       </div>
@@ -453,15 +459,16 @@ const removeApprover = (rule: ApprovalRule, aIndex: number) => {
                     <span :class="rule.appliesTo.includes('project') ? 'flex-shrink-0 w-6 h-6 rounded-full bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center border border-violet-200' : 'flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center border border-blue-200'">
                       {{ aIndex + 1 }}
                     </span>
-                    <!-- Project rules: show employee selector -->
+                    <!-- Project rules: show project members selector -->
                     <template v-if="rule.appliesTo.includes('project')">
                       <select
                         :value="approver.userId"
                         @change="onProjectApproverChange(rule, aIndex, ($event.target as HTMLSelectElement).value)"
                         class="flex-1 bg-white border border-violet-200 text-violet-900 font-medium rounded px-3 py-1.5 text-xs focus:ring-1 focus:ring-violet-500 shadow-sm"
+                        :disabled="!rule.projectId"
                       >
-                        <option value="">従業員を選択...</option>
-                        <option v-for="emp in employees" :key="emp.id" :value="emp.id">{{ emp.name }}</option>
+                        <option value="">{{ rule.projectId ? '責任者を選択...' : 'まずプロジェクトを選択' }}</option>
+                        <option v-for="m in getProjectMembers(rule.projectId || '')" :key="m.user_id" :value="m.user_id">{{ m.name }}</option>
                       </select>
                     </template>
                     <!-- Standard rules: show role selector -->
