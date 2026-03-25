@@ -62,7 +62,7 @@ async def seed():
             cid = str(corp["_id"])
             for col in [
                 "employees", "receipts", "invoices", "approval_rules",
-                "clients", "company_profiles", "notifications",
+                "clients", "company_profiles", "bank_accounts", "notifications",
                 "bank_transactions", "matches", "approval_events",
                 "departments",
             ]:
@@ -84,6 +84,37 @@ async def seed():
     })
     tax_id = str(res_tax.inserted_id)
     print(f"✅ 税理士法人 作成: {tax_id}")
+
+    # 自社情報（税理士法人）
+    tax_profile_res = await db["company_profiles"].insert_one({
+        "corporate_id": tax_id,
+        "profile_name": "メインプロファイル",
+        "company_name": "青山税理士法人",
+        "phone": "03-1234-5678",
+        "address": "東京都港区青山1-1-1",
+        "registration_number": "T1234567890123",
+        "is_default": True,
+        "created_at": today,
+    })
+    tax_profile_id = str(tax_profile_res.inserted_id)
+
+    await db["bank_accounts"].insert_many([
+        {
+            "corporate_id": tax_id, "profile_id": tax_profile_id,
+            "bank_name": "三菱UFJ銀行", "branch_name": "青山支店",
+            "account_type": "ordinary", "account_number": "1234567",
+            "account_holder": "アオヤマゼイリシホウジン",
+            "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
+        },
+        {
+            "corporate_id": tax_id, "profile_id": tax_profile_id,
+            "bank_name": "三井住友銀行", "branch_name": "渋谷支店",
+            "account_type": "ordinary", "account_number": "7654321",
+            "account_holder": "アオヤマゼイリシホウジン",
+            "is_default": False, "is_active": True, "created_at": today, "updated_at": today,
+        },
+    ])
+    print("✅ 税理士法人 自社情報・銀行口座作成")
 
     await db["employees"].insert_many([
         {
@@ -250,6 +281,37 @@ async def seed():
     corp_a_id = str(res_a.inserted_id)
     print(f"✅ 一般法人A 作成: {corp_a_id}")
 
+    # 自社情報（法人A）
+    corp_a_profile_res = await db["company_profiles"].insert_one({
+        "corporate_id": corp_a_id,
+        "profile_name": "メインプロファイル",
+        "company_name": "株式会社アルファ",
+        "phone": "03-9876-5432",
+        "address": "東京都渋谷区渋谷2-2-2",
+        "registration_number": "T9876543210123",
+        "is_default": True,
+        "created_at": today,
+    })
+    corp_a_profile_id = str(corp_a_profile_res.inserted_id)
+
+    await db["bank_accounts"].insert_many([
+        {
+            "corporate_id": corp_a_id, "profile_id": corp_a_profile_id,
+            "bank_name": "みずほ銀行", "branch_name": "新宿支店",
+            "account_type": "ordinary", "account_number": "1111111",
+            "account_holder": "カブシキガイシャアルファ",
+            "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
+        },
+        {
+            "corporate_id": corp_a_id, "profile_id": corp_a_profile_id,
+            "bank_name": "三井住友銀行", "branch_name": "新宿支店",
+            "account_type": "checking", "account_number": "2222222",
+            "account_holder": "カブシキガイシャアルファ",
+            "is_default": False, "is_active": True, "created_at": today, "updated_at": today,
+        },
+    ])
+    print("✅ 一般法人A 自社情報・銀行口座作成")
+
     # 部門データ（法人A）
     dept_res = await db["departments"].insert_many([
         {"corporate_id": corp_a_id, "name": "経営陣", "groups": [], "created_at": today},
@@ -285,6 +347,53 @@ async def seed():
         },
     ])
     print("✅ 一般法人A 従業員2名作成")
+
+    # 取引先（法人A）
+    await db["clients"].insert_many([
+        {
+            "corporate_id": corp_a_id,
+            "name": "株式会社モックアルファ",
+            "registration_number": "T1111111111111",
+            "email": "contact@mockalpha.co.jp",
+            "phone": "03-1111-1111",
+            "postal_code": "150-0001",
+            "address": "東京都渋谷区神宮前1-1-1",
+            "department": "経理部",
+            "contact_person": "田中 誠",
+            "payment_terms": "月末締め翌月末払い",
+            "internal_notes": "メインの取引先",
+            "created_at": today,
+        },
+        {
+            "corporate_id": corp_a_id,
+            "name": "デザイン事務所クリエイト",
+            "registration_number": "T2222222222222",
+            "email": "info@design-create.co.jp",
+            "phone": "03-2222-2222",
+            "postal_code": "160-0022",
+            "address": "東京都新宿区新宿3-3-3",
+            "department": "制作部",
+            "contact_person": "鈴木 美穂",
+            "payment_terms": "納品後30日以内",
+            "internal_notes": "ロゴ・デザイン担当",
+            "created_at": today,
+        },
+        {
+            "corporate_id": corp_a_id,
+            "name": "クラウドサービス株式会社",
+            "registration_number": "T3333333333333",
+            "email": "billing@cloudservice.co.jp",
+            "phone": "03-3333-3333",
+            "postal_code": "100-0005",
+            "address": "東京都千代田区丸の内1-1-1",
+            "department": "営業部",
+            "contact_person": "山本 健太",
+            "payment_terms": "月末締め翌々月払い",
+            "internal_notes": "サーバー・SaaS費用",
+            "created_at": today,
+        },
+    ])
+    print("✅ 一般法人A 取引先3件作成")
 
     # 承認ルール（法人A）
     a_rules_res = await db["approval_rules"].insert_many([
@@ -484,6 +593,37 @@ async def seed():
     corp_b_id = str(res_b.inserted_id)
     print(f"✅ 一般法人B 作成: {corp_b_id}")
 
+    # 自社情報（法人B）
+    corp_b_profile_res = await db["company_profiles"].insert_one({
+        "corporate_id": corp_b_id,
+        "profile_name": "メインプロファイル",
+        "company_name": "株式会社ベータ",
+        "phone": "03-5555-6666",
+        "address": "東京都品川区大崎3-3-3",
+        "registration_number": "T5555666677778",
+        "is_default": True,
+        "created_at": today,
+    })
+    corp_b_profile_id = str(corp_b_profile_res.inserted_id)
+
+    await db["bank_accounts"].insert_many([
+        {
+            "corporate_id": corp_b_id, "profile_id": corp_b_profile_id,
+            "bank_name": "りそな銀行", "branch_name": "品川支店",
+            "account_type": "ordinary", "account_number": "3333333",
+            "account_holder": "カブシキガイシャベータ",
+            "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
+        },
+        {
+            "corporate_id": corp_b_id, "profile_id": corp_b_profile_id,
+            "bank_name": "三菱UFJ銀行", "branch_name": "五反田支店",
+            "account_type": "ordinary", "account_number": "4444444",
+            "account_holder": "カブシキガイシャベータ",
+            "is_default": False, "is_active": True, "created_at": today, "updated_at": today,
+        },
+    ])
+    print("✅ 一般法人B 自社情報・銀行口座作成")
+
     await db["employees"].insert_many([
         {
             "firebase_uid": EMP_B_STAFF_UID,
@@ -505,6 +645,53 @@ async def seed():
         },
     ])
     print("✅ 一般法人B 従業員2名作成")
+
+    # 取引先（法人B）
+    await db["clients"].insert_many([
+        {
+            "corporate_id": corp_b_id,
+            "name": "株式会社ガンマ商事",
+            "registration_number": "T4444444444444",
+            "email": "contact@gamma.co.jp",
+            "phone": "03-4444-4444",
+            "postal_code": "140-0002",
+            "address": "東京都品川区東品川2-2-2",
+            "department": "購買部",
+            "contact_person": "小林 直樹",
+            "payment_terms": "末日締め翌月末払い",
+            "internal_notes": "主要顧客",
+            "created_at": today,
+        },
+        {
+            "corporate_id": corp_b_id,
+            "name": "広告代理店デルタ",
+            "registration_number": "T5555555555555",
+            "email": "billing@delta-ad.co.jp",
+            "phone": "03-5555-5555",
+            "postal_code": "105-0011",
+            "address": "東京都港区芝公園1-1-1",
+            "department": "営業部",
+            "contact_person": "高橋 由美",
+            "payment_terms": "納品後45日以内",
+            "internal_notes": "広告・宣伝費担当",
+            "created_at": today,
+        },
+        {
+            "corporate_id": corp_b_id,
+            "name": "オフィス用品エプシロン",
+            "registration_number": "T6666666666666",
+            "email": "order@epsilon-office.co.jp",
+            "phone": "03-6666-6666",
+            "postal_code": "108-0075",
+            "address": "東京都港区港南3-3-3",
+            "department": "総務部",
+            "contact_person": "中村 朋子",
+            "payment_terms": "月末締め翌々月払い",
+            "internal_notes": "消耗品・備品の仕入先",
+            "created_at": today,
+        },
+    ])
+    print("✅ 一般法人B 取引先3件作成")
 
     # 承認ルール（法人B）
     b_rules_res = await db["approval_rules"].insert_many([
