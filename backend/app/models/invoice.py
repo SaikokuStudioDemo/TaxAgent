@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 from datetime import datetime
 from app.models.approval import ApprovalHistoryItem, AddedApprovalStep
+from app.models.project import ProjectApprover
 
 class InvoiceLineItem(BaseModel):
     description: str
@@ -27,6 +28,8 @@ class InvoiceCreate(BaseModel):
     is_auto_send_enabled: bool = False
     attachments: List[str] = []
     approval_status: Optional[str] = None
+    project_id: Optional[str] = None
+    custom_approvers: Optional[List[ProjectApprover]] = None
 
 class InvoiceInDB(InvoiceCreate):
     id: Optional[str] = Field(None, alias="_id")

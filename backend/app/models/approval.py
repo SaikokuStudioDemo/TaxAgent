@@ -9,8 +9,10 @@ class ApprovalCondition(BaseModel):
 
 class ApprovalStep(BaseModel):
     step: int
-    role: str # "group_leader" / "dept_manager" / "admin" etc.
+    role: str  # "group_leader" / "dept_manager" / "specific_person" etc.
     required: bool = True
+    user_id: Optional[str] = None       # specific person assignment
+    approver_name: Optional[str] = None # display name for specific person
 
 class ApprovalHistoryItem(BaseModel):
     step: int
@@ -23,10 +25,11 @@ class ApprovalHistoryItem(BaseModel):
 
 class ApprovalRuleCreate(BaseModel):
     name: str
-    applies_to: List[Literal["receipt", "received_invoice", "issued_invoice"]]
+    applies_to: List[Literal["receipt", "received_invoice", "issued_invoice", "project"]]
     conditions: List[ApprovalCondition] = []
     steps: List[ApprovalStep]
     active: bool = True
+    project_id: Optional[str] = None  # for project-specific rules
 
 class ApprovalRuleInDB(ApprovalRuleCreate):
     id: Optional[str] = Field(None, alias="_id")

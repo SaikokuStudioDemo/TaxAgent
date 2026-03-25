@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 from datetime import datetime
 from app.models.approval import ApprovalHistoryItem, AddedApprovalStep
+from app.models.project import ProjectApprover
 
 class ReceiptLineItem(BaseModel):
     description: str
@@ -20,6 +21,8 @@ class ReceiptCreate(BaseModel):
     attachments: List[str] = []
     fiscal_period: str
     ai_extracted: bool = False
+    project_id: Optional[str] = None
+    custom_approvers: Optional[List[ProjectApprover]] = None
 
 class ReceiptInDB(ReceiptCreate):
     id: Optional[str] = Field(None, alias="_id")
@@ -33,7 +36,7 @@ class ReceiptInDB(ReceiptCreate):
     current_step: int = 1
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-class BankTransactionInDB(BaseModel):
+class TransactionInDB(BaseModel):
     id: Optional[str] = Field(None, alias="_id")
     corporate_id: str
     source_type: Literal["bank", "card"]
