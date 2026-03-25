@@ -33,13 +33,27 @@ async def evaluate_approval_rules(
     """
     Find the first active approval rule that matches the given document.
 
+    Priority:
+    1. If document has project_id → look for a project-specific rule first
+    2. Otherwise, evaluate normal document-type rules (highest amount threshold first)
+
     Returns:
         (rule_id, steps) if a match is found, else (None, [])
-
-    Rules are evaluated in order of 'amount' condition (highest threshold first)
-    so that the most specific rule takes precedence.
     """
     db = get_database()
+
+    # Priority 1: project-specific rule
+    project_id = document.get("project_id")
+    if project_id:
+        proj_rule = await db["approval_rules"].find_one({
+            "corporate_id": corporate_id,
+            "applies_to": "project",
+            "project_id": project_id,
+            "active": True,
+        })
+        if proj_rule:
+            return str(proj_rule["_id"]), proj_rule.get("steps", [])
+        # No project rule found → fall through to normal rules (may result in no match → 承認不要)
 
     cursor = db["approval_rules"].find({
         "corporate_id": corporate_id,

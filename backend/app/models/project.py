@@ -3,16 +3,15 @@ from typing import Optional, List
 from datetime import datetime
 
 
-class ProjectApprover(BaseModel):
+class ProjectMember(BaseModel):
     user_id: str
     name: str
-    order: int
 
 
 class ProjectCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    approvers: List[ProjectApprover] = []
+    members: List[ProjectMember] = []
 
 
 class ProjectInDB(ProjectCreate):

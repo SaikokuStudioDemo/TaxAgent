@@ -373,9 +373,9 @@ async def seed():
             "corporate_id": corp_a_id,
             "name": "社内基幹システムリプレイス",
             "description": "ERP刷新プロジェクト（2025年度）",
-            "approvers": [
-                {"user_id": emp_a_manager_id, "name": "佐藤 花子", "order": 1},
-                {"user_id": emp_a_staff_id,   "name": "山田 太郎", "order": 2},
+            "members": [
+                {"user_id": emp_a_manager_id, "name": "佐藤 花子"},
+                {"user_id": emp_a_staff_id,   "name": "山田 太郎"},
             ],
             "is_active": True,
             "created_at": today,
@@ -385,8 +385,8 @@ async def seed():
             "corporate_id": corp_a_id,
             "name": "Webサイト制作プロジェクト",
             "description": "コーポレートサイトリニューアル",
-            "approvers": [
-                {"user_id": emp_a_manager_id, "name": "佐藤 花子", "order": 1},
+            "members": [
+                {"user_id": emp_a_manager_id, "name": "佐藤 花子"},
             ],
             "is_active": True,
             "created_at": today,
@@ -750,9 +750,9 @@ async def seed():
             "corporate_id": corp_b_id,
             "name": "新規事業立ち上げプロジェクト",
             "description": "B社 新規事業開発（2025年度）",
-            "approvers": [
-                {"user_id": emp_b_manager_id, "name": "渡辺 美咲", "order": 1},
-                {"user_id": emp_b_staff_id,   "name": "伊藤 翔太", "order": 2},
+            "members": [
+                {"user_id": emp_b_manager_id, "name": "渡辺 美咲"},
+                {"user_id": emp_b_staff_id,   "name": "伊藤 翔太"},
             ],
             "is_active": True,
             "created_at": today,
@@ -762,8 +762,8 @@ async def seed():
             "corporate_id": corp_b_id,
             "name": "マーケティングキャンペーン",
             "description": "Q2広告戦略プロジェクト",
-            "approvers": [
-                {"user_id": emp_b_manager_id, "name": "渡辺 美咲", "order": 1},
+            "members": [
+                {"user_id": emp_b_manager_id, "name": "渡辺 美咲"},
             ],
             "is_active": True,
             "created_at": today,

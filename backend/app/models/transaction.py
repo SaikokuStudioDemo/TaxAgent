@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 from datetime import datetime
 from app.models.approval import ApprovalHistoryItem, AddedApprovalStep
-from app.models.project import ProjectApprover
+from app.models.project import ProjectMember
 
 class ReceiptLineItem(BaseModel):
     description: str
@@ -22,7 +22,7 @@ class ReceiptCreate(BaseModel):
     fiscal_period: str
     ai_extracted: bool = False
     project_id: Optional[str] = None
-    custom_approvers: Optional[List[ProjectApprover]] = None
+    custom_approvers: Optional[List[ProjectMember]] = None
 
 class ReceiptInDB(ReceiptCreate):
     id: Optional[str] = Field(None, alias="_id")

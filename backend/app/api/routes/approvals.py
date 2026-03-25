@@ -151,27 +151,15 @@ async def record_approval_action(
             if doc:
                 doc["extra_approval_steps"] = added_steps_dicts
 
-        # Calculate standard steps using priority: custom_approvers > project > rule
+        # Calculate standard steps using priority: custom_approvers > approval_rule
         total_steps = 1  # Minimum implicit step
         custom_approvers = doc.get("custom_approvers") if doc else None
-        project_id = doc.get("project_id") if doc else None
 
         if custom_approvers:
             # Priority 1: custom approvers set directly on the document
             total_steps = max(total_steps, len(custom_approvers))
-        elif project_id:
-            # Priority 2: project approvers
-            try:
-                from bson import ObjectId as _ObjId
-                proj = await ctx.db["projects"].find_one({"_id": _ObjId(project_id)})
-                if proj:
-                    proj_approvers = proj.get("approvers", [])
-                    if proj_approvers:
-                        total_steps = max(total_steps, len(proj_approvers))
-            except Exception as e:
-                logger.error(f"Error fetching project {project_id}: {e}")
         elif rule_id:
-            # Priority 3: approval_rules (existing logic)
+            # Priority 2: approval_rules (includes project-specific rules)
             try:
                 rule = await ctx.db["approval_rules"].find_one({"_id": ObjectId(rule_id)})
                 if rule:
