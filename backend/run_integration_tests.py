@@ -1,3 +1,4 @@
+# DEPRECATED: このスクリプトは非推奨です。seed_mock_data.py を使用してください。
 """
 run_integration_tests.py - シードデータを使った結合テストスクリプト
 
