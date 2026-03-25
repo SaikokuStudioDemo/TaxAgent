@@ -9,7 +9,7 @@ async def main():
     
     print("--- EMPLOYEES ---")
     for e in employees:
-        print(f"UID: {e.get('firebase_uid')}, Parent: {e.get('parent_corporate_id')}")
+        print(f"UID: {e.get('firebase_uid')}, corporate_id: {e.get('corporate_id')}")
         
     print("\n--- CORPORATES ---")
     for c in corporates:
