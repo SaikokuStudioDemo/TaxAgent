@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import Optional
 from datetime import datetime
 from bson import ObjectId as BsonObjectId
-from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.api.helpers import (
     serialize_doc as _serialize,
@@ -11,16 +10,10 @@ from app.api.helpers import (
     parse_oid,
 )
 from app.models.bank_account import BankAccountCreate
-from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-def _get_db():
-    client = AsyncIOMotorClient(settings.MONGODB_URI)
-    return client[settings.MONGODB_DB_NAME]
 
 
 # ---------------------------------------------------------------------------
@@ -28,11 +21,13 @@ def _get_db():
 # ---------------------------------------------------------------------------
 
 @router.get("/zengin/banks/search", status_code=status.HTTP_200_OK)
-async def search_banks(q: str = Query(..., min_length=1)):
+async def search_banks(
+    q: str = Query(..., min_length=1),
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
     """銀行名・カナで前方一致検索"""
-    db = _get_db()
     regex = {"$regex": f"^{q}", "$options": "i"}
-    cursor = db["zengin_banks"].find(
+    cursor = ctx.db["zengin_banks"].find(
         {"$or": [{"name": regex}, {"kana": regex}, {"hira": regex}]},
         {"_id": 0, "code": 1, "name": 1, "kana": 1},
     ).limit(20)
@@ -41,11 +36,14 @@ async def search_banks(q: str = Query(..., min_length=1)):
 
 
 @router.get("/zengin/banks/{bank_code}/branches/search", status_code=status.HTTP_200_OK)
-async def search_branches(bank_code: str, q: str = Query(..., min_length=1)):
+async def search_branches(
+    bank_code: str,
+    q: str = Query(..., min_length=1),
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
     """支店名・カナで前方一致検索"""
-    db = _get_db()
     regex = {"$regex": f"^{q}", "$options": "i"}
-    cursor = db["zengin_branches"].find(
+    cursor = ctx.db["zengin_branches"].find(
         {"bank_code": bank_code, "$or": [{"name": regex}, {"kana": regex}, {"hira": regex}]},
         {"_id": 0, "code": 1, "name": 1, "kana": 1},
     ).limit(20)
@@ -54,10 +52,13 @@ async def search_branches(bank_code: str, q: str = Query(..., min_length=1)):
 
 
 @router.get("/zengin/banks/{bank_code}/branches/{branch_code}", status_code=status.HTTP_200_OK)
-async def lookup_branch(bank_code: str, branch_code: str):
+async def lookup_branch(
+    bank_code: str,
+    branch_code: str,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
     """支店コードから支店名を取得"""
-    db = _get_db()
-    doc = await db["zengin_branches"].find_one(
+    doc = await ctx.db["zengin_branches"].find_one(
         {"bank_code": bank_code, "code": branch_code},
         {"_id": 0},
     )
@@ -67,10 +68,12 @@ async def lookup_branch(bank_code: str, branch_code: str):
 
 
 @router.get("/zengin/banks/{bank_code}", status_code=status.HTTP_200_OK)
-async def lookup_bank(bank_code: str):
+async def lookup_bank(
+    bank_code: str,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
     """銀行コードから銀行名を取得"""
-    db = _get_db()
-    doc = await db["zengin_banks"].find_one({"code": bank_code}, {"_id": 0})
+    doc = await ctx.db["zengin_banks"].find_one({"code": bank_code}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Bank code {bank_code} not found")
     return {"bank_code": doc["code"], "bank_name": doc["name"], "kana": doc.get("kana", "")}
