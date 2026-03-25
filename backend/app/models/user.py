@@ -60,7 +60,7 @@ class EmployeeUserInDB(BaseModel):
     Data model representing an employee entity stored in MongoDB.
     """
     firebase_uid: str # Their own Firebase login UID
-    parent_corporate_id: str # The Firebase UID of the Tax Firm or Corporate that created them
+    corporate_id: str # ObjectId string of the Corporate or Tax Firm that created them
     role: str
     permissions: dict
     usageFee: Optional[int] = 0
