@@ -101,14 +101,18 @@ async def seed():
     await db["bank_accounts"].insert_many([
         {
             "corporate_id": tax_id, "profile_id": tax_profile_id,
+            "owner_type": "corporate",
             "bank_name": "三菱UFJ銀行", "branch_name": "青山支店",
+            "bank_code": "0005", "branch_code": "001",
             "account_type": "ordinary", "account_number": "1234567",
             "account_holder": "アオヤマゼイリシホウジン",
             "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
         },
         {
             "corporate_id": tax_id, "profile_id": tax_profile_id,
+            "owner_type": "corporate",
             "bank_name": "三井住友銀行", "branch_name": "渋谷支店",
+            "bank_code": "0009", "branch_code": "223",
             "account_type": "ordinary", "account_number": "7654321",
             "account_holder": "アオヤマゼイリシホウジン",
             "is_default": False, "is_active": True, "created_at": today, "updated_at": today,
@@ -297,14 +301,18 @@ async def seed():
     await db["bank_accounts"].insert_many([
         {
             "corporate_id": corp_a_id, "profile_id": corp_a_profile_id,
+            "owner_type": "corporate",
             "bank_name": "みずほ銀行", "branch_name": "新宿支店",
+            "bank_code": "0001", "branch_code": "262",
             "account_type": "ordinary", "account_number": "1111111",
             "account_holder": "カブシキガイシャアルファ",
             "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
         },
         {
             "corporate_id": corp_a_id, "profile_id": corp_a_profile_id,
+            "owner_type": "corporate",
             "bank_name": "三井住友銀行", "branch_name": "新宿支店",
+            "bank_code": "0009", "branch_code": "262",
             "account_type": "checking", "account_number": "2222222",
             "account_holder": "カブシキガイシャアルファ",
             "is_default": False, "is_active": True, "created_at": today, "updated_at": today,
@@ -349,7 +357,7 @@ async def seed():
     print("✅ 一般法人A 従業員2名作成")
 
     # 取引先（法人A）
-    await db["clients"].insert_many([
+    corp_a_client_res = await db["clients"].insert_many([
         {
             "corporate_id": corp_a_id,
             "name": "株式会社モックアルファ",
@@ -393,7 +401,46 @@ async def seed():
             "created_at": today,
         },
     ])
+    corp_a_client_ids = [str(i) for i in corp_a_client_res.inserted_ids]
     print("✅ 一般法人A 取引先3件作成")
+
+    # 取引先口座（法人A）
+    await db["bank_accounts"].insert_many([
+        {
+            "corporate_id": corp_a_id,
+            "owner_type": "client",
+            "client_id": corp_a_client_ids[0],
+            "profile_id": None,
+            "bank_name": "東京都民銀行", "branch_name": "渋谷支店",
+            "bank_code": "0522", "branch_code": "101",
+            "account_type": "ordinary", "account_number": "3333333",
+            "account_holder": "カブシキガイシャモックアルファ",
+            "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
+        },
+        {
+            "corporate_id": corp_a_id,
+            "owner_type": "client",
+            "client_id": corp_a_client_ids[1],
+            "profile_id": None,
+            "bank_name": "りそな銀行", "branch_name": "新宿支店",
+            "bank_code": "0010", "branch_code": "202",
+            "account_type": "ordinary", "account_number": "4444444",
+            "account_holder": "デザインジムショクリエイト",
+            "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
+        },
+        {
+            "corporate_id": corp_a_id,
+            "owner_type": "client",
+            "client_id": corp_a_client_ids[2],
+            "profile_id": None,
+            "bank_name": "みずほ銀行", "branch_name": "丸の内支店",
+            "bank_code": "0001", "branch_code": "303",
+            "account_type": "ordinary", "account_number": "5555555",
+            "account_holder": "クラウドサービスカブシキガイシャ",
+            "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
+        },
+    ])
+    print("✅ 一般法人A 取引先口座3件作成")
 
     # 承認ルール（法人A）
     a_rules_res = await db["approval_rules"].insert_many([
@@ -609,14 +656,18 @@ async def seed():
     await db["bank_accounts"].insert_many([
         {
             "corporate_id": corp_b_id, "profile_id": corp_b_profile_id,
+            "owner_type": "corporate",
             "bank_name": "りそな銀行", "branch_name": "品川支店",
+            "bank_code": "0010", "branch_code": "141",
             "account_type": "ordinary", "account_number": "3333333",
             "account_holder": "カブシキガイシャベータ",
             "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
         },
         {
             "corporate_id": corp_b_id, "profile_id": corp_b_profile_id,
+            "owner_type": "corporate",
             "bank_name": "三菱UFJ銀行", "branch_name": "五反田支店",
+            "bank_code": "0005", "branch_code": "631",
             "account_type": "ordinary", "account_number": "4444444",
             "account_holder": "カブシキガイシャベータ",
             "is_default": False, "is_active": True, "created_at": today, "updated_at": today,
@@ -647,7 +698,7 @@ async def seed():
     print("✅ 一般法人B 従業員2名作成")
 
     # 取引先（法人B）
-    await db["clients"].insert_many([
+    corp_b_client_res = await db["clients"].insert_many([
         {
             "corporate_id": corp_b_id,
             "name": "株式会社ガンマ商事",
@@ -691,7 +742,46 @@ async def seed():
             "created_at": today,
         },
     ])
+    corp_b_client_ids = [str(i) for i in corp_b_client_res.inserted_ids]
     print("✅ 一般法人B 取引先3件作成")
+
+    # 取引先口座（法人B）
+    await db["bank_accounts"].insert_many([
+        {
+            "corporate_id": corp_b_id,
+            "owner_type": "client",
+            "client_id": corp_b_client_ids[0],
+            "profile_id": None,
+            "bank_name": "三菱UFJ銀行", "branch_name": "品川支店",
+            "bank_code": "0005", "branch_code": "141",
+            "account_type": "ordinary", "account_number": "6666666",
+            "account_holder": "カブシキガイシャガンマショウジ",
+            "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
+        },
+        {
+            "corporate_id": corp_b_id,
+            "owner_type": "client",
+            "client_id": corp_b_client_ids[1],
+            "profile_id": None,
+            "bank_name": "みずほ銀行", "branch_name": "芝公園支店",
+            "bank_code": "0001", "branch_code": "191",
+            "account_type": "ordinary", "account_number": "7777777",
+            "account_holder": "コウコクダイリテンデルタ",
+            "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
+        },
+        {
+            "corporate_id": corp_b_id,
+            "owner_type": "client",
+            "client_id": corp_b_client_ids[2],
+            "profile_id": None,
+            "bank_name": "三井住友銀行", "branch_name": "港南支店",
+            "bank_code": "0009", "branch_code": "391",
+            "account_type": "ordinary", "account_number": "8888888",
+            "account_holder": "オフィスヨウヒンエプシロン",
+            "is_default": True, "is_active": True, "created_at": today, "updated_at": today,
+        },
+    ])
+    print("✅ 一般法人B 取引先口座3件作成")
 
     # 承認ルール（法人B）
     b_rules_res = await db["approval_rules"].insert_many([
