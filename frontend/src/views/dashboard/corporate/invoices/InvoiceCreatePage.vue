@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { ChevronLeft, Plus, CheckCircle, Save, Send, FileText, Loader2, Building2, AlertCircle as AlertCircleIcon, Trash2, FileImage, X, AlertCircle, GripHorizontal, Pencil, Mail, ShieldCheck } from 'lucide-vue-next';
 import { useRouter, useRoute } from 'vue-router';
 import ClientFormModal from '@/components/invoices/ClientFormModal.vue';
@@ -150,6 +150,14 @@ const { profiles: senderProfiles, fetchProfiles, formatProfileForTextarea } = us
 const { accounts: bankAccounts, fetchBankAccounts } = useBankAccounts();
 const activeSenderProfile = ref('');
 const activeBankAccountId = ref('');
+
+// 請求元プロファイルが変わったら紐づく口座を再取得してデフォルトを選択
+watch(activeSenderProfile, async (profileId) => {
+    if (!profileId) return;
+    await fetchBankAccounts({ profileId });
+    const defaultAccount = bankAccounts.value.find(a => a.is_default) || bankAccounts.value[0];
+    activeBankAccountId.value = defaultAccount?.id ?? '';
+});
 
 // --- COMPUTED ---
 const subtotal = computed(() => items.value.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0));
@@ -443,10 +451,12 @@ onMounted(async () => {
     const defaultProfile = senderProfiles.value.find((p: any) => p.is_default) || senderProfiles.value[0];
     if (defaultProfile) activeSenderProfile.value = defaultProfile.id;
 
-    await fetchBankAccounts();
-    // Set default bank account
-    const defaultAccount = bankAccounts.value.find(a => a.is_default) || bankAccounts.value[0];
-    if (defaultAccount) activeBankAccountId.value = defaultAccount.id;
+    // 請求元プロファイルに紐づく口座を取得
+    if (activeSenderProfile.value) {
+        await fetchBankAccounts({ profileId: activeSenderProfile.value });
+        const defaultAccount = bankAccounts.value.find(a => a.is_default) || bankAccounts.value[0];
+        if (defaultAccount) activeBankAccountId.value = defaultAccount.id;
+    }
 
     if (editingInvoiceId.value) {
         loadInvoiceData(editingInvoiceId.value);

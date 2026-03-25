@@ -1,12 +1,16 @@
 import { ref } from 'vue';
-import { api } from '@/lib/api';
+import { api, API_BASE } from '@/lib/api';
 
 export interface BankAccount {
   id: string;
   corporate_id: string;
-  profile_id: string;
+  owner_type: 'corporate' | 'client';
+  profile_id?: string;
+  client_id?: string;
   bank_name: string;
   branch_name: string;
+  bank_code?: string;
+  branch_code?: string;
   account_type: 'ordinary' | 'checking';
   account_number: string;
   account_holder: string;
@@ -19,12 +23,16 @@ export function useBankAccounts() {
   const isLoading = ref(false);
   const error = ref('');
 
-  const fetchBankAccounts = async (profileId?: string) => {
+  const fetchBankAccounts = async (params: { profileId?: string; clientId?: string } = {}) => {
     isLoading.value = true;
     error.value = '';
     try {
-      const path = profileId ? `/bank-accounts?profile_id=${profileId}` : '/bank-accounts';
-      accounts.value = await api.get<BankAccount[]>(path);
+      const query = params.profileId
+        ? `?profile_id=${params.profileId}`
+        : params.clientId
+        ? `?client_id=${params.clientId}`
+        : '';
+      accounts.value = await api.get<BankAccount[]>(`/bank-accounts${query}`);
     } catch (e: any) {
       error.value = e.message;
     } finally {
@@ -55,5 +63,25 @@ export function useBankAccounts() {
     accounts.value = accounts.value.map(a => ({ ...a, is_default: a.id === id }));
   };
 
-  return { accounts, isLoading, error, fetchBankAccounts, createBankAccount, updateBankAccount, deleteBankAccount, setDefaultBankAccount };
+  const lookupBank = async (bankCode: string): Promise<{ bank_code: string; bank_name: string } | null> => {
+    try {
+      return await api.get(`/bank-accounts/zengin/banks/${bankCode}`);
+    } catch {
+      return null;
+    }
+  };
+
+  const lookupBranch = async (bankCode: string, branchCode: string): Promise<{ branch_code: string; branch_name: string } | null> => {
+    try {
+      return await api.get(`/bank-accounts/zengin/banks/${bankCode}/branches/${branchCode}`);
+    } catch {
+      return null;
+    }
+  };
+
+  return {
+    accounts, isLoading, error,
+    fetchBankAccounts, createBankAccount, updateBankAccount, deleteBankAccount, setDefaultBankAccount,
+    lookupBank, lookupBranch,
+  };
 }
