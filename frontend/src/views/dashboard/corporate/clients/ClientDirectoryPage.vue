@@ -37,7 +37,7 @@ const mapToDisplay = (c: any): ClientDisplay => ({
   internalNotes: c.internal_notes ?? '',
 });
 
-const mockClients = computed(() => apiClients.value.map(mapToDisplay));
+const displayClients = computed(() => apiClients.value.map(mapToDisplay));
 
 onMounted(fetchClients);
 
@@ -49,9 +49,9 @@ const bankClient = ref<ClientDisplay | null>(null);
 
 // --- COMPUTED ---
 const filteredClients = computed(() => {
-  if (!searchQuery.value) return mockClients.value;
+  if (!searchQuery.value) return displayClients.value;
   const q = searchQuery.value.toLowerCase();
-  return mockClients.value.filter(c =>
+  return displayClients.value.filter(c =>
     c.name.toLowerCase().includes(q) ||
     c.contactPerson.toLowerCase().includes(q) ||
     c.email.toLowerCase().includes(q) ||
