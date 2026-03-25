@@ -35,10 +35,9 @@ async def resolve_corporate_id(firebase_uid: str) -> tuple[str, str]:
     employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
     if employee:
         user_id = str(employee["_id"])
-        parent_uid = employee.get("parent_corporate_firebase_uid") or employee.get("parent_corporate_id")
-        parent_corp = await db["corporates"].find_one({"firebase_uid": parent_uid})
-        if parent_corp:
-            return str(parent_corp["_id"]), user_id
+        corporate_id = employee.get("corporate_id")
+        if corporate_id:
+            return corporate_id, user_id
 
     raise HTTPException(
         status_code=403,
