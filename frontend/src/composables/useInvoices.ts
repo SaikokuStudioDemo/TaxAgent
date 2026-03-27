@@ -2,7 +2,8 @@
  * useInvoices.ts - Invoice composable backed by real API
  */
 import { ref } from 'vue';
-import { api } from '@/lib/api';
+import { api, buildQueryString } from '@/lib/api';
+import type { ApprovalHistory } from '@/lib/types/approvalTypes';
 
 export interface LineItem {
     description: string;
@@ -17,6 +18,7 @@ export interface Invoice {
     invoice_number: string;
     client_id?: string;
     client_name: string;
+    vendor_name?: string;
     recipient_email: string;
     issue_date: string;
     due_date: string;
@@ -28,19 +30,28 @@ export interface Invoice {
     reconciliation_status?: 'unreconciled' | 'reconciled';
     current_step: number;
     approval_rule_id: string | null;
+    approval_steps?: any[];
     is_temporary_approval_needed: boolean;
     is_auto_send_enabled: boolean;
     fiscal_period: string;
     line_items: LineItem[];
     created_by: string;
+    creator_name?: string;
     created_at: string;
     paid_at?: string;
     attachments?: string[];
-    approval_history?: any[];
+    approval_history?: ApprovalHistory[];
+    extra_approval_steps?: { roleId: string; roleName: string; approverName?: string }[];
+    image_url?: string;
+    memo?: string;
+    payment_method?: string;
+    project_id?: string;
+    project_name?: string;
 }
 
 export function useInvoices() {
     const invoices = ref<Invoice[]>([]);
+    const pendingForMe = ref<Invoice[]>([]);
     const isLoading = ref(false);
     const error = ref<string | null>(null);
 
@@ -52,12 +63,19 @@ export function useInvoices() {
         isLoading.value = true;
         error.value = null;
         try {
-            const query = new URLSearchParams();
-            if (params?.document_type) query.append('document_type', params.document_type);
-            if (params?.approval_status) query.append('approval_status', params.approval_status);
-            if (params?.fiscal_period) query.append('fiscal_period', params.fiscal_period);
-            const qs = query.toString();
-            invoices.value = await api.get<Invoice[]>(`/invoices${qs ? '?' + qs : ''}`);
+            invoices.value = await api.get<Invoice[]>(`/invoices${buildQueryString(params)}`);
+        } catch (e: any) {
+            error.value = e.message;
+        } finally {
+            isLoading.value = false;
+        }
+    };
+
+    const fetchPendingForMe = async () => {
+        isLoading.value = true;
+        error.value = null;
+        try {
+            pendingForMe.value = await api.get<Invoice[]>('/approvals/pending-for-me?document_type=invoice');
         } catch (e: any) {
             error.value = e.message;
         } finally {
@@ -136,9 +154,11 @@ export function useInvoices() {
 
     return {
         invoices,
+        pendingForMe,
         isLoading,
         error,
         fetchInvoices,
+        fetchPendingForMe,
         getInvoice,
         createInvoice,
         updateInvoice,

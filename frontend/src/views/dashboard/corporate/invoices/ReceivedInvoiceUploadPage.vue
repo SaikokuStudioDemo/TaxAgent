@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { UploadCloud, ScanLine, AlertCircle, FileText, Loader2, Trash2, CheckCircle2 } from 'lucide-vue-next';
-import { formatCurrency } from '@/lib/utils/formatters';
-import { uploadFile } from '@/lib/firebase/storage';
+import { formatCurrency, formatInputAmount, parseInputAmount } from '@/lib/utils/formatters';
 import { useInvoices } from '@/composables/useInvoices';
+import { useAuth } from '@/composables/useAuth';
+import { useProjects } from '@/composables/useProjects';
+import { useFileUpload } from '@/composables/useFileUpload';
 
 // Type definitions for staging received invoices
 interface StagedInvoice {
@@ -22,76 +24,61 @@ interface StagedInvoice {
 }
 
 const { createInvoice } = useInvoices();
+const { userProfile } = useAuth();
+const { projects, fetchProjects } = useProjects();
+const { fileInput, isUploading: isExtracting, uploadSingleFile, openFilePicker: triggerFileInput, clearFileInput } = useFileUpload({
+  storagePath: 'invoices/',
+  corporateId: computed(() => userProfile.value?.corporate_id),
+});
 
 const stagedInvoices = ref<StagedInvoice[]>([]);
 const isSubmitting = ref(false);
-const isExtracting = ref(false);
 const showSuccessModal = ref(false);
 const showErrorModal = ref(false);
 const showImageModal = ref(false);
 const selectedPreviewImageUrl = ref<string>('');
 const successCount = ref(0);
 
-const fileInput = ref<HTMLInputElement | null>(null);
-
-// Mock Projects
-const PROJECTS = [
-  { id: '', name: '指定なし (部門費)' },
-  { id: 'proj-1', name: '社内基幹システムリプレイス' },
-  { id: 'proj-2', name: '〇〇株式会社様 Webサイト制作' }
-];
+onMounted(fetchProjects);
 
 // Handle actual file selection and upload
 const handleFileSelect = async (event: Event) => {
   const target = event.target as HTMLInputElement;
   if (!target.files?.length) return;
 
-  isExtracting.value = true;
   const files = Array.from(target.files);
-  
-  try {
-    const newInvoices: StagedInvoice[] = [];
-    
-    for (const file of files) {
-      // 1. Upload to Firebase Storage
-      const timestamp = Date.now();
-      const storagePath = `invoices/corp_123/${timestamp}_${file.name}`;
-      const url = await uploadFile(file, storagePath);
-      
-      // 2. Mock 'Extraction' logic
-      const amount = Math.floor(Math.random() * 500000) + 10000;
-      const issueDateObj = new Date();
-      const issueDate = issueDateObj.toISOString().split('T')[0];
-      const dueDateObj = new Date(issueDateObj);
-      dueDateObj.setMonth(dueDateObj.getMonth() + 1);
-      const dueDate = dueDateObj.toISOString().split('T')[0];
-      
-      newInvoices.push({
-        id: crypto.randomUUID(),
-        selected: true,
-        issueDate,
-        dueDate,
-        amount,
-        taxRate: 10,
-        issuer: file.name.split('.')[0],
-        status: 'new',
-        fileUrl: url,
-        fileName: file.name
-      });
-    }
-    
-    stagedInvoices.value.push(...newInvoices);
-  } catch (err) {
-    console.error('Upload failed', err);
-    alert('ファイルのアップロードに失敗しました。');
-  } finally {
-    isExtracting.value = false;
-    if (fileInput.value) fileInput.value.value = '';
-  }
-};
+  const newInvoices: StagedInvoice[] = [];
 
-const triggerFileInput = () => {
-  fileInput.value?.click();
+  for (const file of files) {
+    const url = await uploadSingleFile(file);
+    if (!url) {
+      console.error('Upload failed for', file.name);
+      alert('ファイルのアップロードに失敗しました。');
+      break;
+    }
+    // TODO: OCR/AI extraction will populate these fields
+    const issueDateObj = new Date();
+    const issueDate = issueDateObj.toISOString().split('T')[0];
+    const dueDateObj = new Date(issueDateObj);
+    dueDateObj.setMonth(dueDateObj.getMonth() + 1);
+    const dueDate = dueDateObj.toISOString().split('T')[0];
+
+    newInvoices.push({
+      id: crypto.randomUUID(),
+      selected: true,
+      issueDate,
+      dueDate,
+      amount: 0,
+      taxRate: 10,
+      issuer: file.name.split('.')[0],
+      status: 'new',
+      fileUrl: url,
+      fileName: file.name,
+    });
+  }
+
+  stagedInvoices.value.push(...newInvoices);
+  clearFileInput();
 };
 
 // Selection logic
@@ -112,9 +99,6 @@ const removeInvoice = (id: string) => {
 const previewInvoice = (invoice: StagedInvoice) => {
   if (invoice.fileUrl) {
     selectedPreviewImageUrl.value = invoice.fileUrl;
-    showImageModal.value = true;
-  } else {
-    selectedPreviewImageUrl.value = 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80';
     showImageModal.value = true;
   }
 };
@@ -140,7 +124,7 @@ const submitSelected = async () => {
         document_type: 'received',
         invoice_number: `REC-${Date.now().toString().slice(-6)}`, // Generated number for received doc
         client_name: inv.issuer,
-        recipient_email: 'finance@example.com', // Placeholder
+        recipient_email: '', // TODO: populate from company settings or client record
         issue_date: inv.issueDate,
         due_date: inv.dueDate,
         subtotal: Math.round(inv.amount / 1.1),
@@ -168,19 +152,6 @@ const submitSelected = async () => {
   } finally {
     isSubmitting.value = false;
   }
-};
-
-// Number formatting for amount input
-const formatInputAmount = (val: number | string) => {
-  if (val === null || val === undefined || val === '') return '';
-  const numStr = val.toString().replace(/[^\d]/g, '');
-  if (!numStr) return '';
-  return parseInt(numStr, 10).toLocaleString('ja-JP');
-};
-
-const parseInputAmount = (val: string) => {
-  const parsed = parseInt(val.replace(/[^\d]/g, ''), 10);
-  return isNaN(parsed) ? 0 : parsed;
 };
 
 const handleAmountInput = (invoice: StagedInvoice, event: Event) => {
@@ -323,7 +294,8 @@ const handleAmountInput = (invoice: StagedInvoice, event: Event) => {
               </td>
               <td class="py-4 px-4">
                 <select v-model="invoice.projectId" class="bg-transparent border border-transparent hover:border-gray-300 focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-2 py-1 w-full transition-colors truncate pr-6 appearance-none shadow-none" style="background-image: url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3E%3Cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'m6 8 4 4 4-4\'/%3E%3C/svg%3E'); background-position: right 0.25rem center; background-size: 1.2em 1.2em; background-repeat: no-repeat;">
-                  <option v-for="proj in PROJECTS" :key="proj.id" :value="proj.id">{{ proj.name }}</option>
+                  <option value="">指定なし (部門費)</option>
+                  <option v-for="proj in projects" :key="proj.id" :value="proj.id">{{ proj.name }}</option>
                 </select>
               </td>
               <td class="py-4 px-4 text-center">

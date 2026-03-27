@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted } from 'vue';
 import { Plus, Edit2, Trash2, CreditCard, Star, Loader2 } from 'lucide-vue-next';
 import { useBankAccounts, type BankAccount } from '@/composables/useBankAccounts';
 

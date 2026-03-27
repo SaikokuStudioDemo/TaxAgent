@@ -31,6 +31,14 @@ class ApprovalRuleCreate(BaseModel):
     active: bool = True
     project_id: Optional[str] = None  # for project-specific rules
 
+class ApprovalRuleUpdate(BaseModel):
+    name: Optional[str] = None
+    applies_to: Optional[List[Literal["receipt", "received_invoice", "issued_invoice", "project"]]] = None
+    conditions: Optional[List[ApprovalCondition]] = None
+    steps: Optional[List[ApprovalStep]] = None
+    active: Optional[bool] = None
+    project_id: Optional[str] = None
+
 class ApprovalRuleInDB(ApprovalRuleCreate):
     id: Optional[str] = Field(None, alias="_id")
     corporate_id: str
@@ -45,7 +53,7 @@ class ApprovalEventCreate(BaseModel):
     document_type: Literal["receipt", "invoice", "received_invoice", "issued_invoice"]
     document_id: str
     step: int
-    approver_id: str
+    approver_id: str = ""  # Overridden by ctx.user_id on the server
     action: Literal["approved", "rejected", "returned"]
     comment: Optional[str] = None
     added_steps: Optional[List[AddedApprovalStep]] = None

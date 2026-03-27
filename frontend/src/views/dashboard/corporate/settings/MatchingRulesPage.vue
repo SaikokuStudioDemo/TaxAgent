@@ -1,43 +1,26 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { 
-    Plus, 
-    Search, 
-    Edit, 
-    Trash2, 
-    Save, 
+import { ref, computed, onMounted } from 'vue';
+import {
+    Plus,
+    Search,
+    Edit,
+    Trash2,
+    Save,
     X,
     ArrowRightLeft
 } from 'lucide-vue-next';
+import { useMatchingRules, type MatchingRule } from '@/composables/useMatchingRules';
 
-interface MatchingRule {
-    id: string;
-    targetField: string;     // 判定対象: 振込依頼人名, 入金金額など
-    conditionType: string;   // 条件: 完全一致, 部分一致, 許容誤差範囲内等
-    conditionValue: string;  // 値: (例) スペース無視, カタカナ変換, 500
-    action: string;          // アクション: 自動消込, 確認待ち, 特定顧客への紐付け
-    isActive: boolean;
-}
-
-const rules = ref<MatchingRule[]>([
-    {
-        id: 'R-001',
-        targetField: '取引先グループ化（親会社等への名寄せ）',
-        conditionType: '請求書自動合算',
-        conditionValue: 'A社およびB社からの請求は、親会社C社名義からの振込として判定',
-        action: '複数請求書を束ねて一括消込候補に提示',
-        isActive: true
-    }
-]);
+const { rules, isLoading, fetchRules, createRule, updateRule, deleteRule } = useMatchingRules();
 
 const searchQuery = ref('');
 
 const filteredRules = computed(() => {
     if (!searchQuery.value) return rules.value;
     const lowerQuery = searchQuery.value.toLowerCase();
-    return rules.value.filter(r => 
-        r.targetField.toLowerCase().includes(lowerQuery) || 
-        r.conditionType.toLowerCase().includes(lowerQuery) ||
+    return rules.value.filter(r =>
+        r.target_field.toLowerCase().includes(lowerQuery) ||
+        r.condition_type.toLowerCase().includes(lowerQuery) ||
         r.action.toLowerCase().includes(lowerQuery)
     );
 });
@@ -45,13 +28,18 @@ const filteredRules = computed(() => {
 // モーダル用ステート
 const showModal = ref(false);
 const isEditing = ref(false);
-const editingRule = ref<MatchingRule>({
-    id: '', targetField: '取引先グループ化（親会社等への名寄せ）', conditionType: '請求書自動合算', conditionValue: '', action: '複数請求書を束ねて一括消込候補に提示', isActive: true
+const isSaving = ref(false);
+const editingRule = ref<Omit<MatchingRule, 'id' | 'created_at'> & { id: string }>({
+    id: '', name: '', target_field: '取引先グループ化（親会社等への名寄せ）', condition_type: '請求書自動合算', condition_value: '', action: '複数請求書を束ねて一括消込候補に提示', is_active: true
+});
+
+onMounted(() => {
+    fetchRules();
 });
 
 const openNewModal = () => {
     editingRule.value = {
-        id: '', targetField: '取引先グループ化（親会社等への名寄せ）', conditionType: '請求書自動合算', conditionValue: '', action: '複数請求書を束ねて一括消込候補に提示', isActive: true
+        id: '', name: '', target_field: '取引先グループ化（親会社等への名寄せ）', condition_type: '請求書自動合算', condition_value: '', action: '複数請求書を束ねて一括消込候補に提示', is_active: true
     };
     isEditing.value = false;
     showModal.value = true;
@@ -63,25 +51,27 @@ const editRule = (rule: MatchingRule) => {
     showModal.value = true;
 };
 
-const deleteRule = (id: string) => {
-    if (confirm('このルールを削除してもよろしいですか？')) {
-        rules.value = rules.value.filter(r => r.id !== id);
-    }
+const handleDeleteRule = async (id: string) => {
+    if (!confirm('このルールを削除してもよろしいですか？')) return;
+    const success = await deleteRule(id);
+    if (!success) alert('削除に失敗しました。');
 };
 
-const saveRule = () => {
-    if (isEditing.value) {
-        const index = rules.value.findIndex(r => r.id === editingRule.value.id);
-        if (index !== -1) {
-            rules.value[index] = { ...editingRule.value };
+const saveRule = async () => {
+    isSaving.value = true;
+    try {
+        const { id, ...data } = editingRule.value;
+        if (isEditing.value) {
+            await updateRule(id, data);
+        } else {
+            await createRule(data);
         }
-    } else {
-        rules.value.push({
-            ...editingRule.value,
-            id: `R-00${rules.value.length + 1}`
-        });
+        showModal.value = false;
+    } catch {
+        alert('保存に失敗しました。');
+    } finally {
+        isSaving.value = false;
     }
-    showModal.value = false;
 };
 
 </script>
@@ -110,10 +100,10 @@ const saveRule = () => {
         <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-4 mb-6">
             <div class="relative flex-1">
                 <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input 
+                <input
                     v-model="searchQuery"
-                    type="text" 
-                    placeholder="ルール名、対象項目、アクションで検索..." 
+                    type="text"
+                    placeholder="ルール名、対象項目、アクションで検索..."
                     class="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
                 />
             </div>
@@ -134,23 +124,27 @@ const saveRule = () => {
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100">
+                        <tr v-if="isLoading">
+                            <td colspan="6" class="p-8 text-center text-slate-500 text-sm">読み込み中...</td>
+                        </tr>
+                        <template v-else>
                         <tr v-for="rule in filteredRules" :key="rule.id" class="hover:bg-slate-50 transition-colors group">
                             <td class="p-4">
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold" 
-                                    :class="rule.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'">
-                                    {{ rule.isActive ? '有効' : '無効' }}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold"
+                                    :class="rule.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'">
+                                    {{ rule.is_active ? '有効' : '無効' }}
                                 </span>
                             </td>
                             <td class="p-4">
-                                <span class="text-sm font-bold text-slate-800">{{ rule.targetField }}</span>
+                                <span class="text-sm font-bold text-slate-800">{{ rule.target_field }}</span>
                             </td>
                             <td class="p-4">
                                 <span class="inline-flex items-center px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 font-medium text-xs border border-blue-100">
-                                    {{ rule.conditionType }}
+                                    {{ rule.condition_type }}
                                 </span>
                             </td>
                             <td class="p-4">
-                                <span class="text-sm text-slate-600">{{ rule.conditionValue }}</span>
+                                <span class="text-sm text-slate-600">{{ rule.condition_value }}</span>
                             </td>
                             <td class="p-4">
                                 <span class="text-sm font-medium text-slate-700">{{ rule.action }}</span>
@@ -160,7 +154,7 @@ const saveRule = () => {
                                     <button @click="editRule(rule)" class="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/10 rounded transition-colors" title="編集">
                                         <Edit class="w-4 h-4" />
                                     </button>
-                                    <button @click="deleteRule(rule.id)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="削除">
+                                    <button @click="handleDeleteRule(rule.id)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="削除">
                                         <Trash2 class="w-4 h-4" />
                                     </button>
                                 </div>
@@ -171,6 +165,7 @@ const saveRule = () => {
                                 設定されているルールがありません。
                             </td>
                         </tr>
+                        </template>
                     </tbody>
                 </table>
             </div>
@@ -179,7 +174,7 @@ const saveRule = () => {
         <!-- Rule Editor Modal -->
         <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="showModal = false"></div>
-            
+
             <div class="bg-white rounded-xl shadow-xl w-full max-w-lg relative z-10 flex flex-col overflow-hidden max-h-[90vh]">
                 <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
                     <h2 class="text-lg font-bold text-slate-800">
@@ -189,11 +184,11 @@ const saveRule = () => {
                         <X class="w-5 h-5" />
                     </button>
                 </div>
-                
+
                 <div class="p-6 overflow-y-auto space-y-4">
                     <div class="flex items-center gap-3 mb-2">
                         <label class="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" v-model="editingRule.isActive" class="sr-only peer">
+                            <input type="checkbox" v-model="editingRule.is_active" class="sr-only peer">
                             <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
                             <span class="ml-3 text-sm font-medium text-slate-700">ルールを有効化</span>
                         </label>
@@ -201,7 +196,7 @@ const saveRule = () => {
 
                     <div>
                         <label class="block text-xs font-bold text-slate-700 mb-1.5">対象ルール種別</label>
-                        <select v-model="editingRule.targetField" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600">
+                        <select v-model="editingRule.target_field" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600">
                             <option>取引先グループ化（親会社等への名寄せ）</option>
                             <option>特殊な振込先名義の紐付け</option>
                             <option>その他 AIへの個別指示</option>
@@ -210,7 +205,7 @@ const saveRule = () => {
 
                     <div>
                         <label class="block text-xs font-bold text-slate-700 mb-1.5">マッチング条件（AIへの指示内容）</label>
-                        <select v-model="editingRule.conditionType" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600">
+                        <select v-model="editingRule.condition_type" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600">
                             <option>請求書自動合算</option>
                             <option>特定キーワードに基づく強制マッチング</option>
                             <option>除外キーワード指定</option>
@@ -219,7 +214,7 @@ const saveRule = () => {
 
                     <div>
                         <label class="block text-xs font-bold text-slate-700 mb-1.5">条件の具体例・詳細記述</label>
-                        <input type="text" v-model="editingRule.conditionValue" placeholder="例: A社とB社の請求はいつも親会社のC社名義で振り込まれる" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600">
+                        <input type="text" v-model="editingRule.condition_value" placeholder="例: A社とB社の請求はいつも親会社のC社名義で振り込まれる" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600">
                         <p class="text-[10px] text-slate-500 mt-1">※AIが標準で判断できない、貴社特有の振込・名寄せルールを具体的に文章で指示してください。</p>
                     </div>
 
@@ -232,13 +227,13 @@ const saveRule = () => {
                         </select>
                     </div>
                 </div>
-                
+
                 <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
                     <button @click="showModal = false" class="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
                         キャンセル
                     </button>
-                    <button @click="saveRule" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2">
-                        <Save class="w-4 h-4" /> 保存する
+                    <button @click="saveRule" :disabled="isSaving" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2">
+                        <Save class="w-4 h-4" /> {{ isSaving ? '保存中...' : '保存する' }}
                     </button>
                 </div>
             </div>

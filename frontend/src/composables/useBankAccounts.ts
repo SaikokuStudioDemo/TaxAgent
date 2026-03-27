@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { api, API_BASE } from '@/lib/api';
+import { api } from '@/lib/api';
 
 export interface BankAccount {
   id: string;

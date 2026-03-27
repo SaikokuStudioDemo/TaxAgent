@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 from datetime import datetime
-from bson import ObjectId
 
 from app.api.helpers import (
     serialize_doc as _serialize,
@@ -9,6 +8,9 @@ from app.api.helpers import (
     CorporateContext,
     parse_oid,
     get_doc_or_404,
+    build_list_query,
+    enrich_with_approval_history,
+    build_name_map,
 )
 from app.models.transaction import ReceiptCreate
 import logging
@@ -105,56 +107,21 @@ async def list_receipts(
     submitted_by: Optional[str] = None,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    query: dict = {"corporate_id": ctx.corporate_id}
-    if approval_status:
-        query["approval_status"] = approval_status
-    if fiscal_period:
-        query["fiscal_period"] = fiscal_period
+    query = build_list_query(ctx.corporate_id, approval_status=approval_status, fiscal_period=fiscal_period)
     if submitted_by == "me":
         query["submitted_by"] = ctx.user_id
 
     cursor = ctx.db["receipts"].find(query).sort("created_at", -1)
     docs = await cursor.to_list(length=500)
-    return [_serialize(doc) for doc in docs]
+    user_ids = {doc.get("submitted_by") for doc in docs if doc.get("submitted_by")}
+    name_map = await build_name_map(ctx.db, user_ids)
+    result = []
+    for doc in docs:
+        s = _serialize(doc)
+        s["submitter_name"] = name_map.get(s.get("submitted_by", ""), "不明")
+        result.append(s)
+    return result
 
-
-@router.get("/pending-for-me", summary="自分が承認すべき領収書一覧を取得する")
-async def list_pending_for_me(
-    ctx: CorporateContext = Depends(get_corporate_context),
-):
-    """
-    Returns receipts where the current user is the expected approver
-    at the current_step, based on their role and the applied approval_rule.
-    """
-    # Get current user's role
-    employee = await ctx.db["employees"].find_one({"firebase_uid": ctx.firebase_uid})
-    user_role = employee.get("role", "staff") if employee else "admin"
-
-    # Get all pending receipts for this corporate
-    cursor = ctx.db["receipts"].find({
-        "corporate_id": ctx.corporate_id,
-        "approval_status": "pending_approval",
-    })
-    all_pending = await cursor.to_list(length=500)
-
-    my_pending = []
-    for receipt in all_pending:
-        rule_id = receipt.get("approval_rule_id")
-        current_step = receipt.get("current_step", 1)
-        if not rule_id:
-            continue
-        try:
-            rule = await ctx.db["approval_rules"].find_one({"_id": ObjectId(rule_id)})
-        except Exception:
-            continue
-        if not rule:
-            continue
-        steps = rule.get("steps", [])
-        matching_step = next((s for s in steps if s.get("step") == current_step), None)
-        if matching_step and matching_step.get("role") == user_role:
-            my_pending.append(receipt)
-
-    return [_serialize(r) for r in my_pending]
 
 
 @router.get("/{receipt_id}", summary="領収書詳細を取得する")
@@ -164,15 +131,8 @@ async def get_receipt(
 ):
     doc = await get_doc_or_404(ctx.db, "receipts", receipt_id, ctx.corporate_id, "receipt")
 
-    # Enrich with approval history
-    events_cursor = ctx.db["approval_events"].find(
-        {"document_id": receipt_id, "document_type": "receipt"}
-    ).sort("timestamp", 1)
-    events = await events_cursor.to_list(length=100)
-
     result = _serialize(doc)
-    result["approval_history"] = [_serialize(e) for e in events]
-    return result
+    return await enrich_with_approval_history(ctx.db, result, receipt_id, "receipt")
 
 
 @router.patch("/{receipt_id}", summary="領収書を更新する")

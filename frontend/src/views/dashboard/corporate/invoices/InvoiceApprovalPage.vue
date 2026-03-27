@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import {
   CheckCircle,
   XCircle,
@@ -11,100 +11,62 @@ import {
   FolderKanban,
   Building2
 } from 'lucide-vue-next';
-import { useInvoices } from '@/composables/useInvoices';
+import { useInvoices, type Invoice } from '@/composables/useInvoices';
+import { useDocumentApproval } from '@/composables/useDocumentApproval';
 import InvoiceDetailModal from '@/components/invoices/InvoiceDetailModal.vue';
 import { buildApprovalHistory } from '@/composables/useApprovalHistory';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
-import type { InvoiceItem } from '@/lib/types/approvalTypes';
-
 
 // --- STATE ---
-const { invoices: apiInvoices, fetchInvoices } = useInvoices();
+const { invoices, pendingForMe, fetchInvoices, fetchPendingForMe } = useInvoices();
+// 受領/発行の切り替えは請求書固有のロジックなのでページに残す
 const activeDirection = ref<'received' | 'issued'>('issued');
-const mockInvoices = ref<InvoiceItem[]>([]);
-
-const mapApiInvoice = (inv: any): InvoiceItem => {
-  return {
-    id: inv.id ?? inv._id,
-    vendorName: inv.vendor_name ?? inv.client_name ?? '不明',
-    title: inv.title ?? inv.description ?? '請求書',
-    amount: inv.total_amount ?? inv.amount ?? 0,
-    issuedDate: inv.issue_date ?? '',
-    dueDate: inv.due_date ?? '',
-    category: inv.category ?? '未分類',
-    paymentMethod: inv.payment_method ?? '請求書払い',
-    memo: inv.memo ?? '',
-    status: inv.approval_status === 'approved' || inv.approval_status === 'auto_approved' ? 'approved' : inv.approval_status === 'rejected' ? 'rejected' : 'pending',
-    isAutoApproved: inv.approval_status === 'auto_approved',
-    currentStepIndex: inv.current_step ? inv.current_step - 1 : 0,
-    approvalHistory: buildApprovalHistory(inv.approval_steps, inv.approval_history, inv.approval_status),
-    imageUrl: (inv.attachments && inv.attachments.length > 0) ? inv.attachments[0] : (inv.image_url ?? ''),
-  };
-};
 
 const loadData = async () => {
     const requestedDirection = activeDirection.value;
-    await fetchInvoices({ document_type: requestedDirection });
+    await Promise.all([
+        fetchInvoices({ document_type: requestedDirection }),
+        fetchPendingForMe(),
+    ]);
     // Prevent race condition if user rapid-clicked tabs
     if (activeDirection.value !== requestedDirection) return;
-
-    // 承認フロー対象のみ：pending_approval / 承認済（手動・自動） / 差戻し
-    const approvalRelevant = (apiInvoices.value as any[]).filter(inv =>
-        inv.approval_status === 'pending_approval' ||
-        inv.approval_status === 'approved' ||
-        inv.approval_status === 'auto_approved' ||
-        inv.approval_status === 'rejected'
-    );
-    mockInvoices.value = approvalRelevant.map(mapApiInvoice);
 };
 
 onMounted(loadData);
-
 watch(activeDirection, loadData);
 
-// --- TAB STATE ---
-type TabView = 'pending' | 'pending_all' | 'approved' | 'rejected';
-const activeTab = ref<TabView>('pending');
-
-const selectedInvoice = ref<InvoiceItem | null>(null);
-const isDetailModalOpen = ref(false);
-
-// Computed Filters
-const pendingInvoices = computed(() => mockInvoices.value.filter(i => i.status === 'pending'));
-const pendingAllInvoices = computed(() => mockInvoices.value.filter(i => i.status === 'pending')); 
-const approvedInvoices = computed(() => mockInvoices.value.filter(i => i.status === 'approved'));
-const rejectedInvoices = computed(() => mockInvoices.value.filter(i => i.status === 'rejected'));
-
-const displayedInvoices = computed(() => {
-  switch (activeTab.value) {
-    case 'pending': return pendingInvoices.value;
-    case 'pending_all': return pendingAllInvoices.value;
-    case 'approved': return approvedInvoices.value;
-    case 'rejected': return rejectedInvoices.value;
-    default: return [];
-  }
+const {
+  activeTab,
+  searchQuery,
+  pendingList: pendingInvoices,
+  pendingAllList: pendingAllInvoices,
+  approvedList: approvedInvoices,
+  displayedItems: displayedInvoices,
+  metrics,
+  selectedItem: selectedInvoice,
+  isDetailModalOpen,
+  openDetail,
+  closeDetail,
+  handleActionCompleted,
+} = useDocumentApproval<Invoice>({
+  fetchFn: loadData,
+  items: invoices,
+  pendingItems: pendingForMe,
+  getApprovalStatus: i => i.approval_status,
+  getAmount: i => i.total_amount,
+  urgentThreshold: 100000,
+  getSearchableText: i => [i.client_name, i.vendor_name, i.invoice_number, i.total_amount?.toString(), i.creator_name].filter(Boolean).join(' '),
 });
 
-// Calculate metrics
-const metrics = computed(() => ({
-  pendingCount: pendingInvoices.value.length,
-  urgentCount: pendingInvoices.value.filter(i => i.amount >= 100000).length
-}));
+// 承認ステップ表示用ヘルパー（請求書固有）
+const getApprovalHistory = (inv: Invoice) =>
+    buildApprovalHistory(inv.approval_steps ?? [], inv.approval_history ?? [], inv.approval_status);
 
-// --- ACTIONS ---
-const openDetail = (invoice: InvoiceItem) => {
-  selectedInvoice.value = invoice;
-  isDetailModalOpen.value = true;
-};
-
-const closeDetail = () => {
-  isDetailModalOpen.value = false;
-  setTimeout(() => { selectedInvoice.value = null; }, 300);
-};
-
-const handleActionCompleted = async () => {
-  closeDetail();
-  await loadData();
+const handleStepAdded = (updated: Invoice) => {
+  const idx = invoices.value.findIndex(i => i.id === updated.id);
+  if (idx !== -1) invoices.value[idx] = { ...invoices.value[idx], extra_approval_steps: updated.extra_approval_steps };
+  const pidx = pendingForMe.value.findIndex(i => i.id === updated.id);
+  if (pidx !== -1) pendingForMe.value[pidx] = { ...pendingForMe.value[pidx], extra_approval_steps: updated.extra_approval_steps };
 };
 
 </script>
@@ -127,7 +89,7 @@ const handleActionCompleted = async () => {
 
     <!-- Direction Toggle (Full Width) -->
     <div class="flex bg-gray-200/50 p-1.5 rounded-xl mb-6 shadow-inner border border-gray-200/50">
-        <button 
+        <button
           @click="activeDirection = 'received'"
           class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
           :class="activeDirection === 'received' ? 'bg-white text-blue-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
@@ -135,7 +97,7 @@ const handleActionCompleted = async () => {
           <Clock class="w-4 h-4" />
           受領請求書
         </button>
-        <button 
+        <button
           @click="activeDirection = 'issued'"
           class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
           :class="activeDirection === 'issued' ? 'bg-white text-blue-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
@@ -187,29 +149,29 @@ const handleActionCompleted = async () => {
 
     <!-- Status Tabs (Full Width) -->
     <div class="flex bg-gray-200/50 p-1.5 rounded-xl mb-6 shadow-inner border border-gray-200/50">
-        <button 
-          @click="activeTab = 'pending'" 
+        <button
+          @click="activeTab = 'pending'"
           class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
           :class="activeTab === 'pending' ? 'bg-white text-blue-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
         >
           あなたの承認待ち <span v-if="pendingInvoices.length" class="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0.5 rounded-full ml-1">{{ pendingInvoices.length }}</span>
         </button>
-        <button 
-          @click="activeTab = 'pending_all'" 
+        <button
+          @click="activeTab = 'pending_all'"
           class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
           :class="activeTab === 'pending_all' ? 'bg-white text-purple-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
         >
           全社未承認 <span v-if="pendingAllInvoices.length" class="bg-purple-100 text-purple-700 text-[10px] px-1.5 py-0.5 rounded-full ml-1">{{ pendingAllInvoices.length }}</span>
         </button>
-        <button 
-          @click="activeTab = 'approved'" 
+        <button
+          @click="activeTab = 'approved'"
           class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
           :class="activeTab === 'approved' ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
         >
           承認済履歴
         </button>
-        <button 
-          @click="activeTab = 'rejected'" 
+        <button
+          @click="activeTab = 'rejected'"
           class="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
           :class="activeTab === 'rejected' ? 'bg-white text-rose-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900'"
         >
@@ -222,7 +184,7 @@ const handleActionCompleted = async () => {
         <div class="flex items-center gap-3 w-full">
           <div class="relative flex-1">
             <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input type="text" placeholder="名前や金額・発行元で検索..." class="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 bg-white shadow-sm transition-all" />
+            <input v-model="searchQuery" type="text" placeholder="名前や金額・発行元で検索..." class="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 bg-white shadow-sm transition-all" />
           </div>
           <button class="bg-white border border-gray-200 text-gray-700 px-4 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm shrink-0 flex items-center gap-2 text-sm font-medium">
             <Filter class="w-4 h-4" /> フィルター
@@ -235,7 +197,7 @@ const handleActionCompleted = async () => {
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50/80">
                     <tr>
-                        <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">
+                        <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">
                             {{ activeDirection === 'issued' ? '発行日 / 支払期日' : '受領日 / 支払期限' }}
                         </th>
                         <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -243,13 +205,14 @@ const handleActionCompleted = async () => {
                         </th>
                         <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">件名</th>
                         <th scope="col" class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">金額 (税込)</th>
+                        <th scope="col" class="px-6 py-3.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">書類種別</th>
                         <th scope="col" class="px-6 py-3.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-40 sticky right-20 bg-gray-50/90 backdrop-blur z-10 shadow-[-4px_0_10px_-4px_rgba(0,0,0,0.05)]">ステータス</th>
                         <th scope="col" class="px-6 py-3.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20 sticky right-0 bg-gray-50/90 backdrop-blur z-10 shadow-[-4px_0_10px_-4px_rgba(0,0,0,0.1)]">詳細</th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200">
                     <tr v-if="displayedInvoices.length === 0">
-                        <td colspan="6" class="px-6 py-16 text-center text-gray-500">
+                        <td colspan="7" class="px-6 py-16 text-center text-gray-500">
                             <div class="flex flex-col items-center justify-center">
                                 <CheckCircle v-if="activeTab.startsWith('pending')" class="h-12 w-12 text-emerald-300 mb-3" />
                                 <FolderKanban v-else class="h-12 w-12 text-gray-300 mb-3" />
@@ -258,29 +221,29 @@ const handleActionCompleted = async () => {
                             </div>
                         </td>
                     </tr>
-                    <tr 
-                        v-for="invoice in displayedInvoices" 
+                    <tr
+                        v-for="invoice in displayedInvoices"
                         :key="invoice.id"
                         class="hover:bg-blue-50/50 transition-colors cursor-pointer group"
                         @click="openDetail(invoice)"
                     >
                         <!-- Date -->
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">
-                           {{ invoice.issuedDate }}
-                           <div class="text-[11px] text-gray-400 font-normal mt-1 bg-red-50 text-red-600 rounded px-1.5 py-0.5 inline-block">期日: {{ invoice.dueDate }}</div>
+                        <td class="px-6 py-4 align-middle">
+                            <div class="text-sm text-gray-900 font-medium whitespace-nowrap">{{ invoice.issue_date }}</div>
+                            <div class="text-[11px] font-normal mt-1 bg-red-50 text-red-600 rounded px-1.5 py-0.5 inline-block whitespace-nowrap">期日: {{ invoice.due_date }}</div>
                         </td>
                         <!-- Vendor -->
                         <td class="px-6 py-4">
                             <div class="flex items-center">
                                 <div class="h-9 w-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold mr-3 shrink-0 ring-1 ring-slate-200">
-                                    {{ invoice.vendorName.charAt(0) }}
+                                    {{ (invoice.client_name ?? '?').charAt(0) }}
                                 </div>
                                 <div class="min-w-0">
-                                    <p class="text-sm font-medium text-gray-900 truncate">{{ invoice.vendorName }}</p>
+                                    <p class="text-sm font-medium text-gray-900 truncate">{{ invoice.client_name }}</p>
                                     <div class="flex items-center gap-1.5 mt-0.5 text-xs text-gray-500">
                                         <Building2 class="h-3 w-3" />
                                         <span class="truncate max-w-[120px]">
-                                            {{ invoice.id }}
+                                            {{ invoice.creator_name ?? '不明' }}
                                         </span>
                                     </div>
                                 </div>
@@ -288,25 +251,34 @@ const handleActionCompleted = async () => {
                         </td>
                         <!-- Content -->
                         <td class="px-6 py-4 min-w-[200px]">
-                            <p class="text-sm font-semibold tracking-wide text-gray-900 truncate">{{ invoice.title }}</p>
-                            <p class="text-xs text-gray-500 mt-0.5 truncate">{{ invoice.category }} / {{ invoice.memo }}</p>
+                            <p class="text-sm font-semibold tracking-wide text-gray-900 truncate">{{ invoice.invoice_number ?? invoice.client_name ?? '請求書' }}</p>
+                            <p class="text-xs text-gray-500 mt-0.5 truncate">{{ invoice.line_items?.[0]?.category ?? '未分類' }} / {{ invoice.memo ?? '' }}</p>
                         </td>
                         <!-- Amount -->
                         <td class="px-6 py-4 whitespace-nowrap text-right">
-                           <p class="text-base font-bold text-gray-900">¥{{ formatAmount(invoice.amount) }}</p>
-                           <p class="text-[11px] text-gray-500 mt-0.5">{{ invoice.paymentMethod }}</p>
+                           <p class="text-base font-bold text-gray-900">¥{{ formatAmount(invoice.total_amount) }}</p>
+                           <p class="text-[11px] text-gray-500 mt-0.5">{{ invoice.payment_method ?? '請求書払い' }}</p>
+                        </td>
+                        <!-- 書類種別 -->
+                        <td class="px-6 py-4 whitespace-nowrap text-center">
+                            <span v-if="invoice.document_type === 'issued'" class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                発行請求書
+                            </span>
+                            <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-orange-50 text-orange-700 border border-orange-100">
+                                受領請求書
+                            </span>
                         </td>
                         <!-- Status Badge -->
                         <td class="px-6 py-4 whitespace-nowrap text-center sticky right-20 bg-white/90 group-hover:bg-blue-50/90 transition-colors backdrop-blur z-10 shadow-[-4px_0_10px_-4px_rgba(0,0,0,0.05)]">
-                            <span v-if="invoice.status === 'pending'" class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+                            <span v-if="!['approved', 'auto_approved', 'rejected'].includes(invoice.approval_status)" class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-800 border border-blue-200">
                                 <Clock class="w-3.5 h-3.5 mr-1" />
-                                承認待ち ({{ invoice.currentStepIndex + 1 }}/{{ invoice.approvalHistory.length }})
+                                承認待ち ({{ invoice.current_step }}/{{ getApprovalHistory(invoice).length + (invoice.extra_approval_steps ?? []).length }})
                             </span>
-                            <span v-else-if="invoice.status === 'approved' && invoice.isAutoApproved" class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                            <span v-else-if="invoice.approval_status === 'auto_approved'" class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
                                 <CheckCircle class="w-3.5 h-3.5 mr-1" />
                                 自動承認済
                             </span>
-                            <span v-else-if="invoice.status === 'approved'" class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <span v-else-if="invoice.approval_status === 'approved'" class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
                                 <CheckCircle class="w-3.5 h-3.5 mr-1" />
                                 承認済
                             </span>
@@ -335,6 +307,7 @@ const handleActionCompleted = async () => {
         :document_type="activeDirection"
         @close="closeDetail"
         @action-completed="handleActionCompleted"
+        @step-added="handleStepAdded"
     />
   </div>
 </template>

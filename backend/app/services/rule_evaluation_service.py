@@ -76,6 +76,9 @@ async def evaluate_approval_rules(
         all_match = True
         for cond in conditions:
             field = cond.get("field", "")
+            # "always" means this rule applies unconditionally — skip evaluation
+            if field == "always":
+                continue
             operator = cond.get("operator", ">=")
             rule_val = cond.get("value")
             doc_val = document.get(field) or document.get("total_amount") if field == "amount" else document.get(field)

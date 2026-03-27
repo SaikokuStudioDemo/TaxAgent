@@ -15,3 +15,15 @@ export function formatCurrency(amount: number): string {
         currency: 'JPY',
     }).format(amount);
 }
+
+export function formatInputAmount(val: number | string): string {
+    if (val === null || val === undefined || val === '') return '';
+    const numStr = val.toString().replace(/[^\d]/g, '');
+    if (!numStr) return '';
+    return parseInt(numStr, 10).toLocaleString('ja-JP');
+}
+
+export function parseInputAmount(val: string): number {
+    const parsed = parseInt(val.replace(/[^\d]/g, ''), 10);
+    return isNaN(parsed) ? 0 : parsed;
+}

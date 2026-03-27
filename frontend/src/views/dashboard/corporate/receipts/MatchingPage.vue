@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
-import { 
-  FileText, 
-  CheckCircle, 
+import { ref, computed, onMounted, shallowRef } from 'vue';
+import {
+  FileText,
+  CheckCircle,
   Search,
   Upload,
   Link2,
@@ -10,269 +10,93 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-vue-next';
-import { useTransactions, type Transaction as ApiTransaction } from '@/composables/useTransactions';
-import { useReceipts } from '@/composables/useReceipts';
+import { useReceipts, type Receipt } from '@/composables/useReceipts';
+import { useDocumentMatching, type MatchableDocument } from '@/composables/useDocumentMatching';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
-// --- TYPES (keep for template compatibility) ---
-interface Transaction {
-  id: string;
-  date: string;
-  description: string;
-  amount: number;
-  type: 'card' | 'bank';
-  status: 'unmatched' | 'candidate' | 'matched';
-  matchedReceiptId?: string;
-}
+// --- TYPES ---
+interface MatchingEntry extends Receipt, MatchableDocument {}
 
-interface LineItem {
-  id: string;
-  description: string;
-  amount: number;
-  accountSubject: string;
-}
-
-interface MatchingReceipt {
-  id: string;
-  submitterName: string;
-  date: string;
-  issuer: string;
-  amount: number;
-  paymentMethod: string;
-  status: 'pending' | 'approved' | 'rejected';
-  matchStatus: 'unmatched' | 'candidate' | 'matched';
-  matchedTransactionId?: string;
-  lineItems?: LineItem[];
-}
-
-// --- COMPOSABLES ---
-const { transactions: apiTransactions, matches, fetchTransactions, fetchMatches, createMatch, deleteMatch } = useTransactions();
+// --- DATA SOURCE ---
 const { receipts: apiReceipts, fetchReceipts } = useReceipts();
+const receiptsMock = ref<MatchingEntry[]>([]);
 
-// --- LOCAL STATE (computed from API data) ---
-const transactions = ref<Transaction[]>([]);
-const receiptsMock = ref<MatchingReceipt[]>([]);
-
-const mapApiToTransaction = (t: ApiTransaction): Transaction => ({
-  id: t.id,
-  date: t.transaction_date,
-  description: t.description,
-  amount: t.amount,
-  type: t.source_type,
-  status: 'unmatched',
-  matchedReceiptId: undefined,
-});
-
-const mapApiToReceipt = (r: any): MatchingReceipt => ({
-  id: r.id ?? r._id,
-  submitterName: r.submitter_name ?? r.created_by ?? '不明',
-  date: r.date,
-  issuer: r.payee ?? r.issuer ?? '不明',
-  amount: r.amount,
-  paymentMethod: r.payment_method ?? '法人カード',
-  status: r.approval_status === 'approved' || r.approval_status === 'auto_approved' ? 'approved' : r.approval_status === 'rejected' ? 'rejected' : 'pending',
-  matchStatus: 'unmatched',
-  matchedTransactionId: undefined,
-  lineItems: r.line_items?.map((li: any) => ({
-    id: li.id ?? li._id ?? Math.random().toString(),
-    description: li.description,
-    amount: li.amount,
-    accountSubject: li.category ?? li.account_subject ?? '未分類',
-  })),
-});
-
-const applyMatches = () => {
-  // Reset all statuses first
-  transactions.value.forEach(t => { t.status = 'unmatched'; t.matchedReceiptId = undefined; });
-  receiptsMock.value.forEach(r => { r.matchStatus = 'unmatched'; r.matchedTransactionId = undefined; });
-
-  // Apply matches from API
-  matches.value.forEach((m: any) => {
-    const tid = m.bank_transaction_id;
-    const rid = m.document_id;
-    const t = transactions.value.find(tx => tx.id === tid);
-    const r = receiptsMock.value.find(rc => rc.id === rid);
-    if (t) { t.status = 'matched'; t.matchedReceiptId = rid; }
-    if (r) { r.matchStatus = 'matched'; r.matchedTransactionId = tid; }
-  });
-};
-
-const loadData = async () => {
-  await Promise.all([
-    fetchTransactions({}),
-    fetchReceipts({}),
-    fetchMatches(),
-  ]);
-  transactions.value = apiTransactions.value.map(mapApiToTransaction);
+const fetchAndMapReceipts = async () => {
+  await fetchReceipts({});
   receiptsMock.value = apiReceipts.value
     .filter(r => ['法人カード', '銀行振込', 'corporate_card', 'bank_transfer'].includes(r.payment_method))
-    .map(mapApiToReceipt);
-  applyMatches();
+    .map(r => ({ ...r, matched: false }));
 };
+
+// --- COMPOSABLE ---
+const {
+  rawTransactions,
+  activeTab,
+  documentSearch: receiptSearch,
+  transactionSearch,
+  selectedDocumentIds: selectedReceiptIds,
+  selectedTransactionIds,
+  selectedCandidateIds,
+  showConfirmMatch,
+  confirmMatchResolve,
+  confirmMatchAmount,
+  unmatchedTransactions,
+  unmatchedDocuments: baseUnmatchedReceipts,
+  selectedTransactionSum,
+  selectedDocumentSum: selectedReceiptSum,
+  matchingDifference,
+  suggestedDocumentIds: suggestedReceiptIds,
+  candidatePairs: baseCandidatePairs,
+  matchedPairs: baseMatchedPairs,
+  matchedCount,
+  loadData,
+  selectTransaction,
+  selectDocument: selectReceipt,
+  toggleCandidate,
+  handleMatch,
+  handleBulkMatch,
+  revertToUnmatched,
+} = useDocumentMatching({
+  fetchDocumentsFn: fetchAndMapReceipts,
+  documents: receiptsMock,
+  matchType: 'receipt',
+  getAmount: r => r.amount,
+  getDescription: r => `${r.payee ?? ''} ${r.submitter_name ?? r.submitted_by ?? ''} ${r.amount}`,
+  transactionTypeFilter: shallowRef('debit' as const),
+});
 
 onMounted(loadData);
 
-// --- STATE ---
-const activeTab = ref<'unmatched' | 'candidate' | 'matched'>('unmatched');
-const selectedTransactionIds = ref<string[]>([]);
-const selectedReceiptIds = ref<string[]>([]);
-const selectedCandidateIds = ref<string[]>([]);
+// --- PAGE-LOCAL STATE ---
+// 展開（アコーディオン）はUI固有のためページに残す
 const expandedReceiptIds = ref<string[]>([]);
 
-// Custom Confirm Modal State
-const showConfirmMatch = ref(false);
-const confirmMatchResolve = ref<((value: boolean) => void) | null>(null);
-const confirmMatchAmount = ref(0);
+// --- LOCAL COMPUTED ---
 
-// Search & Filter
-const transactionSearch = ref('');
-const receiptSearch = ref('');
-
-// --- COMPUTED ---
-const unmatchedTransactions = computed(() => {
-  return transactions.value
-    .filter(t => t.status === 'unmatched')
-    .filter(t => t.description.includes(transactionSearch.value) || t.amount.toString().includes(transactionSearch.value));
-});
-
+// 金額が一致する領収書を先頭に並び替え（receipt 固有の UX）
 const unmatchedReceipts = computed(() => {
-  let list = receiptsMock.value
-    .filter(r => r.matchStatus === 'unmatched')
-    .filter(r => r.issuer.includes(receiptSearch.value) || r.submitterName.includes(receiptSearch.value) || r.amount.toString().includes(receiptSearch.value));
-
-  if (selectedTransactionIds.value.length > 0) {
-    const targetSum = selectedTransactionSum.value;
-    list.sort((a, b) => {
-      const aMatch = a.amount === targetSum;
-      const bMatch = b.amount === targetSum;
-      if (aMatch && !bMatch) return -1;
-      if (!aMatch && bMatch) return 1;
-      return 0;
-    });
-  }
-
-  return list;
-});
-
-const selectedTransactionSum = computed(() =>
-  transactions.value
-    .filter(t => selectedTransactionIds.value.includes(t.id))
-    .reduce((sum, t) => sum + t.amount, 0)
-);
-
-const selectedReceiptSum = computed(() =>
-  receiptsMock.value
-    .filter(r => selectedReceiptIds.value.includes(r.id))
-    .reduce((sum, r) => sum + r.amount, 0)
-);
-
-const matchingDifference = computed(() => selectedTransactionSum.value - selectedReceiptSum.value);
-
-const suggestedReceiptIds = computed(() => {
-  if (selectedTransactionIds.value.length === 0) return [];
+  if (selectedTransactionIds.value.length === 0) return baseUnmatchedReceipts.value;
   const targetSum = selectedTransactionSum.value;
-  return receiptsMock.value
-    .filter(r => r.matchStatus === 'unmatched' && r.amount === targetSum)
-    .map(r => r.id);
+  return [...baseUnmatchedReceipts.value].sort((a, b) => {
+    const aMatch = a.amount === targetSum;
+    const bMatch = b.amount === targetSum;
+    return aMatch === bMatch ? 0 : aMatch ? -1 : 1;
+  });
 });
 
-const candidatePairs = computed(() =>
-  transactions.value
-    .filter(t => t.status === 'candidate' && t.matchedReceiptId)
-    .map(t => ({
-      transaction: t,
-      receipt: receiptsMock.value.find(r => r.id === t.matchedReceiptId),
-    }))
+// テンプレートで pair.receipt を参照するためのエイリアス
+const displayCandidatePairs = computed(() =>
+  baseCandidatePairs.value.map(p => ({ ...p, receipt: p.document as MatchingEntry }))
 );
-
-const matchedPairs = computed(() =>
-  transactions.value
-    .filter(t => t.status === 'matched' && t.matchedReceiptId)
-    .map(t => ({
-      transaction: t,
-      receipt: receiptsMock.value.find(r => r.id === t.matchedReceiptId),
-    }))
+const displayMatchedPairs = computed(() =>
+  baseMatchedPairs.value.map(p => ({ ...p, receipt: p.document as MatchingEntry }))
 );
-
-const matchedCount = computed(() => transactions.value.filter(t => t.status === 'matched').length);
 
 // --- ACTIONS ---
-
-const toggleCandidate = (id: string) => {
-  const idx = selectedCandidateIds.value.indexOf(id);
-  if (idx > -1) selectedCandidateIds.value.splice(idx, 1);
-  else selectedCandidateIds.value.push(id);
-};
-
-const handleBulkMatch = async () => {
-  for (const tId of selectedCandidateIds.value) {
-    const t = transactions.value.find(tx => tx.id === tId);
-    if (!t || !t.matchedReceiptId) continue;
-    const currentPeriod = new Date().toISOString().slice(0, 7);
-    await createMatch({
-      match_type: 'receipt',
-      transaction_ids: [tId],
-      document_ids: [t.matchedReceiptId],
-      fiscal_period: currentPeriod,
-    });
-  }
-  await fetchMatches();
-  applyMatches();
-  selectedCandidateIds.value = [];
-  activeTab.value = 'matched';
-};
-
-const revertToUnmatched = async (transactionId: string) => {
-  const m = matches.value.find((mx: any) => mx.transaction_ids?.includes(transactionId));
-  if (m) await deleteMatch(m.id);
-  await fetchMatches();
-  applyMatches();
-  const selectedIdx = selectedCandidateIds.value.indexOf(transactionId);
-  if (selectedIdx > -1) selectedCandidateIds.value.splice(selectedIdx, 1);
-};
-
-const selectTransaction = (id: string) => {
-  const idx = selectedTransactionIds.value.indexOf(id);
-  if (idx > -1) selectedTransactionIds.value.splice(idx, 1);
-  else selectedTransactionIds.value.push(id);
-};
-
-const selectReceipt = (id: string) => {
-  const idx = selectedReceiptIds.value.indexOf(id);
-  if (idx > -1) selectedReceiptIds.value.splice(idx, 1);
-  else selectedReceiptIds.value.push(id);
-};
-
 const toggleReceiptExpansion = (id: string) => {
   const idx = expandedReceiptIds.value.indexOf(id);
   if (idx > -1) expandedReceiptIds.value.splice(idx, 1);
   else expandedReceiptIds.value.push(id);
-};
-
-const handleMatch = async () => {
-  if (selectedTransactionIds.value.length === 0 || selectedReceiptIds.value.length === 0) return;
-
-  if (Math.abs(matchingDifference.value) > 1000) {
-    confirmMatchAmount.value = Math.abs(matchingDifference.value);
-    showConfirmMatch.value = true;
-    const confirmed = await new Promise<boolean>(resolve => { confirmMatchResolve.value = resolve; });
-    showConfirmMatch.value = false;
-    if (!confirmed) return;
-  }
-
-  // Create single match record linking all selected transactions to all selected receipts
-  const currentPeriod = new Date().toISOString().slice(0, 7);
-  await createMatch({
-    match_type: 'receipt',
-    transaction_ids: [...selectedTransactionIds.value],
-    document_ids: [...selectedReceiptIds.value],
-    fiscal_period: currentPeriod,
-  });
-
-  await fetchMatches();
-  applyMatches();
-  selectedTransactionIds.value = [];
-  selectedReceiptIds.value = [];
 };
 </script>
 
@@ -297,12 +121,12 @@ const handleMatch = async () => {
             未結合 ({{ unmatchedTransactions.length }})
         </button>
         <button 
-            @click="activeTab = 'candidate'"
-            :class="activeTab === 'candidate' ? 'bg-white text-gray-900 shadow-sm font-bold ring-1 ring-blue-500/20' : 'text-gray-500 hover:text-gray-700 font-medium'"
+            @click="activeTab = 'candidates'"
+            :class="activeTab === 'candidates' ? 'bg-white text-gray-900 shadow-sm font-bold ring-1 ring-blue-500/20' : 'text-gray-500 hover:text-gray-700 font-medium'"
             class="flex-1 justify-center px-6 py-2.5 rounded-lg text-sm transition-all flex items-center gap-1.5 relative"
         >
-            <div v-if="candidatePairs.length > 0" class="absolute top-2 right-4 md:right-auto md:-top-1 md:-right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
-            ✨ 自動結合候補 ({{ candidatePairs.length }})
+            <div v-if="displayCandidatePairs.length > 0" class="absolute top-2 right-4 md:right-auto md:-top-1 md:-right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
+            ✨ 自動結合候補 ({{ displayCandidatePairs.length }})
         </button>
         <button 
             @click="activeTab = 'matched'"
@@ -418,7 +242,7 @@ const handleMatch = async () => {
                     <div class="flex justify-between items-start mb-2">
                         <div class="flex items-center gap-2">
                             <span class="text-xs font-medium px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200">
-                                {{ r.paymentMethod }}
+                                {{ r.payment_method }}
                             </span>
                             <span class="text-xs text-gray-500 font-medium">{{ r.date }}</span>
                         </div>
@@ -427,22 +251,22 @@ const handleMatch = async () => {
 
                     <div class="flex justify-between items-end">
                         <div class="min-w-0 pr-4">
-                            <p class="text-sm font-bold text-gray-900 leading-tight truncate w-[220px]" :title="r.issuer">{{ r.issuer }}</p>
-                            
+                            <p class="text-sm font-bold text-gray-900 leading-tight truncate w-[220px]" :title="r.payee">{{ r.payee }}</p>
+
                             <div class="flex items-center gap-2 mt-2">
                                 <div class="h-5 w-5 rounded-full bg-slate-200 flex items-center justify-center text-[9px] font-bold text-slate-600">
-                                    {{ r.submitterName.charAt(0) }}
+                                    {{ (r.submitter_name ?? r.submitted_by ?? '?').charAt(0) }}
                                 </div>
-                                <p class="text-[13px] text-gray-600 font-medium">{{ r.submitterName }}</p>
+                                <p class="text-[13px] text-gray-600 font-medium">{{ r.submitter_name ?? r.submitted_by ?? '不明' }}</p>
                             </div>
                         </div>
                         <div class="shrink-0 flex flex-col items-end gap-2">
-                            <span v-if="r.status === 'approved'" class="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200">承認済</span>
-                            <span v-else-if="r.status === 'pending'" class="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded border border-blue-200 flex items-center"><Clock class="w-3.5 h-3.5 mr-1 text-blue-500"/>承認進行中</span>
+                            <span v-if="r.approval_status === 'approved' || r.approval_status === 'auto_approved'" class="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200">承認済</span>
+                            <span v-else-if="!['approved', 'auto_approved', 'rejected'].includes(r.approval_status)" class="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded border border-blue-200 flex items-center"><Clock class="w-3.5 h-3.5 mr-1 text-blue-500"/>承認進行中</span>
                             
                             <!-- Accordion Toggle Button -->
-                            <button 
-                                v-if="r.lineItems && r.lineItems.length > 0"
+                            <button
+                                v-if="r.line_items && r.line_items.length > 0"
                                 @click.stop="toggleReceiptExpansion(r.id)"
                                 class="text-gray-400 hover:text-blue-600 p-1 rounded transition-colors flex items-center justify-center bg-gray-50 hover:bg-blue-50 border border-gray-200"
                             >
@@ -453,15 +277,15 @@ const handleMatch = async () => {
                     </div>
                     
                     <!-- Line Items Accordion Panel -->
-                    <div v-if="expandedReceiptIds.includes(r.id) && r.lineItems && r.lineItems.length > 0" class="mt-4 pt-3 border-t border-gray-100/50 bg-gray-50/50 -mx-2 px-2 rounded-lg">
+                    <div v-if="expandedReceiptIds.includes(r.id) && r.line_items && r.line_items.length > 0" class="mt-4 pt-3 border-t border-gray-100/50 bg-gray-50/50 -mx-2 px-2 rounded-lg">
                         <p class="text-[11px] font-bold text-gray-500 mb-2 flex items-center">
-                            <FileText class="w-3 h-3 mr-1" /> 内訳 ({{ r.lineItems.length }}件)
+                            <FileText class="w-3 h-3 mr-1" /> 内訳 ({{ r.line_items.length }}件)
                         </p>
                         <div class="space-y-2">
-                            <div v-for="item in r.lineItems" :key="item.id" class="flex items-start justify-between text-xs bg-white p-2 rounded border border-gray-100 shadow-sm">
+                            <div v-for="(item, idx) in r.line_items" :key="item.id ?? idx" class="flex items-start justify-between text-xs bg-white p-2 rounded border border-gray-100 shadow-sm">
                                 <div class="break-words w-2/3 pr-2">
                                     <div class="font-bold text-gray-700 mb-0.5">{{ item.description }}</div>
-                                    <div class="text-[10px] bg-gray-100 text-gray-600 px-1 py-0.5 rounded inline-block">{{ item.accountSubject }}</div>
+                                    <div class="text-[10px] bg-gray-100 text-gray-600 px-1 py-0.5 rounded inline-block">{{ item.category ?? item.account_subject ?? '未分類' }}</div>
                                 </div>
                                 <div class="font-bold text-gray-900 whitespace-nowrap mt-0.5">
                                     ¥{{ formatAmount(item.amount) }}
@@ -502,7 +326,7 @@ const handleMatch = async () => {
             </div>
 
             <div class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/30">
-                <div v-if="transactions.length === 0" class="flex flex-col items-center justify-center h-full text-gray-400 py-12">
+                <div v-if="rawTransactions.length === 0" class="flex flex-col items-center justify-center h-full text-gray-400 py-12">
                     <Upload class="h-12 w-12 mb-3 text-gray-300" />
                     <p class="text-sm font-medium text-gray-600">明細データが存在しません</p>
                     <p class="text-xs mt-1">上部の取得ボタンからデータを取り込んでください</p>
@@ -540,17 +364,17 @@ const handleMatch = async () => {
     </template>
 
     <!-- Candidate Tab Content -->
-    <template v-else-if="activeTab === 'candidate'">
+    <template v-else-if="activeTab === 'candidates'">
       <div class="flex flex-col h-full relative">
         <div class="flex-1 overflow-y-auto no-scrollbar pb-24">
-            <div v-if="candidatePairs.length === 0" class="flex flex-col items-center justify-center h-full text-gray-400 py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
+            <div v-if="displayCandidatePairs.length === 0" class="flex flex-col items-center justify-center h-full text-gray-400 py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
                 <Link2 class="h-16 w-16 mb-4 text-gray-200" />
                 <p class="text-base font-medium text-gray-500">自動結合できる候補はありません。</p>
             </div>
 
             <div v-else class="space-y-4">
-                <div 
-                    v-for="pair in candidatePairs" :key="pair.transaction.id"
+                <div
+                    v-for="pair in displayCandidatePairs" :key="pair.transaction.id"
                     @click="toggleCandidate(pair.transaction.id)"
                     class="bg-indigo-50/30 rounded-xl border transition-shadow relative overflow-hidden flex items-center cursor-pointer hover:shadow-md"
                     :class="selectedCandidateIds.includes(pair.transaction.id) ? 'border-indigo-400 ring-1 ring-indigo-400 shadow-sm bg-indigo-50/60' : 'border-indigo-200'"
@@ -590,14 +414,14 @@ const handleMatch = async () => {
                             <div class="flex items-center justify-between mb-2">
                                 <div class="flex items-center gap-2">
                                     <span class="text-xs font-medium px-2 py-0.5 rounded-full border bg-white text-indigo-700 border-indigo-200">
-                                        {{ pair.receipt?.paymentMethod || '提出領収書' }}
+                                        {{ pair.receipt?.payment_method || '提出領収書' }}
                                     </span>
                                     <span class="text-xs text-gray-500 font-medium">{{ pair.receipt?.date }}</span>
                                 </div>
                             </div>
-                            <p class="text-base font-bold text-gray-900 truncate" :title="pair.receipt?.issuer">{{ pair.receipt?.issuer }}</p>
+                            <p class="text-base font-bold text-gray-900 truncate" :title="pair.receipt?.payee">{{ pair.receipt?.payee }}</p>
                             <p class="text-xs text-gray-500 mt-1 flex items-center gap-1">
-                                <FileText class="h-3 w-3" /> {{ pair.receipt?.submitterName }}
+                                <FileText class="h-3 w-3" /> {{ pair.receipt?.submitter_name ?? pair.receipt?.submitted_by ?? '不明' }}
                             </p>
                         </div>
 
@@ -617,7 +441,7 @@ const handleMatch = async () => {
         </div>
 
         <!-- Floating Bulk Action Bar -->
-        <div v-if="candidatePairs.length > 0" class="absolute bottom-4 left-0 right-0 bg-gray-900 text-white p-4 rounded-xl shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 animate-in slide-in-from-bottom border border-gray-700 z-20">
+        <div v-if="displayCandidatePairs.length > 0" class="absolute bottom-4 left-0 right-0 bg-gray-900 text-white p-4 rounded-xl shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 animate-in slide-in-from-bottom border border-gray-700 z-20">
             <div class="flex items-center gap-4">
                 <span class="bg-gray-800 text-gray-300 text-sm font-bold px-3 py-1.5 rounded-lg border border-gray-700">
                     選択中: <span class="text-white text-base">{{ selectedCandidateIds.length }}</span> 件
@@ -638,15 +462,15 @@ const handleMatch = async () => {
     <!-- Matched Tab Content -->
     <template v-else>
       <div class="flex-1 overflow-y-auto no-scrollbar pb-8">
-        <div v-if="matchedPairs.length === 0" class="flex flex-col items-center justify-center h-full text-gray-400 py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
+        <div v-if="displayMatchedPairs.length === 0" class="flex flex-col items-center justify-center h-full text-gray-400 py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
             <Link2 class="h-16 w-16 mb-4 text-gray-200" />
             <p class="text-base font-medium text-gray-500">結合済みのデータはありません。</p>
             <p class="text-sm mt-1 text-gray-400">「未結合」タブで明細と領収書をマッチングしてください。</p>
         </div>
 
         <div v-else class="space-y-4">
-            <div 
-                v-for="pair in matchedPairs" :key="pair.transaction.id"
+            <div
+                v-for="pair in displayMatchedPairs" :key="pair.transaction.id"
                 class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex items-center gap-6 hover:shadow-md transition-shadow relative overflow-hidden"
             >
                 <!-- Left Line Decoration -->
@@ -678,14 +502,14 @@ const handleMatch = async () => {
                     <div class="flex items-center justify-between mb-2">
                          <div class="flex items-center gap-2">
                              <span class="text-xs font-medium px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200">
-                                {{ pair.receipt?.paymentMethod || '提出領収書' }}
+                                {{ pair.receipt?.payment_method || '提出領収書' }}
                             </span>
                              <span class="text-xs text-gray-500 font-medium">{{ pair.receipt?.date }}</span>
                          </div>
                     </div>
-                    <p class="text-base font-bold text-gray-900 truncate" :title="pair.receipt?.issuer">{{ pair.receipt?.issuer }}</p>
+                    <p class="text-base font-bold text-gray-900 truncate" :title="pair.receipt?.payee">{{ pair.receipt?.payee }}</p>
                     <p class="text-xs text-gray-500 mt-1 flex items-center gap-1">
-                        <FileText class="h-3 w-3" /> {{ pair.receipt?.submitterName }}
+                        <FileText class="h-3 w-3" /> {{ pair.receipt?.submitter_name ?? pair.receipt?.submitted_by ?? '不明' }}
                     </p>
                 </div>
 

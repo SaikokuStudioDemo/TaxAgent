@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from bson import ObjectId
 from fastapi import HTTPException, Depends
+from typing import Set
 from app.db.mongodb import get_database
 from app.api.deps import get_current_user
 
@@ -74,6 +75,61 @@ def parse_oid(doc_id: str, label: str = "document") -> ObjectId:
         return ObjectId(doc_id)
     except Exception:
         raise HTTPException(status_code=400, detail=f"Invalid {label} ID")
+
+
+def build_list_query(corporate_id: str, **filters) -> dict:
+    """一覧取得用の MongoDB クエリを組み立てる共通ヘルパー。
+    値が None のフィールドは自動でスキップされる。"""
+    query: dict = {"corporate_id": corporate_id}
+    for key, value in filters.items():
+        if value is not None:
+            query[key] = value
+    return query
+
+
+async def enrich_with_approval_history(
+    db,
+    doc: dict,
+    document_id: str,
+    document_type,
+) -> dict:
+    """approval_events から承認履歴を取得してドキュメントに付加する共通ヘルパー。
+    document_type は文字列または文字列のリストを受け取る。"""
+    dt_filter = {"$in": list(document_type)} if not isinstance(document_type, str) else document_type
+    events_cursor = db["approval_events"].find(
+        {"document_id": document_id, "document_type": dt_filter}
+    ).sort("timestamp", 1)
+    events = await events_cursor.to_list(length=100)
+    doc["approval_history"] = [serialize_doc(e) for e in events]
+    return doc
+
+
+async def build_name_map(db, user_ids: Set[str]) -> dict:
+    """user_id の集合から {user_id: name} マップを一括取得する。
+    employees → corporates の順で検索し、見つからなければ '不明' を使う。"""
+    if not user_ids:
+        return {}
+    oids = []
+    for uid in user_ids:
+        try:
+            oids.append(ObjectId(uid))
+        except Exception:
+            pass
+    if not oids:
+        return {}
+
+    name_map: dict = {}
+    employees = await db["employees"].find({"_id": {"$in": oids}}).to_list(length=500)
+    for e in employees:
+        name_map[str(e["_id"])] = e.get("name", "不明")
+
+    unresolved_oids = [o for o in oids if str(o) not in name_map]
+    if unresolved_oids:
+        corporates = await db["corporates"].find({"_id": {"$in": unresolved_oids}}).to_list(length=100)
+        for c in corporates:
+            name_map[str(c["_id"])] = c.get("name", "不明")
+
+    return name_map
 
 
 async def get_doc_or_404(

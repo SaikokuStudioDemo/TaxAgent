@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
-import { 
-    Search, 
-    Filter, 
+import {
+    Search,
+    Filter,
     Building2,
-    UserCircle2,
     Upload,
     Send,
     Calendar,
@@ -16,46 +15,10 @@ import {
     AlertCircle
 } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
-import { useInvoices } from '@/composables/useInvoices';
+import { useInvoices, type Invoice } from '@/composables/useInvoices';
 import { api } from '@/lib/api';
 import InvoiceDetailModal from '@/components/invoices/InvoiceDetailModal.vue';
-import { buildApprovalHistory, type ApprovalHistory } from '@/composables/useApprovalHistory';
 import { formatNumber as formatCurrency } from '@/lib/utils/formatters';
-
-// --- Types for Modal compatibility ---
-interface InvoiceItem {
-  id: string;
-  vendorName: string;
-  title: string;
-  amount: number;
-  issuedDate: string;
-  dueDate: string;
-  category: string;
-  paymentMethod: string;
-  memo: string;
-  status: 'pending' | 'approved' | 'rejected';
-  currentStepIndex: number; 
-  approvalHistory: ApprovalHistory[];
-  imageUrl: string;
-}
-
-const mapToModalData = (inv: any): InvoiceItem => {
-  return {
-    id: inv.id,
-    vendorName: inv.clientName || '不明',
-    title: inv.title || '請求書',
-    amount: inv.totalAmount || 0,
-    issuedDate: inv.issueDate || '',
-    dueDate: inv.dueDate || '',
-    category: inv.category || '未分類',
-    paymentMethod: inv.paymentMethod || '請求書払い',
-    memo: inv.memo || '',
-    status: inv.approvalStatus === 'approved' || inv.approvalStatus === 'auto_approved' ? 'approved' : inv.approvalStatus === 'rejected' ? 'rejected' : 'pending',
-    currentStepIndex: inv.current_step ? inv.current_step - 1 : 0,
-    approvalHistory: buildApprovalHistory(inv.approval_steps, inv.approval_history, inv.approvalStatus),
-    imageUrl: inv.image_url || ((inv.attachments && inv.attachments.length > 0) ? inv.attachments[0] : ''),
-  };
-};
 
 const router = useRouter();
 
@@ -152,11 +115,11 @@ const handleDeleteSingle = (id: string) => {
 
 // handleEditSingle removed as it's not currently used in the list view actions
 
-const selectedPreviewInvoice = ref<any | null>(null);
+const selectedPreviewInvoice = ref<Invoice | null>(null);
 const isPreviewModalOpen = ref(false);
 
-const openPreview = (invoice: any) => {
-    selectedPreviewInvoice.value = mapToModalData(invoice);
+const openPreview = (invoice: Invoice) => {
+    selectedPreviewInvoice.value = invoice;
     isPreviewModalOpen.value = true;
 };
 const closePreview = () => {
@@ -167,6 +130,14 @@ const closePreview = () => {
 const handleModalActionCompleted = async () => {
     closePreview();
     await loadInvoices();
+};
+
+const handleStepAdded = (updated: Invoice) => {
+    const idx = invoices.value.findIndex(i => i.id === updated.id);
+    if (idx !== -1) invoices.value[idx] = { ...invoices.value[idx], extra_approval_steps: updated.extra_approval_steps };
+    if (selectedPreviewInvoice.value?.id === updated.id) {
+        selectedPreviewInvoice.value = { ...selectedPreviewInvoice.value, extra_approval_steps: updated.extra_approval_steps };
+    }
 };
 
 // Fetch invoices filtered by active tab via API parameters
@@ -207,8 +178,9 @@ watch(activeTab, async () => {
 
 // Map API invoice to display format
 type InvoiceStatus = 'draft' | 'pending_approval' | 'pending_send' | 'sent_unmatched' | 'reconciled' | 'overdue_unmatched' | 'received_unmatched' | 'received_reconciled';
+type DisplayInvoice = Invoice & { displayStatus: InvoiceStatus };
 
-const mapStatus = (inv: any): InvoiceStatus => {
+const mapStatus = (inv: Invoice): InvoiceStatus => {
     if (inv.approval_status === 'draft') return 'draft';
     if (inv.approval_status === 'pending_approval') return 'pending_approval';
     if (inv.reconciliation_status === 'reconciled') return inv.document_type === 'received' ? 'received_reconciled' : 'reconciled';
@@ -217,33 +189,17 @@ const mapStatus = (inv: any): InvoiceStatus => {
     return 'pending_send';
 };
 
-const filteredInvoices = computed(() => {
+const filteredInvoices = computed((): DisplayInvoice[] => {
     // API already filtered by tab; apply only search filter here
-    let list = invoices.value.map(inv => ({
+    let list: DisplayInvoice[] = invoices.value.map(inv => ({
         ...inv,
         displayStatus: mapStatus(inv),
-        clientName: inv.client_name,
-        clientId: inv.client_id,
-        totalAmount: inv.total_amount,
-        issueDate: inv.issue_date,
-        dueDate: inv.due_date,
-        title: `${inv.invoice_number ?? ''} ${inv.client_name ?? ''}`.trim(),
-        amount: inv.total_amount,
-        clientType: 'corporate',
-        type: 'single',
-        recurringDetails: undefined,
-        projectName: undefined,
-        approvalStatus: inv.approval_status,
-        approval_history: (inv as any).approval_history || [],
-        extra_approval_steps: (inv as any).extra_approval_steps || [],
-        current_step_index: (inv as any).current_step_index || 0,
-        lineItems: inv.line_items,
     }));
 
     if (searchQuery.value) {
         const q = searchQuery.value.toLowerCase();
         list = list.filter(i =>
-            i.clientName?.toLowerCase().includes(q) ||
+            i.client_name?.toLowerCase().includes(q) ||
             i.invoice_number?.toLowerCase().includes(q)
         );
     }
@@ -481,31 +437,28 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
                 </td>
                 <td class="px-4 py-4 whitespace-nowrap">
                     <div class="text-xs text-gray-500 flex items-center gap-1 mb-1">
-                        <Calendar class="w-3 h-3" /> {{ invoice.issueDate }}
+                        <Calendar class="w-3 h-3" /> {{ invoice.issue_date }}
                     </div>
                     <div class="font-bold text-gray-900 text-sm">{{ invoice.id }}</div>
                 </td>
                 <td class="px-4 py-4">
                     <div class="flex items-center gap-2 mb-1">
-                        <component :is="invoice.clientType === 'student' ? UserCircle2 : Building2" class="w-4 h-4 shrink-0" :class="invoice.clientType === 'student' ? 'text-emerald-500' : 'text-blue-500'" />
-                        <span class="font-bold text-gray-900 text-sm truncate max-w-[120px] md:max-w-none" :title="invoice.clientName">{{ invoice.clientName }}</span>
+                        <Building2 class="w-4 h-4 shrink-0 text-blue-500" />
+                        <span class="font-bold text-gray-900 text-sm truncate max-w-[120px] md:max-w-none" :title="invoice.client_name">{{ invoice.client_name }}</span>
                     </div>
-                    <div class="text-[10px] text-gray-400 truncate" :title="invoice.clientId">{{ invoice.clientId }}</div>
+                    <div class="text-[10px] text-gray-400 truncate" :title="invoice.client_id">{{ invoice.client_id }}</div>
                 </td>
                 <td class="hidden lg:table-cell px-4 py-4">
-                    <div class="font-bold text-gray-900 text-sm mb-1 truncate max-w-[150px]">{{ invoice.title }}</div>
+                    <div class="font-bold text-gray-900 text-sm mb-1 truncate max-w-[150px]">{{ invoice.invoice_number || invoice.client_name || '請求書' }}</div>
                     <div class="flex items-center gap-2">
-                        <span v-if="invoice.type === 'recurring'" class="bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded text-[10px] font-bold inline-flex items-center">
-                            自動
-                        </span>
-                        <span v-if="invoice.projectName" class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-medium border border-gray-200 truncate max-w-[80px]">
-                            {{ invoice.projectName }}
+                        <span v-if="invoice.project_name" class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-medium border border-gray-200 truncate max-w-[80px]">
+                            {{ invoice.project_name }}
                         </span>
                     </div>
                 </td>
                 <td class="px-4 py-4 whitespace-nowrap text-right">
-                    <div class="font-black text-gray-900">¥{{ formatCurrency(invoice.amount) }}</div>
-                    <div class="text-[10px] text-gray-500 mt-0.5">期日: {{ invoice.dueDate }}</div>
+                    <div class="font-black text-gray-900">¥{{ formatCurrency(invoice.total_amount) }}</div>
+                    <div class="text-[10px] text-gray-500 mt-0.5">期日: {{ invoice.due_date }}</div>
                 </td>
                 <td class="px-4 py-4 whitespace-nowrap text-center">
                     <span class="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold border shrink-0" :class="getStatusBadge(invoice.displayStatus).classes">
@@ -538,11 +491,11 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
               </tr>
               
               <!-- Accordion Row for Line Items -->
-              <tr v-if="expandedInvoiceIds.includes(invoice.id) && invoice.lineItems && invoice.lineItems.length > 0" class="bg-slate-50 border-t-0">
+              <tr v-if="expandedInvoiceIds.includes(invoice.id) && invoice.line_items && invoice.line_items.length > 0" class="bg-slate-50 border-t-0">
                   <td :colspan="activeTab === 'received' ? 9 : 8" class="p-0">
                       <div class="px-14 py-4 border-l-4 border-l-blue-400 bg-blue-50/20 shadow-inner">
                           <p class="text-xs font-bold text-gray-500 mb-3 flex items-center">
-                              <FileText class="w-4 h-4 mr-1.5" /> 請求明細 ({{ invoice.lineItems.length }}件)
+                              <FileText class="w-4 h-4 mr-1.5" /> 請求明細 ({{ invoice.line_items.length }}件)
                           </p>
                           <table class="w-full text-sm">
                               <thead class="bg-white/60 border-b border-gray-200">
@@ -553,7 +506,7 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
                                   </tr>
                               </thead>
                               <tbody class="divide-y divide-gray-100">
-                                  <tr v-for="(item, idx) in invoice.lineItems" :key="idx" class="hover:bg-white transition-colors">
+                                  <tr v-for="(item, idx) in invoice.line_items" :key="idx" class="hover:bg-white transition-colors">
                                       <td class="py-2.5 px-4 font-medium text-gray-800">{{ item.description }}</td>
                                       <td class="py-2.5 px-4 text-right text-gray-600">{{ item.tax_rate }}%</td>
                                       <td class="py-2.5 px-4 text-right font-bold text-gray-900">¥{{ formatCurrency(item.amount) }}</td>
@@ -680,6 +633,7 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
         :document_type="activeTab === 'received' ? 'received' : 'issued'"
         @close="closePreview"
         @action-completed="handleModalActionCompleted"
+        @step-added="handleStepAdded"
     />
     </div>
   </div>

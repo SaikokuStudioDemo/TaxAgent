@@ -32,7 +32,6 @@ export function useApprovals() {
         document_id: params.documentId,
         action: params.action,
         step: params.step,
-        approver_id: 'current_user',
         comment: sanitizedComment,
         added_steps: params.addedSteps || null,
       });

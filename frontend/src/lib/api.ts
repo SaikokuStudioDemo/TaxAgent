@@ -12,8 +12,8 @@ async function getAuthToken(): Promise<string> {
     const devToken = localStorage.getItem('DEV_AUTH_TOKEN');
     if (devToken) return devToken;
     const user = auth.currentUser;
-    if (user) return await user.getIdToken();
-    return '';
+    if (user) return await user.getIdToken(/* forceRefresh */ false);
+    throw new Error('認証情報が取得できません。ページを再読み込みしてください。');
 }
 
 async function request<T>(
@@ -43,6 +43,20 @@ async function request<T>(
     // 204 No Content
     if (res.status === 204) return undefined as T;
     return res.json() as Promise<T>;
+}
+
+/**
+ * オブジェクトのキー・値から URLSearchParams クエリ文字列を生成する。
+ * 値が falsy な場合はそのキーをスキップする。
+ */
+export function buildQueryString(params?: Record<string, string | undefined>): string {
+    if (!params) return '';
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+        if (value) query.append(key, value);
+    }
+    const qs = query.toString();
+    return qs ? '?' + qs : '';
 }
 
 export const api = {

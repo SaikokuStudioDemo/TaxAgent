@@ -2,7 +2,7 @@
  * useTransactions.ts - Transactions (Bank/Card) and matching composable
  */
 import { ref } from 'vue';
-import { api } from '@/lib/api';
+import { api, buildQueryString } from '@/lib/api';
 
 export interface Transaction {
     id: string;
@@ -49,12 +49,7 @@ export function useTransactions() {
         isLoading.value = true;
         error.value = null;
         try {
-            const query = new URLSearchParams();
-            if (params?.source_type) query.append('source_type', params.source_type);
-            if (params?.status) query.append('status', params.status);
-            if (params?.fiscal_period) query.append('fiscal_period', params.fiscal_period);
-            const qs = query.toString();
-            transactions.value = await api.get<Transaction[]>(`/transactions${qs ? '?' + qs : ''}`);
+            transactions.value = await api.get<Transaction[]>(`/transactions${buildQueryString(params)}`);
         } catch (e: any) {
             error.value = e.message;
         } finally {

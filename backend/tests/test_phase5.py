@@ -362,4 +362,4 @@ async def test_matching_flow(corporate_id, client):
     txn = await db["bank_transactions"].find_one({"_id": t_result.inserted_id})
     rcpt = await db["receipts"].find_one({"_id": r_result.inserted_id})
     assert txn["status"] == "matched"
-    assert rcpt["status"] == "matched"
+    assert rcpt["reconciliation_status"] == "reconciled"

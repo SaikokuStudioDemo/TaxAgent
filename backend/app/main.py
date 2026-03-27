@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
-from app.api.routes import users, receipts, invoices, approvals, clients, company_profiles, transactions, matches, admin, advisor, departments, bank_accounts, projects
+from app.api.routes import users, receipts, invoices, approvals, clients, company_profiles, transactions, matches, admin, advisor, departments, bank_accounts, projects, matching_rules, journal_rules
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,6 +44,8 @@ app.include_router(advisor.router, prefix=f"{settings.API_V1_STR}/advisor", tags
 app.include_router(departments.router, prefix=f"{settings.API_V1_STR}/departments", tags=["departments"])
 app.include_router(bank_accounts.router, prefix=f"{settings.API_V1_STR}/bank-accounts", tags=["bank-accounts"])
 app.include_router(projects.router, prefix=f"{settings.API_V1_STR}/projects", tags=["projects"])
+app.include_router(matching_rules.router, prefix=f"{settings.API_V1_STR}/matching-rules", tags=["matching-rules"])
+app.include_router(journal_rules.router, prefix=f"{settings.API_V1_STR}/journal-rules", tags=["journal-rules"])
 
 
 @app.get("/")

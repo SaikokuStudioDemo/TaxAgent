@@ -9,6 +9,9 @@ from app.api.helpers import (
     CorporateContext,
     parse_oid,
     get_doc_or_404,
+    build_list_query,
+    enrich_with_approval_history,
+    build_name_map,
 )
 from app.models.invoice import InvoiceCreate, InvoiceInDB
 import logging
@@ -64,17 +67,24 @@ async def list_invoices(
     fiscal_period: Optional[str] = None,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    query: dict = {"corporate_id": ctx.corporate_id, "is_deleted": {"$ne": True}}
-    if document_type:
-        query["document_type"] = document_type
-    if approval_status:
-        query["approval_status"] = approval_status
-    if fiscal_period:
-        query["fiscal_period"] = fiscal_period
+    query = build_list_query(
+        ctx.corporate_id,
+        document_type=document_type,
+        approval_status=approval_status,
+        fiscal_period=fiscal_period,
+    )
+    query["is_deleted"] = {"$ne": True}
 
     cursor = ctx.db["invoices"].find(query).sort("created_at", -1)
     docs = await cursor.to_list(length=500)
-    return [_serialize(doc) for doc in docs]
+    user_ids = {doc.get("created_by") for doc in docs if doc.get("created_by")}
+    name_map = await build_name_map(ctx.db, user_ids)
+    result = []
+    for doc in docs:
+        s = _serialize(doc)
+        s["creator_name"] = name_map.get(s.get("created_by", ""), "不明")
+        result.append(s)
+    return result
 
 
 @router.get("/{invoice_id}", summary="請求書詳細を取得する")
@@ -84,19 +94,11 @@ async def get_invoice(
 ):
     doc = await get_doc_or_404(ctx.db, "invoices", invoice_id, ctx.corporate_id, "invoice")
 
-    # Fetch approval events for this invoice
-    events_cursor = ctx.db["approval_events"].find(
-        {
-            "document_id": invoice_id,
-            "document_type": {"$in": ["invoice", "received_invoice", "issued_invoice"]}
-        }
-    ).sort("timestamp", 1)
-    events = await events_cursor.to_list(length=100)
-    serialized_events = [_serialize(e) for e in events]
-
     result = _serialize(doc)
-    result["approval_history"] = serialized_events
-    return result
+    return await enrich_with_approval_history(
+        ctx.db, result, invoice_id,
+        ["invoice", "received_invoice", "issued_invoice"],
+    )
 
 
 @router.patch("/{invoice_id}", summary="請求書を更新する")

@@ -13,13 +13,15 @@ This document provides a high-level overview of the features and architectural c
 
 ### 2. Approval Workflow (Receipts & Invoices)
 - **Unified Approvals (Backend)**: Consistent rule-based approval workflow for both receipts and invoices using a shared evaluation service and `approval_rules` collection.
+- **Approval Types Consolidation**: Shared `approvalTypes.ts` for consistent `ApprovalHistory`, `ReceiptItem`, and `InvoiceItem` definitions across all views and modals.
 - **Shared ApprovalStepper Component**: Reusable `ApprovalStepper.vue` used in ReceiptDetailModal, InvoiceDetailModal, InvoiceCreatePage, and ReceiptUploadPage.
-- **Approval Dashboard (Receipts)**: Full-width tab layout with status tabs (承認待ち / 全社未承認 / 承認済 / 差戻し), search/filter controls, and sticky Status/Action columns.
-- **Approval Dashboard (Invoices)**: Direction toggle (受領/発行) + status tabs with identical layout standardization. Header renamed to 「請求書承認状況」.
+- **Approval Dashboard (Receipts)**: Full-width tab layout with status tabs (あなたの承認待ち / 全社未承認 / 承認済 / 差戻し).
+- **Pending-for-me Integration**: The "Your Pending" tab correctly filters records where the current user is the specific approver using the backend API.
 - **Sticky Columns**: Status and Action columns remain visible during horizontal scrolling on both approval pages.
 - **Multi-step Approval**: Support for hierarchical approval steps, extra approver addition, and optimistic locking for concurrent approvals.
 
 ### 3. Matching (Reconciliation)
+- **Unified Transactions**: Renamed `bank_transactions` to `transactions` to include both bank and credit card data in a single unified pipeline.
 - **Receipt Matching**: Match bank/card transactions to receipts with difference auto-resolution (< ¥1,000).
 - **Invoice Matching**: Match bank transactions to invoices with the same reconciliation logic.
 - **Journal Entry Generation**: Auto-generated journal entries for small differences (雑損失/雑収入).

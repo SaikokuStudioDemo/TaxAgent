@@ -9,7 +9,7 @@ from app.api.helpers import (
     CorporateContext,
     parse_oid,
 )
-from app.models.approval import ApprovalRuleCreate, ApprovalEventCreate, ApprovalPreviewRequest
+from app.models.approval import ApprovalRuleCreate, ApprovalRuleUpdate, ApprovalEventCreate, ApprovalPreviewRequest
 import logging
 
 logger = logging.getLogger(__name__)
@@ -50,13 +50,12 @@ async def create_approval_rule(
 @router.patch("/rules/{rule_id}", summary="承認ルールを更新する")
 async def update_approval_rule(
     rule_id: str,
-    payload: dict,
+    payload: ApprovalRuleUpdate,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     oid = parse_oid(rule_id, "rule")
 
-    forbidden = {"corporate_id", "created_at", "_id"}
-    update_data = {k: v for k, v in payload.items() if k not in forbidden}
+    update_data = payload.model_dump(exclude_unset=True)
 
     result = await ctx.db["approval_rules"].update_one(
         {"_id": oid, "corporate_id": ctx.corporate_id},
@@ -103,6 +102,50 @@ async def preview_approval_rule(
         "steps": steps,
         "matched": rule_id is not None
     }
+
+
+# ─────────────── Pending For Me ───────────────
+
+async def _get_pending_for_me(db, corporate_id: str, firebase_uid: str, document_type: str) -> list:
+    """自分が承認すべきドキュメントを返す共通ロジック（receipt / invoice 共用）"""
+    collection = "receipts" if document_type == "receipt" else "invoices"
+
+    employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
+    user_role = employee.get("role", "staff") if employee else "admin"
+
+    cursor = db[collection].find({
+        "corporate_id": corporate_id,
+        "approval_status": "pending_approval",
+    })
+    all_pending = await cursor.to_list(length=500)
+
+    my_pending = []
+    for doc in all_pending:
+        rule_id = doc.get("approval_rule_id")
+        current_step = doc.get("current_step", 1)
+        if not rule_id:
+            continue
+        try:
+            rule = await db["approval_rules"].find_one({"_id": ObjectId(rule_id)})
+        except Exception:
+            continue
+        if not rule:
+            continue
+        steps = rule.get("steps", [])
+        matching_step = next((s for s in steps if s.get("step") == current_step), None)
+        if matching_step and matching_step.get("role") == user_role:
+            my_pending.append(doc)
+
+    return my_pending
+
+
+@router.get("/pending-for-me", summary="自分が承認すべきドキュメント一覧を取得する")
+async def list_pending_for_me(
+    document_type: str = "receipt",
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    docs = await _get_pending_for_me(ctx.db, ctx.corporate_id, ctx.firebase_uid, document_type)
+    return [_serialize(doc) for doc in docs]
 
 
 # ─────────────── Approval Actions ───────────────

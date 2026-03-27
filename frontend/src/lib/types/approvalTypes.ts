@@ -7,7 +7,7 @@
 
 // ─── 承認ステップ履歴 ───
 export interface ApprovalHistory {
-  id: string;
+  id?: string;
   step: number;
   roleId: string;
   roleName: string;
@@ -18,40 +18,3 @@ export interface ApprovalHistory {
   comment?: string;
 }
 
-// ─── 領収書表示用 ───
-export interface ReceiptItem {
-  id: string;
-  submitterName: string;
-  departmentName: string;
-  groupName?: string;
-  projectName?: string;
-  date: string;
-  issuer: string;
-  amount: number;
-  taxRate: string;
-  category: string;
-  paymentMethod: string;
-  memo: string;
-  status: 'pending' | 'approved' | 'rejected';
-  currentStepIndex: number;
-  approvalHistory: ApprovalHistory[];
-  imageUrl: string;
-}
-
-// ─── 請求書表示用 ───
-export interface InvoiceItem {
-  id: string;
-  vendorName: string;
-  title: string;
-  amount: number;
-  issuedDate: string;
-  dueDate: string;
-  category: string;
-  paymentMethod: string;
-  memo: string;
-  status: 'pending' | 'approved' | 'rejected';
-  isAutoApproved?: boolean;
-  currentStepIndex: number;
-  approvalHistory: ApprovalHistory[];
-  imageUrl: string;
-}

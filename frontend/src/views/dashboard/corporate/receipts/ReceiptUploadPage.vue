@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { UploadCloud, ScanLine, Trash2, CheckCircle2, Save, Loader2, AlertCircle, FileText, ChevronDown } from 'lucide-vue-next';
-import { formatCurrency } from '@/lib/utils/formatters';
+import { UploadCloud, ScanLine, Trash2, CheckCircle2, Save, Loader2, AlertCircle, FileText } from 'lucide-vue-next';
+import { formatCurrency, formatInputAmount, parseInputAmount } from '@/lib/utils/formatters';
 import { useReceipts } from '@/composables/useReceipts';
 import { useProjects } from '@/composables/useProjects';
-import { uploadFile } from '@/lib/firebase/storage';
+import { useAuth } from '@/composables/useAuth';
+import { useFileUpload } from '@/composables/useFileUpload';
 import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
 
 // Type definitions for staging receipts
@@ -26,17 +27,19 @@ interface StagedReceipt {
 
 const { createReceipt } = useReceipts();
 const { projects, fetchProjects } = useProjects();
+const { userProfile } = useAuth();
+const { fileInput, isUploading: isExtracting, uploadSingleFile, openFilePicker: triggerFileInput, clearFileInput } = useFileUpload({
+  storagePath: 'receipts/',
+  corporateId: computed(() => userProfile.value?.corporate_id),
+});
 
 const stagedReceipts = ref<StagedReceipt[]>([]);
 const isSubmitting = ref(false);
-const isExtracting = ref(false);
 const showSuccessModal = ref(false);
 const showErrorModal = ref(false);
 const showImageModal = ref(false);
 const selectedPreviewImageUrl = ref<string>('');
 const successCount = ref(0);
-
-const fileInput = ref<HTMLInputElement | null>(null);
 
 const categories = ['消耗品費', '交際費', '旅費交通費', '通信費', '会議費'];
 
@@ -47,50 +50,34 @@ const handleFileSelect = async (event: Event) => {
   const target = event.target as HTMLInputElement;
   if (!target.files?.length) return;
 
-  isExtracting.value = true;
   const files = Array.from(target.files);
-  
-  try {
-    const newReceipts: StagedReceipt[] = [];
-    
-    for (const file of files) {
-      // 1. Upload to Firebase Storage
-      // Path format: receipts/corporate_id/timestamp_filename
-      // Note: In local bypass, corporate_id is usually 'corp_123'
-      const timestamp = Date.now();
-      const storagePath = `receipts/corp_123/${timestamp}_${file.name}`;
-      const url = await uploadFile(file, storagePath);
-      
-      // 2. Mock 'Extraction' logic (In real app, we'd call an AI extraction endpoint here)
-      const amount = Math.floor(Math.random() * 20000) + 1000;
-      
-      newReceipts.push({
-        id: crypto.randomUUID(),
-        selected: true,
-        date: new Date().toISOString().split('T')[0],
-        amount,
-        taxRate: 10,
-        paymentMethod: '立替',
-        payee: file.name.split('.')[0], // Use filename as payee name for now
-        category: '消耗品費',
-        status: 'new',
-        fileUrl: url,
-        fileName: file.name
-      });
-    }
-    
-    stagedReceipts.value.push(...newReceipts);
-  } catch (err) {
-    console.error('Upload failed', err);
-    alert('ファイルのアップロードに失敗しました。');
-  } finally {
-    isExtracting.value = false;
-    if (fileInput.value) fileInput.value.value = '';
-  }
-};
+  const newReceipts: StagedReceipt[] = [];
 
-const triggerFileInput = () => {
-  fileInput.value?.click();
+  for (const file of files) {
+    const url = await uploadSingleFile(file);
+    if (!url) {
+      console.error('Upload failed for', file.name);
+      alert('ファイルのアップロードに失敗しました。');
+      break;
+    }
+    // TODO: OCR/AI extraction will populate these fields
+    newReceipts.push({
+      id: crypto.randomUUID(),
+      selected: true,
+      date: new Date().toISOString().split('T')[0],
+      amount: 0,
+      taxRate: 10,
+      paymentMethod: '立替',
+      payee: file.name.split('.')[0],
+      category: '消耗品費',
+      status: 'new',
+      fileUrl: url,
+      fileName: file.name,
+    });
+  }
+
+  stagedReceipts.value.push(...newReceipts);
+  clearFileInput();
 };
 
 const selectAll = computed({
@@ -108,10 +95,6 @@ const removeReceipt = (id: string) => {
 const previewReceipt = (receipt: StagedReceipt) => {
   if (receipt.fileUrl) {
     selectedPreviewImageUrl.value = receipt.fileUrl;
-    showImageModal.value = true;
-  } else {
-    // Fallback for old mock items
-    selectedPreviewImageUrl.value = 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80';
     showImageModal.value = true;
   }
 };
@@ -157,18 +140,6 @@ const submitSelected = async () => {
   } finally {
     isSubmitting.value = false;
   }
-};
-
-const formatInputAmount = (val: number | string) => {
-  if (val === null || val === undefined || val === '') return '';
-  const numStr = val.toString().replace(/[^\d]/g, '');
-  if (!numStr) return '';
-  return parseInt(numStr, 10).toLocaleString('ja-JP');
-};
-
-const parseInputAmount = (val: string) => {
-  const parsed = parseInt(val.replace(/[^\d]/g, ''), 10);
-  return isNaN(parsed) ? 0 : parsed;
 };
 
 const handleAmountInput = (receipt: StagedReceipt, event: Event) => {

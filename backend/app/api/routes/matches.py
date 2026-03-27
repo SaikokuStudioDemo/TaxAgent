@@ -74,6 +74,7 @@ async def create_match(
     # ── 差額処理の決定 ─────────────────────────────────
     auto_resolved = False
     difference_treatment = payload.get("difference_treatment")
+    journal_entries = payload.get("journal_entries", [])
 
     if abs_diff == 0:
         difference_treatment = None  # 完全一致
@@ -87,7 +88,6 @@ async def create_match(
             difference_treatment = "雑損失" if difference > 0 else "雑収入"
 
         # 自動仕訳エントリを生成
-        journal_entries = payload.get("journal_entries", [])
         if abs_diff > 0 and not journal_entries:
             journal_entries = [{
                 "debit_account": difference_treatment if difference > 0 else "売掛金",
@@ -106,7 +106,6 @@ async def create_match(
                     f"差額の処理方法（difference_treatment）を指定してください。"
                 ),
             )
-        journal_entries = payload.get("journal_entries", [])
 
     match_doc = {
         "corporate_id": ctx.corporate_id,

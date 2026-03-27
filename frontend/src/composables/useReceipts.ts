@@ -2,7 +2,8 @@
  * useReceipts.ts - Receipt composable backed by real API
  */
 import { ref } from 'vue';
-import { api } from '@/lib/api';
+import { api, buildQueryString } from '@/lib/api';
+import type { ApprovalHistory } from '@/lib/types/approvalTypes';
 
 export interface Receipt {
     id: string;
@@ -20,16 +21,18 @@ export interface Receipt {
     submitted_by: string;
     created_at: string;
     attachments?: string[];
-    approval_history?: ApprovalEvent[];
-}
-
-export interface ApprovalEvent {
-    id: string;
-    step: number;
-    approver_id: string;
-    action: string;
-    comment?: string;
-    timestamp: string;
+    approval_history?: ApprovalHistory[];
+    extra_approval_steps?: { roleId: string; roleName: string; approverName?: string }[];
+    // Optional fields populated by API
+    submitter_name?: string;
+    department?: string;
+    group_name?: string;
+    project_name?: string;
+    image_url?: string;
+    memo?: string;
+    project_id?: string;
+    document_type?: string;
+    line_items?: any[];
 }
 
 export function useReceipts() {
@@ -45,12 +48,7 @@ export function useReceipts() {
         isLoading.value = true;
         error.value = null;
         try {
-            const query = new URLSearchParams();
-            if (params?.approval_status) query.append('approval_status', params.approval_status);
-            if (params?.fiscal_period) query.append('fiscal_period', params.fiscal_period);
-            if (params?.submitted_by) query.append('submitted_by', params.submitted_by);
-            const qs = query.toString();
-            receipts.value = await api.get<Receipt[]>(`/receipts${qs ? '?' + qs : ''}`);
+            receipts.value = await api.get<Receipt[]>(`/receipts${buildQueryString(params)}`);
         } catch (e: any) {
             error.value = e.message;
         } finally {
@@ -64,7 +62,7 @@ export function useReceipts() {
         isLoading.value = true;
         error.value = null;
         try {
-            pendingForMe.value = await api.get<Receipt[]>('/receipts/pending-for-me');
+            pendingForMe.value = await api.get<Receipt[]>('/approvals/pending-for-me?document_type=receipt');
         } catch (e: any) {
             error.value = e.message;
         } finally {

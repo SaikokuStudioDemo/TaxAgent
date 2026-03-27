@@ -71,7 +71,8 @@ const router = createRouter({
                     component: () => import('@/views/dashboard/corporate/invoices/InvoiceApprovalPage.vue'),
                     meta: { title: '受領請求書承認' }
                 },
-                { path: 'invoices/matching', name: 'dashboard-corporate-invoices-matching', component: () => import('@/views/dashboard/corporate/invoices/InvoiceMatchingPage.vue') },
+                { path: 'invoices/matching', name: 'dashboard-corporate-invoices-matching', component: () => import('@/views/dashboard/corporate/invoices/InvoiceMatchingPage.vue'), props: { mode: 'income' } },
+                { path: 'invoices/payment-matching', name: 'dashboard-corporate-invoices-payment-matching', component: () => import('@/views/dashboard/corporate/invoices/InvoiceMatchingPage.vue'), props: { mode: 'payment' } },
                 { path: 'banking/import', name: 'dashboard-corporate-banking-import', component: () => import('@/views/dashboard/corporate/banking/BankingImportPage.vue') },
                 { path: 'rules/approvals', name: 'dashboard-corporate-rules-approvals', component: () => import('@/views/dashboard/corporate/rules/ApprovalRulesPage.vue') },
                 { path: 'settings/organization', name: 'dashboard-corporate-settings-organization', component: () => import('@/views/dashboard/corporate/settings/OrganizationPage.vue') },

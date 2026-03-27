@@ -1,8 +1,7 @@
 /**
  * useApprovalRules.ts - Approval rules composable backed by real API
  */
-import { ref } from 'vue';
-import { api } from '@/lib/api';
+import { useGenericRules } from './useGenericRules';
 
 export interface ApprovalCondition {
     field: string;
@@ -14,6 +13,8 @@ export interface ApprovalStep {
     step: number;
     role: string;
     required: boolean;
+    user_id?: string;
+    approver_name?: string;
 }
 
 export interface ApprovalRule {
@@ -24,67 +25,10 @@ export interface ApprovalRule {
     steps: ApprovalStep[];
     active: boolean;
     created_at: string;
+    project_id?: string;
 }
 
 export function useApprovalRules() {
-    const rules = ref<ApprovalRule[]>([]);
-    const isLoading = ref(false);
-    const error = ref<string | null>(null);
-
-    const fetchRules = async (applies_to?: string) => {
-        isLoading.value = true;
-        error.value = null;
-        try {
-            const qs = applies_to ? `?applies_to=${applies_to}` : '';
-            rules.value = await api.get<ApprovalRule[]>(`/approvals/rules${qs}`);
-        } catch (e: any) {
-            error.value = e.message;
-        } finally {
-            isLoading.value = false;
-        }
-    };
-
-    const createRule = async (data: Omit<ApprovalRule, 'id' | 'created_at'>) => {
-        try {
-            const created = await api.post<ApprovalRule>('/approvals/rules', data);
-            rules.value.unshift(created);
-            return created;
-        } catch (e: any) {
-            error.value = e.message;
-            return null;
-        }
-    };
-
-    const updateRule = async (id: string, data: Partial<ApprovalRule>) => {
-        try {
-            const updated = await api.patch<ApprovalRule>(`/approvals/rules/${id}`, data);
-            const idx = rules.value.findIndex(r => r.id === id);
-            if (idx !== -1) rules.value[idx] = updated;
-            return updated;
-        } catch (e: any) {
-            error.value = e.message;
-            return null;
-        }
-    };
-
-    const deleteRule = async (id: string) => {
-        try {
-            await api.delete(`/approvals/rules/${id}`);
-            rules.value = rules.value.filter(r => r.id !== id);
-            return true;
-        } catch (e: any) {
-            error.value = e.message;
-            return false;
-        }
-    };
-
-    return {
-        rules,
-        isLoading,
-        error,
-        fetchRules,
-        createRule,
-        updateRule,
-        deleteRule,
-    };
+    // applies_to クエリパラメータを filterParam として渡す
+    return useGenericRules<ApprovalRule>('/approvals/rules', { filterParam: 'applies_to' });
 }
