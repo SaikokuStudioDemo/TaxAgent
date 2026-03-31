@@ -14,3 +14,7 @@ firebase-admin-key.json
 # IDE
 .vscode/
 .idea/
+
+# テストデータ（個人情報を含むため絶対にコミットしない）
+scripts/test_data/source/
+scripts/test_data/*.json

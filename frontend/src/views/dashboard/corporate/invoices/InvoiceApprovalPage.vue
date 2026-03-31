@@ -252,19 +252,18 @@ const handleStepAdded = (updated: Invoice) => {
                         <!-- Content -->
                         <td class="px-6 py-4 min-w-[200px]">
                             <p class="text-sm font-semibold tracking-wide text-gray-900 truncate">{{ invoice.invoice_number ?? invoice.client_name ?? '請求書' }}</p>
-                            <p class="text-xs text-gray-500 mt-0.5 truncate">{{ invoice.line_items?.[0]?.category ?? '未分類' }} / {{ invoice.memo ?? '' }}</p>
+                            <p class="text-xs text-gray-500 mt-0.5 truncate"><span v-if="invoice.line_items?.[0]?.category" class="bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded text-[10px] font-medium">{{ invoice.line_items?.[0]?.category }}</span><span v-if="invoice.line_items?.[0]?.category" class="mx-1 text-gray-400">/</span><span class="bg-gray-100 px-1.5 py-0.5 rounded text-[10px]">{{ invoice.payment_method ?? '請求書払い' }}</span></p>
                         </td>
                         <!-- Amount -->
                         <td class="px-6 py-4 whitespace-nowrap text-right">
                            <p class="text-base font-bold text-gray-900">¥{{ formatAmount(invoice.total_amount) }}</p>
-                           <p class="text-[11px] text-gray-500 mt-0.5">{{ invoice.payment_method ?? '請求書払い' }}</p>
                         </td>
                         <!-- 書類種別 -->
                         <td class="px-6 py-4 whitespace-nowrap text-center">
-                            <span v-if="invoice.document_type === 'issued'" class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                            <span v-if="invoice.document_type === 'issued'" class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-gray-100 text-gray-600 border border-gray-200">
                                 発行請求書
                             </span>
-                            <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-orange-50 text-orange-700 border border-orange-100">
+                            <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-gray-100 text-gray-600 border border-gray-200">
                                 受領請求書
                             </span>
                         </td>

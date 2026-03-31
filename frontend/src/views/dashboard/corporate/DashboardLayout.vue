@@ -113,8 +113,8 @@ onMounted(async () => {
               <RouterLink to="/dashboard/corporate/receipts/approvals" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="領収書承認状況">
                 <FileText :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">領収書承認状況</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/receipts/matching" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="マッチング確認">
-                <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">マッチング確認</span>
+              <RouterLink to="/dashboard/corporate/receipts/matching" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="経費消込">
+                <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">経費消込</span>
               </RouterLink>
             </div>
           </div>
@@ -135,11 +135,11 @@ onMounted(async () => {
               <RouterLink to="/dashboard/corporate/invoices/approvals" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="請求書承認状況">
                 <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">請求書承認状況</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/invoices/matching" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="入金確認">
-                <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">入金確認</span>
+              <RouterLink to="/dashboard/corporate/invoices/matching" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="入金消込">
+                <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">入金消込</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/invoices/payment-matching" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="支払確認">
-                <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">支払確認</span>
+              <RouterLink to="/dashboard/corporate/invoices/payment-matching" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="支払消込">
+                <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">支払消込</span>
               </RouterLink>
             </div>
           </div>

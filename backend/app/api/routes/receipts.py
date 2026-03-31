@@ -15,6 +15,7 @@ from app.api.helpers import (
 from app.models.transaction import ReceiptCreate
 import logging
 from app.services.rule_evaluation_service import evaluate_approval_rules
+from app.services.journal_rule_service import apply_journal_rules
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,7 +43,23 @@ async def submit_receipts_batch(
     for r in receipts_data:
         amount = r.get("amount", 0)
         fiscal_period = r.get("date", datetime.utcnow().strftime("%Y-%m"))[:7]
-        rule_id, _ = await evaluate_approval_rules(ctx.corporate_id, "receipt", r)
+        rule_id, steps = await evaluate_approval_rules(ctx.corporate_id, "receipt", r)
+        role_name_map = {
+            "direct_manager": "直属上長",
+            "accounting": "経理担当",
+            "dept_manager": "部門長",
+            "admin": "管理者",
+            "group_leader": "グループリーダー",
+        }
+        initial_history = [
+            {
+                "step": s.get("step", i + 1),
+                "roleId": s.get("role", ""),
+                "roleName": role_name_map.get(s.get("role", ""), s.get("role", "")),
+                "status": "pending",
+            }
+            for i, s in enumerate(steps or [])
+        ]
         doc = {
             "corporate_id": ctx.corporate_id,
             "submitted_by": ctx.user_id,
@@ -60,16 +77,20 @@ async def submit_receipts_batch(
             "approval_status": "pending_approval",
             "reconciliation_status": "unreconciled",
             "approval_rule_id": rule_id,
+            "approval_history": initial_history,
             "current_step": 1,
             "created_at": datetime.utcnow(),
         }
         docs_to_insert.append(doc)
+
+    docs_to_insert = await apply_journal_rules(ctx.db, ctx.corporate_id, docs_to_insert)
 
     result = await ctx.db["receipts"].insert_many(docs_to_insert)
     return {
         "status": "success",
         "message": f"{len(docs_to_insert)} receipts submitted",
         "inserted_count": len(docs_to_insert),
+        "inserted_ids": [str(oid) for oid in result.inserted_ids],
     }
 
 

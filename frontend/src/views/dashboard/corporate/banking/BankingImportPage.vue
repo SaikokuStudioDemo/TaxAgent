@@ -118,7 +118,7 @@ const handleRegister = async () => {
         <h1 class="text-2xl font-bold tracking-tight text-gray-900 border-b-2 border-primary pb-2 inline-block">データアップロード (口座・カード)</h1>
         <p class="text-muted-foreground mt-2 text-sm text-gray-500">
           銀行口座やクレジットカードの利用明細（CSV）をシステムに取り込みます。<br/>
-          取り込んだデータは「マッチング確認」画面にて、提出された領収書データと紐付けることができます。
+          取り込んだデータは「経費消込」画面にて、提出された領収書データと紐付けることができます。
         </p>
       </div>
     </div>

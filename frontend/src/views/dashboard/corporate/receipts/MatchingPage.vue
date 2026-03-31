@@ -24,7 +24,6 @@ const receiptsMock = ref<MatchingEntry[]>([]);
 const fetchAndMapReceipts = async () => {
   await fetchReceipts({});
   receiptsMock.value = apiReceipts.value
-    .filter(r => ['法人カード', '銀行振込', 'corporate_card', 'bank_transfer'].includes(r.payment_method))
     .map(r => ({ ...r, matched: false }));
 };
 
@@ -105,10 +104,10 @@ const toggleReceiptExpansion = (id: string) => {
     <!-- Header -->
     <div class="flex flex-col gap-4 shrink-0">
       <div>
-        <h1 class="text-2xl font-bold tracking-tight text-gray-900 border-b-2 border-primary pb-2 inline-block">口座・カード明細マッチング</h1>
+        <h1 class="text-2xl font-bold tracking-tight text-gray-900 border-b-2 border-primary pb-2 inline-block">経費消込</h1>
         <p class="text-muted-foreground mt-2 text-sm text-gray-500">
           「データアップロード」画面で取り込まれた明細データと、提出された領収書データを突合（マッチング）し、仕訳を確定します。<br/>
-          ※ 領収書の承認ステータスに関わらず、決済手段が「法人カード」「銀行振込」のデータがマッチング対象となります。
+          ※ 銀行明細はすべての決済手段の領収書と、カード明細はカード払いの領収書と突合できます。
         </p>
       </div>
       <!-- Tabs -->
@@ -355,7 +354,7 @@ const toggleReceiptExpansion = (id: string) => {
                         <p class="text-lg font-bold tracking-tight text-gray-900 whitespace-nowrap">¥{{ formatAmount(t.amount) }}</p>
                     </div>
                     <div class="pr-8">
-                        <p class="text-sm font-bold text-gray-800 leading-tight">{{ t.description }}</p>
+                        <p class="text-sm font-bold text-gray-800 leading-tight">{{ t.description }} <span v-if="t.type === 'card'" class="text-[10px] bg-purple-50 text-purple-600 border border-purple-200 px-1.5 py-0.5 rounded font-medium">カード</span><span v-else class="text-[10px] bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded font-medium">銀行</span></p>
                     </div>
                 </div>
             </div>

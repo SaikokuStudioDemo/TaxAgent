@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, nextTick } from 'vue';
 import {
     Plus,
     Search,
@@ -24,6 +24,68 @@ const filteredRules = computed(() => {
     );
 });
 
+// 勘定科目マスタ
+const ACCOUNT_SUBJECTS = [
+    '売上高', '売上返品', '受取利息', '受取配当金', '雑収入',
+    '仕入高', '外注費', '給与手当', '役員報酬', '賞与', '法定福利費',
+    '福利厚生費', '交際費', '会議費', '旅費交通費', '通信費',
+    '消耗品費', '事務用品費', '新聞図書費', '広告宣伝費',
+    '支払手数料', '地代家賃', '水道光熱費', '修繕費',
+    '減価償却費', 'リース料', '保険料', '租税公課',
+    '支払利息', '雑損失', '貸倒損失',
+];
+
+// 勘定科目コンボボックス用ステート
+const accountSubjectQuery = ref('消耗品費');
+const showAccountDropdown = ref(false);
+const isTypingAccountSubject = ref(false);
+const accountSubjectInputRef = ref<HTMLInputElement | null>(null);
+const dropdownStyle = ref<Record<string, string>>({});
+
+const filteredAccountSubjects = computed(() => {
+    // フォーカス直後（未入力）は全件表示、入力中はフィルタ
+    if (!isTypingAccountSubject.value) return ACCOUNT_SUBJECTS;
+    const q = accountSubjectQuery.value.trim();
+    if (!q) return ACCOUNT_SUBJECTS;
+    return ACCOUNT_SUBJECTS.filter(s => s.includes(q));
+});
+
+const updateDropdownPosition = () => {
+    if (!accountSubjectInputRef.value) return;
+    const rect = accountSubjectInputRef.value.getBoundingClientRect();
+    dropdownStyle.value = {
+        top: `${rect.bottom + 4}px`,
+        left: `${rect.left}px`,
+        width: `${rect.width}px`,
+    };
+};
+
+const onAccountSubjectFocus = () => {
+    isTypingAccountSubject.value = false;
+    nextTick(() => {
+        updateDropdownPosition();
+        showAccountDropdown.value = true;
+        accountSubjectInputRef.value?.select();
+    });
+};
+
+const selectAccountSubject = (subject: string) => {
+    editingRule.value.account_subject = subject;
+    accountSubjectQuery.value = subject;
+    showAccountDropdown.value = false;
+    isTypingAccountSubject.value = false;
+};
+
+const onAccountSubjectInput = () => {
+    isTypingAccountSubject.value = true;
+    editingRule.value.account_subject = accountSubjectQuery.value;
+    showAccountDropdown.value = true;
+};
+
+const onAccountSubjectBlur = () => {
+    setTimeout(() => { showAccountDropdown.value = false; }, 150);
+};
+
 // モーダル用ステート
 const showModal = ref(false);
 const isEditing = ref(false);
@@ -40,12 +102,14 @@ const openNewModal = () => {
     editingRule.value = {
         id: '', name: '', keyword: '', target_field: '品目・摘要', account_subject: '消耗品費', tax_division: '課税仕入 10%', is_active: true
     };
+    accountSubjectQuery.value = '消耗品費';
     isEditing.value = false;
     showModal.value = true;
 };
 
 const editRule = (rule: JournalRule) => {
     editingRule.value = { ...rule };
+    accountSubjectQuery.value = rule.account_subject;
     isEditing.value = true;
     showModal.value = true;
 };
@@ -210,15 +274,36 @@ const saveRule = async () => {
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1.5">割り当て: 勘定科目</label>
-                            <select v-model="editingRule.account_subject" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary">
-                                <option>消耗品費</option>
-                                <option>通信費</option>
-                                <option>旅費交通費</option>
-                                <option>交際費</option>
-                                <option>支払手数料</option>
-                                <option>売上高</option>
-                                <option>対象外（登録しない）</option>
-                            </select>
+                            <div class="relative">
+                                <input
+                                    ref="accountSubjectInputRef"
+                                    type="text"
+                                    v-model="accountSubjectQuery"
+                                    @input="onAccountSubjectInput"
+                                    @focus="onAccountSubjectFocus"
+                                    @blur="onAccountSubjectBlur"
+                                    placeholder="選択または入力..."
+                                    autocomplete="off"
+                                    class="w-full border border-slate-300 rounded-lg p-2.5 text-sm text-gray-900 focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                />
+                                <Teleport to="body">
+                                    <ul
+                                        v-if="showAccountDropdown && filteredAccountSubjects.length > 0"
+                                        :style="dropdownStyle"
+                                        class="fixed z-[9999] bg-white text-gray-900 border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto"
+                                    >
+                                        <li
+                                            v-for="subject in filteredAccountSubjects"
+                                            :key="subject"
+                                            @mousedown.prevent="selectAccountSubject(subject)"
+                                            class="px-3 py-2 text-sm cursor-pointer hover:bg-slate-50"
+                                            :class="subject === editingRule.account_subject ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700'"
+                                        >
+                                            {{ subject }}
+                                        </li>
+                                    </ul>
+                                </Teleport>
+                            </div>
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-700 mb-1.5">割り当て: 税区分</label>

@@ -16,6 +16,7 @@ from app.api.helpers import (
 from app.models.invoice import InvoiceCreate, InvoiceInDB
 import logging
 from app.services.rule_evaluation_service import evaluate_approval_rules
+from app.services.journal_rule_service import apply_journal_rules
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -39,6 +40,23 @@ async def create_invoice(
     # 承認ルールなしで即送付 → 自動承認扱い
     is_auto_approved = requested_status == "sent" and rule_id is None
 
+    role_name_map = {
+        "direct_manager": "直属上長",
+        "accounting": "経理担当",
+        "dept_manager": "部門長",
+        "admin": "管理者",
+        "group_leader": "グループリーダー",
+    }
+    initial_history = [
+        {
+            "step": s.get("step", i + 1),
+            "roleId": s.get("role", ""),
+            "roleName": role_name_map.get(s.get("role", ""), s.get("role", "")),
+            "status": "pending",
+        }
+        for i, s in enumerate(rule_steps or [])
+    ]
+
     doc = {
         **payload.model_dump(),
         "corporate_id": ctx.corporate_id,
@@ -48,12 +66,16 @@ async def create_invoice(
         "current_step": 1,
         "approval_rule_id": rule_id,
         "approval_steps": rule_steps if rule_id else [],
+        "approval_history": initial_history,
         "attachments": payload.attachments or [],
         "fiscal_period": fiscal_period,
         "ai_extracted": False,
         "created_at": datetime.utcnow(),
         "paid_at": None,
     }
+
+    docs = await apply_journal_rules(ctx.db, ctx.corporate_id, [doc], doc_type="invoice")
+    doc = docs[0]
 
     result = await ctx.db["invoices"].insert_one(doc)
     created = await ctx.db["invoices"].find_one({"_id": result.inserted_id})

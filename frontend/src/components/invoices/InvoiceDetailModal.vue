@@ -123,7 +123,7 @@ const onSave = async (data: Record<string, any>): Promise<boolean> => {
             </div>
             <div>
               <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">勘定科目</dt>
-              <dd class="font-medium text-blue-800 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded text-xs inline-block">{{ invoice.line_items?.[0]?.category ?? '未分類' }}</dd>
+              <dd class="font-medium text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded text-xs inline-block">{{ invoice.line_items?.[0]?.category ?? '未分類' }}</dd>
             </div>
             <div>
               <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">支払方法</dt>

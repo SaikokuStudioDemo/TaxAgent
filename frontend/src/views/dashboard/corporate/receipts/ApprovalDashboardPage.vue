@@ -210,7 +210,7 @@ const handleStepAdded = (updated: Receipt) => {
                         <!-- Content -->
                         <td class="px-6 py-4 min-w-[200px]">
                             <p class="text-sm font-semibold tracking-wide text-gray-900 truncate">{{ receipt.payee }}</p>
-                            <p class="text-xs text-gray-500 mt-0.5 truncate">{{ receipt.category }} / {{ receipt.memo ?? '' }} / <span class="bg-gray-100 px-1.5 py-0.5 rounded ml-1">{{ receipt.payment_method }}</span></p>
+                            <p class="text-xs text-gray-500 mt-0.5 truncate"><span v-if="receipt.category" class="bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded text-[10px] font-medium">{{ receipt.category }}</span><span v-if="receipt.category" class="mx-1 text-gray-400">/</span><span class="bg-gray-100 px-1.5 py-0.5 rounded text-[10px]">{{ receipt.payment_method }}</span></p>
                         </td>
                         <!-- Amount -->
                         <td class="px-6 py-4 whitespace-nowrap text-right">
@@ -219,7 +219,7 @@ const handleStepAdded = (updated: Receipt) => {
                         </td>
                         <!-- 書類種別 -->
                         <td class="px-6 py-4 whitespace-nowrap text-center">
-                            <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-gray-100 text-gray-600 border border-gray-200">
                                 領収書
                             </span>
                         </td>

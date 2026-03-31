@@ -33,6 +33,17 @@ export interface Match {
     journal_entries: any[];
     fiscal_period: string;
     matched_at: string;
+    score?: number;
+    score_breakdown?: { amount: number; date: number; name: number };
+    auto_suggested: boolean;
+    user_action: string;
+}
+
+export interface ApiCandidatePair {
+    transaction: any;
+    document: any;
+    score: number;
+    score_breakdown: { amount: number; date: number; name: number };
 }
 
 export function useTransactions() {
@@ -96,14 +107,25 @@ export function useTransactions() {
         fiscal_period: string;
         matched_by?: string;
         difference_treatment?: string;
+        auto_suggested?: boolean;
     }) => {
         try {
             const created = await api.post<Match>('/matches', {
                 ...data,
                 matched_by: data.matched_by || 'manual',
+                auto_suggested: data.auto_suggested ?? false,
             });
             matches.value.unshift(created);
             return created;
+        } catch (e: any) {
+            error.value = e.message;
+            return null;
+        }
+    };
+
+    const patchMatch = async (id: string, data: Record<string, any>) => {
+        try {
+            return await api.patch<Match>(`/matches/${id}`, data);
         } catch (e: any) {
             error.value = e.message;
             return null;
@@ -121,6 +143,19 @@ export function useTransactions() {
         }
     };
 
+    const fetchCandidates = async (params?: {
+        match_type?: string;
+        fiscal_period?: string;
+    }): Promise<ApiCandidatePair[]> => {
+        try {
+            const qs = buildQueryString(params);
+            return await api.get<ApiCandidatePair[]>(`/matches/candidates${qs}`);
+        } catch (e: any) {
+            error.value = e.message;
+            return [];
+        }
+    };
+
     return {
         transactions,
         matches,
@@ -130,6 +165,8 @@ export function useTransactions() {
         importTransactions,
         fetchMatches,
         createMatch,
+        patchMatch,
         deleteMatch,
+        fetchCandidates,
     };
 }

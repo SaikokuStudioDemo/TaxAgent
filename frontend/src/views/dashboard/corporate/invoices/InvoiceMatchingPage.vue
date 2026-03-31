@@ -23,7 +23,7 @@ const props = defineProps<{ mode: 'income' | 'payment' }>();
 // All Tailwind class strings must appear as complete literals for the JIT scanner
 const CONFIGS = {
     income: {
-        title: '入金確認 (入金消込)',
+        title: '入金消込',
         description: '発行した請求書データと、銀行口座等への入金データを突合（マッチング）します。',
         documentType: 'issued' as const,
         txFilter: 'credit' as const,
@@ -52,7 +52,7 @@ const CONFIGS = {
         txBankBadge:    'bg-emerald-50 text-emerald-700 border-emerald-200',
     },
     payment: {
-        title: '支払確認 (出金消込)',
+        title: '支払消込',
         description: '受領した請求書データと、銀行口座からの出金データを突合（マッチング）します。',
         documentType: 'received' as const,
         txFilter: 'debit' as const,

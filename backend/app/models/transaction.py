@@ -61,6 +61,10 @@ class MatchCreate(BaseModel):
     matched_by: Literal["ai", "manual"]
     journal_entries: List[dict] = []
     fiscal_period: str
+    score: Optional[int] = None
+    score_breakdown: Optional[dict] = None
+    auto_suggested: bool = False
+    user_action: str = "manual"  # confirmed / rejected / manual
 
 class MatchInDB(MatchCreate):
     id: Optional[str] = Field(None, alias="_id")
