@@ -87,6 +87,7 @@ async def list_invoices(
     document_type: Optional[str] = None,
     approval_status: Optional[str] = None,
     fiscal_period: Optional[str] = None,
+    reconciliation_status: Optional[str] = None,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     query = build_list_query(
@@ -96,6 +97,8 @@ async def list_invoices(
         fiscal_period=fiscal_period,
     )
     query["is_deleted"] = {"$ne": True}
+    if reconciliation_status:
+        query["reconciliation_status"] = reconciliation_status
 
     cursor = ctx.db["invoices"].find(query).sort("created_at", -1)
     docs = await cursor.to_list(length=500)

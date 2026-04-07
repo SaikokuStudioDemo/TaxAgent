@@ -1,0 +1,17 @@
+export const MATCHING_STYLES = {
+  tabContainer: 'flex w-full items-center gap-1 bg-gray-100 p-1.5 rounded-xl shadow-inner shrink-0',
+  tabBase: 'flex-1 justify-center px-6 py-2.5 rounded-lg text-sm transition-all',
+  tabActive: 'bg-white text-gray-900 shadow-sm font-bold',
+  tabInactive: 'text-gray-500 hover:text-gray-700 font-medium',
+  paneBase: 'flex-1 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[400px] overflow-hidden',
+  paneHeaderBase: 'p-4 border-b border-gray-200 flex items-center justify-between shrink-0',
+  searchInput: 'w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500',
+  cardBase: 'bg-white border rounded-lg p-4 cursor-pointer transition-all hover:shadow-md relative overflow-hidden select-none border-gray-200 hover:border-gray-300',
+  cardSelected: 'border-blue-500 ring-2 ring-blue-500 shadow-sm bg-blue-50/30',
+  cardSuggested: 'border-indigo-300 bg-indigo-50/20',
+  centerIcon: 'bg-gray-100 rounded-full p-2 shadow-sm cursor-pointer hover:bg-blue-100 transition-colors',
+  guidanceBarActive: 'bg-blue-600 text-white p-4 rounded-xl shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2',
+  guidanceBarWarning: 'bg-amber-50 text-amber-900 p-4 rounded-xl shadow-md flex items-center gap-3 animate-in fade-in slide-in-from-top-2 border border-amber-300',
+  guidanceBarDefault: 'bg-gray-50 text-gray-500 p-4 rounded-xl border border-dashed border-gray-300 flex items-center justify-center gap-2',
+  matchButton: 'bg-white text-blue-600 font-bold px-8 py-3 rounded-lg shadow-sm hover:bg-blue-50 transition-colors shrink-0 flex justify-center items-center gap-2 text-base',
+} as const

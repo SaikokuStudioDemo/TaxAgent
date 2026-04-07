@@ -252,7 +252,7 @@ async def update_employee(
         raise HTTPException(status_code=404, detail="Employee not found or access denied")
 
     # Only allow updating safe operational fields
-    allowed = {"role", "permissions", "usageFee", "departmentId", "groupId"}
+    allowed = {"role", "permissions", "usageFee", "departmentId", "groupId", "bank_display_name"}
     update_data = {k: v for k, v in payload.items() if k in allowed}
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields to update")

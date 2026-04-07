@@ -10,8 +10,26 @@ import {
     BookText
 } from 'lucide-vue-next';
 import { useJournalRules, type JournalRule } from '@/composables/useJournalRules';
+import { API_BASE } from '@/lib/api';
+
+interface AutoExpenseRule {
+  key: string
+  name: string
+  source_type: string
+  keywords: string[]
+  account_subject: string
+  tax_division: string
+}
 
 const { rules, isLoading, fetchRules, createRule, updateRule, deleteRule } = useJournalRules();
+
+const activeTab = ref<'custom' | 'auto'>('custom');
+const autoExpenseRules = ref<AutoExpenseRule[]>([]);
+
+const fetchAutoExpenseRules = async () => {
+  const res = await fetch(`${API_BASE}/journal-rules/auto-expense-rules`);
+  autoExpenseRules.value = await res.json();
+};
 
 const searchQuery = ref('');
 
@@ -96,6 +114,7 @@ const editingRule = ref<Omit<JournalRule, 'id' | 'created_at'> & { id: string }>
 
 onMounted(() => {
     fetchRules();
+    fetchAutoExpenseRules();
 });
 
 const openNewModal = () => {
@@ -153,14 +172,36 @@ const saveRule = async () => {
                     <p>AIが判断できない特殊な取引や、<span class="font-semibold text-slate-800">「社内独自の勘定項目に強制的に振り分けたい特定のキーワード」</span>がある場合のみ、こちらにルールを追加してください。</p>
                 </div>
             </div>
-            <button @click="openNewModal" class="shrink-0 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm w-[180px]">
+            <button v-if="activeTab === 'custom'" @click="openNewModal" class="shrink-0 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm w-[180px]">
                 <Plus class="w-5 h-5" />
                 <span>新規ルール作成</span>
             </button>
         </div>
 
+        <!-- Tabs -->
+        <div class="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit mb-6">
+          <button
+            @click="activeTab = 'custom'"
+            :class="activeTab === 'custom'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'"
+            class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+          >
+            カスタムルール
+          </button>
+          <button
+            @click="activeTab = 'auto'"
+            :class="activeTab === 'auto'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'"
+            class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+          >
+            自動処理ルール
+          </button>
+        </div>
+
         <!-- Toolbar -->
-        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-4 mb-6">
+        <div v-if="activeTab === 'custom'" class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-4 mb-6">
             <div class="relative flex-1">
                 <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
@@ -173,7 +214,7 @@ const saveRule = async () => {
         </div>
 
         <!-- Table -->
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div v-if="activeTab === 'custom'" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse">
                     <thead>
@@ -234,8 +275,38 @@ const saveRule = async () => {
             </div>
         </div>
 
+        <!-- 自動処理ルール -->
+        <div v-if="activeTab === 'auto'" class="space-y-4">
+          <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
+            <p class="font-bold mb-1">自動処理ルールとは</p>
+            <p>領収書が不要で、銀行・カード明細上で確定できる取引を自動でマッチング済みにするルールです。明細インポート時に自動で適用されます。このルールは編集できません。</p>
+          </div>
+          <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-700">ルール名</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-700">対象</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-700">キーワード</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-700">勘定科目</th>
+                  <th class="text-left px-4 py-3 font-semibold text-slate-700">税区分</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr v-for="rule in autoExpenseRules" :key="rule.key" class="hover:bg-slate-50">
+                  <td class="px-4 py-3 font-medium text-slate-900">{{ rule.name }}</td>
+                  <td class="px-4 py-3 text-slate-600">{{ rule.source_type }}</td>
+                  <td class="px-4 py-3 text-slate-600">{{ rule.keywords.join('、') }}</td>
+                  <td class="px-4 py-3 text-slate-600">{{ rule.account_subject }}</td>
+                  <td class="px-4 py-3 text-slate-600">{{ rule.tax_division }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- Rule Editor Modal -->
-        <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div v-if="activeTab === 'custom' && showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="showModal = false"></div>
 
             <div class="bg-white rounded-xl shadow-xl w-full max-w-lg relative z-10 flex flex-col overflow-hidden max-h-[90vh]">

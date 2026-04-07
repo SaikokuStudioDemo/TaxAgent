@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.get("/auto-expense-rules", summary="自動処理ルール一覧を取得する")
+async def list_auto_expense_rules():
+    from app.services.auto_expense_rules import AUTO_EXPENSE_RULES
+    return AUTO_EXPENSE_RULES
+
+
 @router.get("", summary="自動仕訳ルール一覧を取得する")
 async def list_journal_rules(
     ctx: CorporateContext = Depends(get_corporate_context),

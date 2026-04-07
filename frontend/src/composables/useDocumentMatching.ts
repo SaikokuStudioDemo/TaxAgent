@@ -26,6 +26,7 @@ export interface MatchingTransaction {
   type: 'bank' | 'card';
   source_type: 'bank' | 'card';  // 追加
   transaction_type: 'credit' | 'debit';
+  status: 'unmatched' | 'matched' | 'transferred';
   matched: boolean;
 }
 
@@ -108,14 +109,15 @@ export function useDocumentMatching<T extends MatchableDocument>(
     description: t.description,
     amount: t.amount,
     type: t.source_type,
-    source_type: t.source_type,  // 追加
+    source_type: t.source_type,
     transaction_type: t.transaction_type,
-    matched: false,
+    status: t.status ?? 'unmatched',
+    matched: t.status === 'matched',
   });
 
   /** matches の内容を documents / rawTransactions の matched フラグに反映 */
   const applyMatches = () => {
-    rawTransactions.value.forEach(t => { t.matched = false; });
+    rawTransactions.value.forEach(t => { t.matched = t.status === 'matched'; });
     documents.value.forEach(d => { d.matched = false; });
     matches.value
       .filter((m: any) => m.match_type === matchType)

@@ -24,3 +24,13 @@ This document tracks the outstanding requirements and future improvements for th
 ## メンテナンス & クリーンアップ (Maintenance)
 - [ ] **Ongoing Artifact Cleanup**: Periodically move old step/test logs to the `/archive` directory to keep the workspace efficient.
 - [ ] **Secret Audit**: Regularly verify that no new environment variables have been committed to the repository.
+
+## 優先度：低（要望ベースで対応）
+- [ ] **マッチングページの承認ステータスフィルター**: 
+  マッチングページ（領収書・請求書）に承認済み／未承認で
+  絞り込めるフィルターを追加する。
+  現状は承認状態に関わらず全件表示する仕様で問題ないが、
+  ユーザーから要望があれば対応する。
+  実装はfrontendのfetchAndMapReceipts/fetchAndMapInvoicesに
+  approval_statusフィルターを追加するだけ。
+

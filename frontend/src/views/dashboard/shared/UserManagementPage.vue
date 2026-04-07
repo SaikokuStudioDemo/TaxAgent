@@ -86,6 +86,7 @@ const patchUser = async (u: UserData) => {
             usageFee: u.usageFee,
             departmentId: u.departmentId,
             groupId: u.groupId,
+            bank_display_name: u.bank_display_name,
         }),
     }).catch(() => {});
 };

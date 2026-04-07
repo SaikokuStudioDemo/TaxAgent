@@ -19,6 +19,9 @@ import {
   MessageSquareText,
   ArrowRightLeft,
   BookText,
+  Wallet,
+  History,
+  Zap,
   Send as SendIcon,
   Paperclip as PaperclipIcon
 } from 'lucide-vue-next';
@@ -146,10 +149,29 @@ onMounted(async () => {
 
           <!-- Bank & Card Integration -->
           <div>
-            <p v-if="isLeftSidebarOpen" class="px-3 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 mt-4">口座・カード連携</p>
+            <p v-if="isLeftSidebarOpen" class="px-3 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 mt-4">口座・カードデータ</p>
             <div class="space-y-1" :class="{'mt-4': !isLeftSidebarOpen}">
               <RouterLink to="/dashboard/corporate/banking/import" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="データアップロード">
                 <CreditCard :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">データアップロード</span>
+              </RouterLink>
+              <RouterLink to="/dashboard/corporate/banking/history" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="インポート履歴">
+                <History :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">インポート履歴</span>
+              </RouterLink>
+              <RouterLink to="/dashboard/corporate/banking/auto-matches" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="自動消込履歴">
+                <Zap :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">自動消込履歴</span>
+              </RouterLink>
+            </div>
+          </div>
+
+          <!-- Cash -->
+          <div>
+            <p v-if="isLeftSidebarOpen" class="px-3 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 mt-4">現金出納帳</p>
+            <div class="space-y-1" :class="{'mt-4': !isLeftSidebarOpen}">
+              <RouterLink to="/dashboard/corporate/cash/ledger" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="現金出納帳">
+                <Wallet :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">現金出納帳</span>
+              </RouterLink>
+              <RouterLink to="/dashboard/corporate/cash/matching" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="現金消込">
+                <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">現金消込</span>
               </RouterLink>
             </div>
           </div>
@@ -173,7 +195,7 @@ onMounted(async () => {
 
           <!-- Settings (User & Organization Management) -->
           <div>
-            <p v-if="isLeftSidebarOpen" class="px-3 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 mt-4">設定</p>
+            <p v-if="isLeftSidebarOpen" class="px-3 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 mt-4">組織設定</p>
             <div class="space-y-1" :class="{'mt-4': !isLeftSidebarOpen}">
               <RouterLink to="/dashboard/corporate/settings/organization" class="flex items-center gap-3 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors" active-class="bg-blue-600/20 text-white" :class="{'justify-center': !isLeftSidebarOpen}" title="部門・プロジェクト編成">
                 <Users :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">部門・プロジェクト編成</span>

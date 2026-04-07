@@ -74,12 +74,16 @@ const router = createRouter({
                 { path: 'invoices/matching', name: 'dashboard-corporate-invoices-matching', component: () => import('@/views/dashboard/corporate/invoices/InvoiceMatchingPage.vue'), props: { mode: 'income' } },
                 { path: 'invoices/payment-matching', name: 'dashboard-corporate-invoices-payment-matching', component: () => import('@/views/dashboard/corporate/invoices/InvoiceMatchingPage.vue'), props: { mode: 'payment' } },
                 { path: 'banking/import', name: 'dashboard-corporate-banking-import', component: () => import('@/views/dashboard/corporate/banking/BankingImportPage.vue') },
+                { path: 'banking/history', name: 'dashboard-corporate-banking-history', component: () => import('@/views/dashboard/corporate/banking/BankImportHistoryPage.vue') },
+                { path: 'banking/auto-matches', name: 'BankingAutoMatches', component: () => import('@/views/dashboard/corporate/banking/AutoMatchHistoryPage.vue') },
                 { path: 'rules/approvals', name: 'dashboard-corporate-rules-approvals', component: () => import('@/views/dashboard/corporate/rules/ApprovalRulesPage.vue') },
                 { path: 'settings/organization', name: 'dashboard-corporate-settings-organization', component: () => import('@/views/dashboard/corporate/settings/OrganizationPage.vue') },
                 { path: 'settings/company', name: 'dashboard-corporate-settings-company', component: () => import('@/views/dashboard/corporate/settings/CompanyProfilePage.vue') },
                 { path: 'settings/clients', name: 'dashboard-corporate-settings-clients', component: () => import('@/views/dashboard/corporate/clients/ClientDirectoryPage.vue') },
                 { path: 'settings/matching-rules', name: 'dashboard-corporate-settings-matching-rules', component: () => import('@/views/dashboard/corporate/settings/MatchingRulesPage.vue') },
                 { path: 'settings/journal-rules', name: 'dashboard-corporate-settings-journal-rules', component: () => import('@/views/dashboard/corporate/settings/JournalRulesPage.vue') },
+                { path: 'cash/ledger', name: 'CashLedger', component: () => import('@/views/dashboard/corporate/cash/CashLedgerPage.vue') },
+                { path: 'cash/matching', name: 'CashMatching', component: () => import('@/views/dashboard/corporate/cash/CashMatchingPage.vue') },
                 { path: 'users', name: 'dashboard-corporate-users', component: () => import('@/views/dashboard/shared/UserManagementPage.vue') }
             ]
         },

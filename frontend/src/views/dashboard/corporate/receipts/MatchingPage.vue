@@ -8,11 +8,14 @@ import {
   Link2,
   Clock,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  User,
 } from 'lucide-vue-next';
 import { useReceipts, type Receipt } from '@/composables/useReceipts';
 import { useDocumentMatching, type MatchableDocument } from '@/composables/useDocumentMatching';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
+import { MATCHING_STYLES } from '@/constants/matchingStyles';
+import { api } from '@/lib/api';
 
 // --- TYPES ---
 interface MatchingEntry extends Receipt, MatchableDocument {}
@@ -64,7 +67,60 @@ const {
   transactionTypeFilter: shallowRef('debit' as const),
 });
 
-onMounted(loadData);
+// --- APPLICANT CANDIDATES ---
+interface ApplicantReceipt {
+  id: string
+  payee?: string
+  amount: number
+  date?: string
+  submitter_name?: string
+}
+interface ApplicantCandidate {
+  transaction: { id: string; date?: string; description?: string; amount: number; type?: string; transaction_date?: string }
+  employee: { id: string; name: string; bank_display_name?: string } | null
+  receipts: ApplicantReceipt[]
+  confidence: number
+  match_reason: string
+}
+
+const applicantCandidates = ref<ApplicantCandidate[]>([])
+const isLoadingApplicants = ref(false)
+const matchingApplicantId = ref<string | null>(null)
+
+const fetchApplicantCandidates = async () => {
+  isLoadingApplicants.value = true
+  try {
+    applicantCandidates.value = await api.get<ApplicantCandidate[]>('/matches/candidates/by-applicant')
+  } catch {
+    // silent — applicant matching is optional
+  } finally {
+    isLoadingApplicants.value = false
+  }
+}
+
+const handleApplicantMatch = async (candidate: ApplicantCandidate) => {
+  if (!confirm(`「${candidate.employee?.name ?? '不明'}」の取引明細と領収書 ${candidate.receipts.length} 件を消込しますか？`)) return
+  matchingApplicantId.value = candidate.transaction.id
+  try {
+    await api.post('/matches', {
+      match_type: 'receipt',
+      transaction_ids: [candidate.transaction.id],
+      document_ids: candidate.receipts.map((r: ApplicantReceipt) => r.id),
+      matched_by: 'ai',
+      auto_suggested: true,
+    })
+    await Promise.all([loadData(), fetchApplicantCandidates()])
+  } catch (e: any) {
+    alert(`消込に失敗しました: ${e.message}`)
+  } finally {
+    matchingApplicantId.value = null
+  }
+}
+
+onMounted(() => {
+  loadData()
+  fetchApplicantCandidates()
+});
 
 // --- PAGE-LOCAL STATE ---
 // 展開（アコーディオン）はUI固有のためページに残す
@@ -111,26 +167,23 @@ const toggleReceiptExpansion = (id: string) => {
         </p>
       </div>
       <!-- Tabs -->
-      <div class="flex w-full items-center gap-1 bg-gray-100 p-1.5 rounded-xl shadow-inner shrink-0">
-        <button 
+      <div :class="MATCHING_STYLES.tabContainer">
+        <button
             @click="activeTab = 'unmatched'"
-            :class="activeTab === 'unmatched' ? 'bg-white text-gray-900 shadow-sm font-bold' : 'text-gray-500 hover:text-gray-700 font-medium'"
-            class="flex-1 justify-center px-6 py-2.5 rounded-lg text-sm transition-all"
+            :class="[MATCHING_STYLES.tabBase, activeTab === 'unmatched' ? MATCHING_STYLES.tabActive : MATCHING_STYLES.tabInactive]"
         >
             未結合 ({{ unmatchedTransactions.length }})
         </button>
-        <button 
+        <button
             @click="activeTab = 'candidates'"
-            :class="activeTab === 'candidates' ? 'bg-white text-gray-900 shadow-sm font-bold ring-1 ring-blue-500/20' : 'text-gray-500 hover:text-gray-700 font-medium'"
-            class="flex-1 justify-center px-6 py-2.5 rounded-lg text-sm transition-all flex items-center gap-1.5 relative"
+            :class="[MATCHING_STYLES.tabBase, activeTab === 'candidates' ? MATCHING_STYLES.tabActive : MATCHING_STYLES.tabInactive, 'flex items-center gap-1.5 relative']"
         >
             <div v-if="displayCandidatePairs.length > 0" class="absolute top-2 right-4 md:right-auto md:-top-1 md:-right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
             ✨ 自動結合候補 ({{ displayCandidatePairs.length }})
         </button>
-        <button 
+        <button
             @click="activeTab = 'matched'"
-            :class="activeTab === 'matched' ? 'bg-white text-gray-900 shadow-sm font-bold' : 'text-gray-500 hover:text-gray-700 font-medium'"
-            class="flex-1 justify-center px-6 py-2.5 rounded-lg text-sm transition-all flex items-center gap-1.5"
+            :class="[MATCHING_STYLES.tabBase, activeTab === 'matched' ? MATCHING_STYLES.tabActive : MATCHING_STYLES.tabInactive, 'flex items-center gap-1.5']"
         >
             <CheckCircle v-if="matchedCount > 0" class="h-4 w-4 text-emerald-500" />
             結合済 ({{ matchedCount }})
@@ -143,7 +196,7 @@ const toggleReceiptExpansion = (id: string) => {
       <!-- Interactive Action / Guidance Bar Area -->
       <div class="shrink-0 transition-all relative">
           <!-- 1. Match Action Bar (Transaction AND Receipt selected) -->
-          <div v-if="selectedTransactionIds.length > 0 && selectedReceiptIds.length > 0" class="bg-blue-600 text-white p-4 rounded-xl shadow-lg flex flex-col md:flex-row items-center justify-between animate-in slide-in-from-top-2 fade-in border border-blue-500 z-20 gap-4">
+          <div v-if="selectedTransactionIds.length > 0 && selectedReceiptIds.length > 0" :class="MATCHING_STYLES.guidanceBarActive">
               <div class="flex items-start gap-3 w-full md:w-auto">
                   <div class="bg-white/20 p-2 rounded-full hidden sm:block mt-1"><Link2 class="h-5 w-5" /></div>
                   <div class="flex-1">
@@ -174,14 +227,14 @@ const toggleReceiptExpansion = (id: string) => {
                       </div>
                   </div>
               </div>
-              <button @click="handleMatch" class="w-full md:w-auto bg-white text-blue-600 font-bold px-8 py-3 rounded-lg shadow-sm hover:bg-blue-50 transition-colors shrink-0 flex justify-center items-center gap-2 text-base">
+              <button @click="handleMatch" :class="['w-full md:w-auto', MATCHING_STYLES.matchButton]">
                   <CheckCircle class="w-5 h-5" />
                   <span>この内容で結合する</span>
               </button>
           </div>
 
           <!-- 2. Guidance Banner (Transaction selected, NO receipt selected) -->
-          <div v-else-if="selectedTransactionIds.length > 0 && selectedReceiptIds.length === 0" class="bg-amber-50 text-amber-900 p-4 rounded-xl shadow-md flex items-center gap-3 animate-in fade-in slide-in-from-top-2 border border-amber-300 z-10">
+          <div v-else-if="selectedTransactionIds.length > 0 && selectedReceiptIds.length === 0" :class="MATCHING_STYLES.guidanceBarWarning">
               <span class="flex h-6 w-6 items-center justify-center rounded-full bg-amber-200 text-amber-900 text-sm font-bold border border-amber-400 shrink-0 shadow-sm animate-pulse">!</span>
               <div>
                   <p class="font-bold">右の明細 (計 ¥{{ formatAmount(selectedTransactionSum) }}) に対応する領収書を、左のリストから選択してください。</p>
@@ -189,7 +242,7 @@ const toggleReceiptExpansion = (id: string) => {
           </div>
 
           <!-- 3. Default Empty Banner (NO transaction selected) -->
-          <div v-else class="bg-gray-50 text-gray-500 p-4 rounded-xl border border-dashed border-gray-300 flex items-center justify-center gap-2 animate-in fade-in transition-all">
+          <div v-else :class="MATCHING_STYLES.guidanceBarDefault">
               <Link2 class="h-5 w-5 opacity-50" />
               <p class="font-medium text-sm">マッチングを開始するには、左のリストから領収書を選択してください（または右の明細を選択）。</p>
           </div>
@@ -201,8 +254,8 @@ const toggleReceiptExpansion = (id: string) => {
       <div class="flex-1 flex flex-col lg:flex-row gap-6 min-h-0">
         
         <!-- Left Pane: Receipts -->
-        <div class="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[400px] overflow-hidden">
-            <div class="p-4 border-b border-gray-200 bg-blue-50/50 flex items-center justify-between shrink-0">
+        <div :class="MATCHING_STYLES.paneBase">
+            <div :class="[MATCHING_STYLES.paneHeaderBase, 'bg-blue-50/50']">
                 <div class="flex items-center gap-2">
                     <FileText class="text-blue-700 h-5 w-5" />
                     <h2 class="font-bold text-gray-800 text-base">領収書データ (要マッチング)</h2>
@@ -213,19 +266,19 @@ const toggleReceiptExpansion = (id: string) => {
             <div class="p-3 border-b border-gray-100 shrink-0">
                 <div class="relative">
                     <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input v-model="receiptSearch" type="text" placeholder="発行元・提出者・金額で検索..." class="w-full pl-9 pr-4 py-2 border border-blue-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 bg-blue-50/30" />
+                    <input v-model="receiptSearch" type="text" placeholder="発行元・提出者・金額で検索..." :class="MATCHING_STYLES.searchInput" />
                 </div>
             </div>
 
             <div class="flex-1 overflow-y-auto p-4 space-y-3 bg-blue-50/10 relative">
                 <!-- Receipt Cards -->
-                <div 
+                <div
                     v-for="r in unmatchedReceipts" :key="r.id"
                     @click="selectReceipt(r.id)"
-                    class="bg-white border rounded-lg p-4 cursor-pointer transition-all hover:shadow-md relative overflow-hidden flex flex-col justify-between min-h-[105px] select-none"
                     :class="[
-                        selectedReceiptIds.includes(r.id) ? 'border-blue-500 ring-2 ring-blue-500 shadow-sm bg-blue-50/30' : 'border-gray-200 hover:border-gray-300',
-                        suggestedReceiptIds.includes(r.id) && !selectedReceiptIds.includes(r.id) ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-300' : ''
+                        MATCHING_STYLES.cardBase, 'flex flex-col justify-between min-h-[105px]',
+                        selectedReceiptIds.includes(r.id) ? MATCHING_STYLES.cardSelected : '',
+                        suggestedReceiptIds.includes(r.id) && !selectedReceiptIds.includes(r.id) ? MATCHING_STYLES.cardSuggested : ''
                     ]"
                 >
                     <div v-if="selectedReceiptIds.includes(r.id)" class="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>
@@ -302,14 +355,14 @@ const toggleReceiptExpansion = (id: string) => {
 
         <!-- Center Divider (Desktop only visual cue) -->
         <div class="hidden lg:flex flex-col items-center justify-center -mx-2 z-10 shrink-0">
-            <div class="bg-gray-100 rounded-full p-2.5 border border-gray-200 shadow-sm shadow-blue-500/10">
+            <div :class="MATCHING_STYLES.centerIcon">
                 <Link2 class="h-5 w-5 text-blue-500" />
             </div>
         </div>
 
         <!-- Right Pane: Transactions -->
-        <div class="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-[400px] overflow-hidden">
-            <div class="p-4 border-b border-gray-200 bg-slate-50 flex items-center justify-between shrink-0">
+        <div :class="MATCHING_STYLES.paneBase">
+            <div :class="[MATCHING_STYLES.paneHeaderBase, 'bg-slate-50']">
                 <div class="flex items-center gap-2">
                     <Building2 class="text-slate-600 h-5 w-5" />
                     <h2 class="font-bold text-gray-800 text-base">口座・カード明細 (未結合)</h2>
@@ -320,7 +373,7 @@ const toggleReceiptExpansion = (id: string) => {
             <div class="p-3 border-b border-gray-100 shrink-0">
                 <div class="relative">
                     <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input v-model="transactionSearch" type="text" placeholder="摘要・金額で検索..." class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 bg-gray-50/50" />
+                    <input v-model="transactionSearch" type="text" placeholder="摘要・金額で検索..." :class="MATCHING_STYLES.searchInput" />
                 </div>
             </div>
 
@@ -332,11 +385,10 @@ const toggleReceiptExpansion = (id: string) => {
                 </div>
                 
                 <!-- Transaction Cards -->
-                <div 
+                <div
                     v-for="t in unmatchedTransactions" :key="t.id"
                     @click="selectTransaction(t.id)"
-                    class="bg-white border rounded-lg p-4 cursor-pointer transition-all hover:shadow-md relative overflow-hidden flex flex-col justify-between min-h-[90px] select-none"
-                    :class="selectedTransactionIds.includes(t.id) ? 'border-blue-500 ring-2 ring-blue-500 shadow-sm bg-blue-50/30' : 'border-gray-200 hover:border-gray-300'"
+                    :class="[MATCHING_STYLES.cardBase, 'flex flex-col justify-between min-h-[90px]', selectedTransactionIds.includes(t.id) ? MATCHING_STYLES.cardSelected : '']"
                 >
                     <div v-if="selectedTransactionIds.includes(t.id)" class="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>
                     
@@ -366,7 +418,7 @@ const toggleReceiptExpansion = (id: string) => {
     <template v-else-if="activeTab === 'candidates'">
       <div class="flex flex-col h-full relative">
         <div class="flex-1 overflow-y-auto no-scrollbar pb-24">
-            <div v-if="displayCandidatePairs.length === 0" class="flex flex-col items-center justify-center h-full text-gray-400 py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
+            <div v-if="displayCandidatePairs.length === 0 && applicantCandidates.length === 0 && !isLoadingApplicants" class="flex flex-col items-center justify-center h-full text-gray-400 py-20 bg-white rounded-xl border border-gray-200 shadow-sm">
                 <Link2 class="h-16 w-16 mb-4 text-gray-200" />
                 <p class="text-base font-medium text-gray-500">自動結合できる候補はありません。</p>
             </div>
@@ -437,7 +489,66 @@ const toggleReceiptExpansion = (id: string) => {
                     </div>
                 </div>
             </div>
+
+        <!-- Applicant-based Candidates Section -->
+        <div v-if="applicantCandidates.length > 0 || isLoadingApplicants" class="mt-6">
+            <div class="flex items-center gap-2 mb-3 px-1">
+              <User class="h-4 w-4 text-violet-500" />
+              <h3 class="text-sm font-bold text-gray-700">申請者マッチング候補</h3>
+              <span class="text-xs text-gray-400">振込名義から申請者の領収書を紐付け</span>
+              <span v-if="isLoadingApplicants" class="ml-2 text-xs text-gray-400">読み込み中...</span>
+            </div>
+            <div class="space-y-3">
+              <div
+                v-for="c in applicantCandidates" :key="c.transaction.id"
+                class="bg-violet-50/40 rounded-xl border border-violet-200 p-4 flex flex-col md:flex-row items-start md:items-center gap-4"
+              >
+                <!-- Transaction -->
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs text-gray-500 mb-0.5">{{ c.transaction.transaction_date ?? c.transaction.date ?? '—' }}</p>
+                  <p class="text-sm font-bold text-gray-900 truncate" :title="c.transaction.description">{{ c.transaction.description }}</p>
+                  <p class="text-lg font-bold text-violet-700 mt-1">¥{{ formatAmount(c.transaction.amount) }}</p>
+                </div>
+
+                <!-- Arrow + Employee -->
+                <div class="shrink-0 flex flex-col items-center gap-1">
+                  <div class="bg-violet-100 rounded-full p-1.5">
+                    <User class="h-4 w-4 text-violet-600" />
+                  </div>
+                  <p class="text-xs font-bold text-violet-700">{{ c.employee?.name ?? '—' }}</p>
+                  <p v-if="c.employee?.bank_display_name" class="text-[10px] text-gray-500">{{ c.employee.bank_display_name }}</p>
+                  <span class="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-medium">
+                    信頼度 {{ Math.round((c.confidence ?? 0) * 100) }}%
+                  </span>
+                </div>
+
+                <!-- Receipts -->
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs text-gray-500 mb-1">領収書 {{ c.receipts.length }} 件</p>
+                  <div class="space-y-1">
+                    <div v-for="r in c.receipts.slice(0, 3)" :key="r.id" class="flex justify-between text-xs">
+                      <span class="truncate text-gray-700 max-w-[120px]" :title="r.payee">{{ r.payee ?? '—' }}</span>
+                      <span class="font-medium text-gray-900 shrink-0 ml-2">¥{{ formatAmount(r.amount) }}</span>
+                    </div>
+                    <p v-if="c.receipts.length > 3" class="text-xs text-gray-400">他 {{ c.receipts.length - 3 }} 件...</p>
+                  </div>
+                </div>
+
+                <!-- Action -->
+                <div class="shrink-0">
+                  <button
+                    @click="handleApplicantMatch(c)"
+                    :disabled="matchingApplicantId === c.transaction.id"
+                    class="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <CheckCircle class="h-4 w-4" />
+                    {{ matchingApplicantId === c.transaction.id ? '処理中...' : '消込実行' }}
+                  </button>
+                </div>
+              </div>
+            </div>
         </div>
+        </div><!-- /overflow-y-auto -->
 
         <!-- Floating Bulk Action Bar -->
         <div v-if="displayCandidatePairs.length > 0" class="absolute bottom-4 left-0 right-0 bg-gray-900 text-white p-4 rounded-xl shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 animate-in slide-in-from-bottom border border-gray-700 z-20">

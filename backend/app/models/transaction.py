@@ -46,25 +46,27 @@ class TransactionInDB(BaseModel):
     normalized_name: Optional[str] = None
     amount: int
     transaction_type: Literal["credit", "debit"]
-    status: Literal["unmatched", "matched"] = "unmatched"
+    status: Literal["unmatched", "matched", "transferred"] = "unmatched"
     fiscal_period: str
     imported_at: datetime = Field(default_factory=datetime.utcnow)
 
 class MatchCreate(BaseModel):
-    match_type: Literal["receipt", "invoice"]
+    match_type: Literal["receipt", "invoice", "auto_expense", "cash"]
     transaction_ids: List[str]
     document_ids: List[str]
     total_transaction_amount: int
     total_document_amount: int
     difference: int
     difference_treatment: Optional[str] = None
-    matched_by: Literal["ai", "manual"]
+    matched_by: Literal["ai", "manual", "system"]
     journal_entries: List[dict] = []
     fiscal_period: str
     score: Optional[int] = None
     score_breakdown: Optional[dict] = None
     auto_suggested: bool = False
     user_action: str = "manual"  # confirmed / rejected / manual
+    no_document_reason: Optional[str] = None
+    auto_rule_key: Optional[str] = None
 
 class MatchInDB(MatchCreate):
     id: Optional[str] = Field(None, alias="_id")

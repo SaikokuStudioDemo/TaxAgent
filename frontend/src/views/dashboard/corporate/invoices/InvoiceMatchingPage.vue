@@ -15,6 +15,7 @@ import {
 import { useInvoices, type Invoice } from '@/composables/useInvoices';
 import { useDocumentMatching, type MatchableDocument } from '@/composables/useDocumentMatching';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
+import { MATCHING_STYLES } from '@/constants/matchingStyles';
 
 // ── Props ────────────────────────────────────────────────────────────────────
 const props = defineProps<{ mode: 'income' | 'payment' }>();
@@ -184,19 +185,17 @@ const matchedFromDB = computed(() =>
         <p class="text-sm text-gray-500 mt-1">{{ cfg.description }}</p>
       </div>
 
-      <div class="mt-6 flex bg-gray-100/80 p-1.5 rounded-xl w-full overflow-x-auto shrink-0 border border-gray-200/50 shadow-inner">
+      <div :class="['mt-6', MATCHING_STYLES.tabContainer]">
         <button
           @click="activeTab = 'unmatched'"
-          class="flex-1 px-6 py-2.5 rounded-lg text-sm font-bold transition-all relative flex items-center justify-center gap-1.5"
-          :class="activeTab === 'unmatched' ? 'bg-white text-blue-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50'"
+          :class="[MATCHING_STYLES.tabBase, 'flex items-center justify-center gap-1.5', activeTab === 'unmatched' ? MATCHING_STYLES.tabActive : MATCHING_STYLES.tabInactive]"
         >
           未結合 ({{ unmatchedInvoices.length }})
         </button>
 
         <button
           @click="activeTab = 'candidates'"
-          class="flex-1 px-6 py-2.5 rounded-lg text-sm font-bold transition-all relative flex items-center justify-center gap-1.5"
-          :class="activeTab === 'candidates' ? 'bg-amber-50 text-amber-700 shadow-sm ring-1 ring-amber-500/20' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50'"
+          :class="[MATCHING_STYLES.tabBase, 'flex items-center justify-center gap-1.5 relative', activeTab === 'candidates' ? MATCHING_STYLES.tabActive : MATCHING_STYLES.tabInactive]"
         >
           <div v-if="candidatePairs.length > 0" class="absolute top-2 right-4 md:right-auto md:-top-1 md:-right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
           <span class="mr-1">✨</span> 自動結合候補 ({{ candidatePairs.length }})
@@ -204,8 +203,7 @@ const matchedFromDB = computed(() =>
 
         <button
           @click="activeTab = 'matched'"
-          class="flex-1 px-6 py-2.5 rounded-lg text-sm font-bold transition-all relative flex items-center justify-center gap-1.5"
-          :class="activeTab === 'matched' ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-gray-900/5' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50'"
+          :class="[MATCHING_STYLES.tabBase, 'flex items-center justify-center gap-1.5', activeTab === 'matched' ? MATCHING_STYLES.tabActive : MATCHING_STYLES.tabInactive]"
         >
           <CheckCircle v-if="matchedFromDB.length > 0" class="h-4 w-4 text-emerald-500" />
           結合済 ({{ matchedFromDB.length }})
@@ -222,7 +220,7 @@ const matchedFromDB = computed(() =>
         <div class="h-[72px] mb-6 relative">
           <!-- 1. Exact match -->
           <div v-if="selectedTransactionIds.length > 0 && selectedInvoiceIds.length > 0 && matchingDifference === 0"
-               class="absolute inset-0 bg-blue-600 text-white p-4 rounded-xl shadow-lg flex items-center justify-between animate-in slide-in-from-top-2 z-20">
+               :class="['absolute inset-0 z-20 flex items-center justify-between', MATCHING_STYLES.guidanceBarActive]">
             <div class="flex items-center gap-3">
               <div class="bg-blue-500 rounded-full p-2"><Link2 class="h-5 w-5 text-white" /></div>
               <div>
@@ -239,14 +237,14 @@ const matchedFromDB = computed(() =>
                 </div>
               </div>
             </div>
-            <button @click="handleMatch" class="bg-white text-blue-600 font-bold px-6 py-2.5 rounded-lg shadow-sm hover:bg-blue-50 transition-colors flex items-center gap-2">
+            <button @click="handleMatch" :class="MATCHING_STYLES.matchButton">
               <CheckCircle class="w-4 h-4" /> この内容で結合する
             </button>
           </div>
 
           <!-- 2. Discrepancy -->
           <div v-else-if="selectedTransactionIds.length > 0 && selectedInvoiceIds.length > 0 && matchingDifference !== 0"
-               class="absolute inset-0 bg-slate-800 text-white p-4 rounded-xl shadow-lg flex items-center justify-between animate-in slide-in-from-top-2 z-20">
+               :class="['absolute inset-0 z-20 flex items-center justify-between', MATCHING_STYLES.guidanceBarActive]">
             <div class="flex items-center gap-3">
               <div class="bg-amber-500 rounded-full p-2"><AlertCircle class="h-5 w-5 text-amber-900" /></div>
               <div>
@@ -270,7 +268,7 @@ const matchedFromDB = computed(() =>
 
           <!-- 3. Guidance -->
           <div v-else-if="selectedTransactionIds.length > 0 || selectedInvoiceIds.length > 0"
-               class="absolute inset-0 bg-blue-50 text-blue-900 p-4 rounded-xl shadow-md flex items-center gap-3 animate-in fade-in slide-in-from-top-2 border border-blue-200 z-10">
+               :class="['absolute inset-0 z-10', MATCHING_STYLES.guidanceBarWarning]">
             <div class="bg-blue-100 rounded-full p-1.5"><ArrowRightLeft class="h-4 w-4 text-blue-600" /></div>
             <div>
               <p class="font-bold text-sm">もう一方のリストから対応するデータを選択してください。</p>
@@ -283,7 +281,7 @@ const matchedFromDB = computed(() =>
           </div>
 
           <!-- 4. Default -->
-          <div v-else class="absolute inset-0 bg-gray-50 text-gray-500 p-4 rounded-xl border border-dashed border-gray-300 flex items-center justify-center gap-2 animate-in fade-in transition-all">
+          <div v-else :class="['absolute inset-0', MATCHING_STYLES.guidanceBarDefault]">
             <Link2 class="h-5 w-5 opacity-50" />
             <p class="font-medium text-sm">結合を開始するには、左の{{ cfg.docMatchLabel }}リストまたは右の明細リストから対象を選択してください。</p>
           </div>
@@ -293,8 +291,8 @@ const matchedFromDB = computed(() =>
         <div class="flex h-[calc(100%-96px)] flex-col lg:flex-row gap-6">
 
           <!-- Left: Invoices -->
-          <div class="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">
-            <div class="p-4 border-b border-gray-200 flex items-center justify-between shrink-0" :class="cfg.docHeaderBg">
+          <div :class="MATCHING_STYLES.paneBase">
+            <div :class="[MATCHING_STYLES.paneHeaderBase, cfg.docHeaderBg]">
               <div class="flex items-center gap-2">
                 <FileText class="h-5 w-5" :class="cfg.docIconColor" />
                 <h2 class="font-bold text-gray-800 text-base">{{ cfg.docLabel }}</h2>
@@ -306,7 +304,7 @@ const matchedFromDB = computed(() =>
               <div class="relative">
                 <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input v-model="invoiceSearch" type="text" :placeholder="`${cfg.docMatchLabel}・請求書番号で検索...`"
-                  class="w-full pl-9 pr-4 py-2 border rounded-lg text-sm" :class="cfg.docSearch" />
+                  :class="MATCHING_STYLES.searchInput" />
               </div>
             </div>
 
@@ -314,14 +312,14 @@ const matchedFromDB = computed(() =>
               <div
                 v-for="inv in unmatchedInvoices" :key="inv.id"
                 @click="selectInvoice(inv.id)"
-                class="bg-white border rounded-lg p-4 cursor-pointer transition-all hover:shadow-md relative overflow-hidden flex flex-col justify-between"
                 :class="[
-                  selectedInvoiceIds.includes(inv.id) ? cfg.docCardSel : 'border-gray-200 hover:border-gray-300',
-                  suggestedInvoiceIds.includes(inv.id) && !selectedInvoiceIds.includes(inv.id) ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-300' : ''
+                  MATCHING_STYLES.cardBase, 'flex flex-col justify-between',
+                  selectedInvoiceIds.includes(inv.id) ? MATCHING_STYLES.cardSelected : '',
+                  suggestedInvoiceIds.includes(inv.id) && !selectedInvoiceIds.includes(inv.id) ? MATCHING_STYLES.cardSuggested : ''
                 ]"
               >
-                <div v-if="selectedInvoiceIds.includes(inv.id)" class="absolute left-0 top-0 bottom-0 w-1.5" :class="cfg.docBar"></div>
-                <div v-if="selectedInvoiceIds.includes(inv.id)" class="absolute top-2 right-2 text-white rounded-full p-0.5 shadow-sm" :class="cfg.docCheck">
+                <div v-if="selectedInvoiceIds.includes(inv.id)" class="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>
+                <div v-if="selectedInvoiceIds.includes(inv.id)" class="absolute top-2 right-2 bg-blue-600 text-white rounded-full p-0.5 shadow-sm">
                   <CheckCircle class="w-4 h-4" />
                 </div>
                 <div v-if="suggestedInvoiceIds.includes(inv.id) && !selectedInvoiceIds.includes(inv.id)"
@@ -378,14 +376,14 @@ const matchedFromDB = computed(() =>
 
           <!-- Center Divider -->
           <div class="hidden lg:flex flex-col items-center justify-center -mx-2 z-10 shrink-0">
-            <div class="bg-gray-100 rounded-full p-2.5 border border-gray-200 shadow-sm" :class="cfg.centerShadow">
+            <div :class="MATCHING_STYLES.centerIcon">
               <Link2 class="h-5 w-5" :class="cfg.centerIcon" />
             </div>
           </div>
 
           <!-- Right: Transactions -->
-          <div class="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">
-            <div class="p-4 border-b border-gray-200 bg-slate-50 flex items-center justify-between shrink-0">
+          <div :class="MATCHING_STYLES.paneBase">
+            <div :class="[MATCHING_STYLES.paneHeaderBase, 'bg-slate-50']">
               <div class="flex items-center gap-2">
                 <Building2 class="text-slate-600 h-5 w-5" />
                 <h2 class="font-bold text-gray-800 text-base">{{ cfg.txDataLabel }}</h2>
@@ -397,7 +395,7 @@ const matchedFromDB = computed(() =>
               <div class="relative">
                 <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input v-model="transactionSearch" type="text" placeholder="振込名義・金額で検索..."
-                  class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50/50" :class="cfg.txSearch" />
+                  :class="MATCHING_STYLES.searchInput" />
               </div>
             </div>
 
@@ -405,11 +403,10 @@ const matchedFromDB = computed(() =>
               <div
                 v-for="t in unmatchedTransactions" :key="t.id"
                 @click="selectTransaction(t.id)"
-                class="bg-white border rounded-lg p-4 cursor-pointer transition-all hover:shadow-md relative overflow-hidden flex flex-col justify-between"
-                :class="selectedTransactionIds.includes(t.id) ? cfg.txCardSel : 'border-gray-200 hover:border-gray-300'"
+                :class="[MATCHING_STYLES.cardBase, 'flex flex-col justify-between', selectedTransactionIds.includes(t.id) ? MATCHING_STYLES.cardSelected : '']"
               >
-                <div v-if="selectedTransactionIds.includes(t.id)" class="absolute left-0 top-0 bottom-0 w-1.5" :class="cfg.txBar"></div>
-                <div v-if="selectedTransactionIds.includes(t.id)" class="absolute top-2 right-2 text-white rounded-full p-0.5 shadow-sm" :class="cfg.txCheck">
+                <div v-if="selectedTransactionIds.includes(t.id)" class="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>
+                <div v-if="selectedTransactionIds.includes(t.id)" class="absolute top-2 right-2 bg-blue-600 text-white rounded-full p-0.5 shadow-sm">
                   <CheckCircle class="w-4 h-4" />
                 </div>
                 <div class="flex justify-between items-start mb-2">

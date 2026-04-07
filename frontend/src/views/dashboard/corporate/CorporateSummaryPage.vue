@@ -6,13 +6,16 @@ import {
   FileText,
   CheckCircle,
   Percent,
-  ArrowUpRight
+  ArrowUpRight,
+  Wallet,
 } from 'lucide-vue-next';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { Doughnut } from 'vue-chartjs';
 import { useInvoices } from '@/composables/useInvoices';
 import { useReceipts } from '@/composables/useReceipts';
 import { useTransactions } from '@/composables/useTransactions';
+import { useCash } from '@/composables/useCash';
+import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -20,6 +23,7 @@ ChartJS.register(ArcElement, Tooltip, Legend);
 const { invoices, fetchInvoices } = useInvoices();
 const { receipts, fetchReceipts } = useReceipts();
 const { transactions, matches, fetchTransactions, fetchMatches } = useTransactions();
+const { cashSummary, fetchCashSummary } = useCash();
 
 onMounted(() => {
     Promise.all([
@@ -27,6 +31,7 @@ onMounted(() => {
         fetchReceipts(),
         fetchTransactions(),
         fetchMatches(),
+        fetchCashSummary(),
     ]);
 });
 
@@ -135,6 +140,49 @@ const chartOptions = {
         </div>
         <h3 class="text-gray-500 text-sm font-medium mb-1">マッチング完了率</h3>
         <p class="text-3xl font-extrabold text-gray-900">{{ kpi.matchRate }}%</p>
+      </div>
+    </div>
+
+    <!-- 現金出納帳サマリー -->
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+      <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center">
+        <div class="flex items-center gap-2">
+          <Wallet :size="20" class="text-emerald-600" />
+          <h2 class="text-lg font-bold text-gray-800">現金出納帳</h2>
+        </div>
+        <RouterLink
+          to="/dashboard/corporate/cash/matching"
+          class="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+          <span
+            v-if="(cashSummary?.unmatched_count ?? 0) > 0"
+            class="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full mr-1">
+            未消込 {{ cashSummary?.unmatched_count }}件
+          </span>
+          消込画面へ
+          <ArrowUpRight :size="16" />
+        </RouterLink>
+      </div>
+      <div class="p-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="text-center">
+          <p class="text-xs font-semibold text-gray-500 mb-1">現在残高</p>
+          <p class="text-2xl font-extrabold text-gray-900">¥{{ formatAmount(cashSummary?.current_balance ?? 0) }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs font-semibold text-gray-500 mb-1">収入合計</p>
+          <p class="text-2xl font-extrabold text-emerald-600">¥{{ formatAmount(cashSummary?.total_income ?? 0) }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs font-semibold text-gray-500 mb-1">支出合計</p>
+          <p class="text-2xl font-extrabold text-red-500">¥{{ formatAmount(cashSummary?.total_expense ?? 0) }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs font-semibold text-gray-500 mb-1">未消込</p>
+          <p class="text-2xl font-extrabold"
+            :class="(cashSummary?.unmatched_count ?? 0) > 0 ? 'text-amber-500' : 'text-gray-400'">
+            {{ cashSummary?.unmatched_count ?? 0 }}件
+          </p>
+          <p class="text-xs text-gray-400 mt-0.5">¥{{ formatAmount(cashSummary?.unmatched_amount ?? 0) }}</p>
+        </div>
       </div>
     </div>
 

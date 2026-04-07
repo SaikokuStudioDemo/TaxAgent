@@ -10,6 +10,7 @@ export interface UserData {
   role: string;
   departmentId?: string;
   groupId?: string;
+  bank_display_name?: string;
   status: 'draft' | 'invited';
   permissions: {
     dataProcessing: boolean;
@@ -180,6 +181,7 @@ const hasEmptyUser = computed(() => {
         <thead>
           <tr class="bg-gray-50 border-y border-gray-200 text-xs font-semibold text-gray-700">
             <th class="py-3 px-3 w-[22%]">氏名 / ログインID</th>
+            <th class="py-3 px-3 w-[13%] whitespace-nowrap">銀行表記名</th>
             <template v-if="!props.hidePermissions">
               <th class="py-3 px-3 w-[15%] whitespace-nowrap">所属部門</th>
               <th class="py-3 px-3 w-[15%] whitespace-nowrap">承認レベル</th>
@@ -209,6 +211,17 @@ const hasEmptyUser = computed(() => {
                   class="w-full px-3 py-1.5 border border-gray-200 rounded-md focus:ring-1 focus:ring-indigo-500 bg-white"
                 />
               </div>
+            </td>
+
+            <!-- Bank Display Name -->
+            <td class="py-3 px-3 align-top">
+              <input
+                type="text"
+                placeholder="カナ表記名 (任意)"
+                :value="user.bank_display_name ?? ''"
+                @input="handleUpdateUser(user.id, 'bank_display_name', ($event.target as HTMLInputElement).value)"
+                class="w-full px-3 py-1.5 border border-gray-200 rounded-md focus:ring-1 focus:ring-indigo-500 bg-white text-xs"
+              />
             </td>
 
             <template v-if="!props.hidePermissions">

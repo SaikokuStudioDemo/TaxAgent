@@ -71,6 +71,7 @@ export function useTransactions() {
     const importTransactions = async (data: {
         source_type: 'bank' | 'card';
         account_name: string;
+        file_name?: string;
         transactions: Partial<Transaction>[];
     }) => {
         try {

@@ -126,11 +126,14 @@ async def list_receipts(
     approval_status: Optional[str] = None,
     fiscal_period: Optional[str] = None,
     submitted_by: Optional[str] = None,
+    reconciliation_status: Optional[str] = None,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     query = build_list_query(ctx.corporate_id, approval_status=approval_status, fiscal_period=fiscal_period)
     if submitted_by == "me":
         query["submitted_by"] = ctx.user_id
+    if reconciliation_status:
+        query["reconciliation_status"] = reconciliation_status
 
     cursor = ctx.db["receipts"].find(query).sort("created_at", -1)
     docs = await cursor.to_list(length=500)

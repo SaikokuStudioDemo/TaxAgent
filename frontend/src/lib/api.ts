@@ -20,16 +20,28 @@ async function request<T>(
     method: string,
     path: string,
     body?: unknown,
+    timeoutMs = 8000,
 ): Promise<T> {
     const token = await getAuthToken();
-    const res = await fetch(`${API_BASE}${path}`, {
-        method,
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-        },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res: Response;
+    try {
+        res = await fetch(`${API_BASE}${path}`, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+            },
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+            signal: controller.signal,
+        });
+    } catch (e: any) {
+        if (e?.name === 'AbortError') throw new Error('サーバーへの接続がタイムアウトしました。バックエンドが起動しているか確認してください。');
+        throw e;
+    } finally {
+        clearTimeout(timer);
+    }
 
     if (!res.ok) {
         let detail = res.statusText;
