@@ -173,6 +173,7 @@ const handleToggleOption = (id: string) => {
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 pb-24">
     <!-- Page Header -->
     <div class="mb-10">
+      <img src="/logo.png" alt="Tax Agent" class="h-10 w-auto object-contain mb-6" />
       <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight mb-3">一般法人 新規登録</h1>
       <div class="w-20 h-1 bg-emerald-500 rounded-full mb-4"></div>
       <p class="text-gray-600 max-w-2xl text-lg">

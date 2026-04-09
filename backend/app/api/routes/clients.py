@@ -9,7 +9,7 @@ from app.api.helpers import (
     parse_oid,
     get_doc_or_404,
 )
-from app.models.master import ClientCreate
+from app.models.master import ClientCreate, BankDisplayName
 import logging
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,50 @@ async def update_client(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Client not found")
 
+    updated = await ctx.db["clients"].find_one({"_id": oid})
+    return _serialize(updated)
+
+
+@router.post("/{client_id}/bank-display-names", summary="銀行表示名パターンを追加する")
+async def add_bank_display_name(
+    client_id: str,
+    payload: BankDisplayName,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    """
+    取引先に銀行振込表示名パターンを追加する。
+    マッチングスコアリングで使用される（取引明細の description との照合）。
+    """
+    oid = parse_oid(client_id, "client")
+    entry = {
+        "pattern": payload.pattern,
+        "source": payload.source,
+        "confidence": payload.confidence,
+        "added_at": datetime.utcnow().isoformat(),
+    }
+    result = await ctx.db["clients"].update_one(
+        {"_id": oid, "corporate_id": ctx.corporate_id},
+        {"$push": {"bank_display_names": entry}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Client not found")
+    updated = await ctx.db["clients"].find_one({"_id": oid})
+    return _serialize(updated)
+
+
+@router.delete("/{client_id}/bank-display-names/{pattern}", summary="銀行表示名パターンを削除する")
+async def remove_bank_display_name(
+    client_id: str,
+    pattern: str,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    oid = parse_oid(client_id, "client")
+    result = await ctx.db["clients"].update_one(
+        {"_id": oid, "corporate_id": ctx.corporate_id},
+        {"$pull": {"bank_display_names": {"pattern": pattern}}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Client not found")
     updated = await ctx.db["clients"].find_one({"_id": oid})
     return _serialize(updated)
 

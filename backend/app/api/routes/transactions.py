@@ -9,9 +9,76 @@ from app.api.helpers import (
     parse_oid,
 )
 import logging
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def detect_and_create_transfers(db, corporate_id: str) -> int:
+    """
+    同一 corporate_id の unmatched 取引から、同日同額の credit/debit ペアを検出し
+    match_type: "transfer" として消込する。
+    """
+    unmatched = await db["transactions"].find(
+        {"corporate_id": corporate_id, "status": "unmatched"}
+    ).to_list(length=5000)
+
+    # (transaction_date, amount, source_type) でグループ化
+    # source_type を揃えることで bank↔card の誤検知を防ぐ
+    groups: dict = defaultdict(lambda: {"credit": [], "debit": []})
+    for tx in unmatched:
+        key = (tx.get("transaction_date", ""), tx.get("amount", 0), tx.get("source_type", ""))
+        tx_type = tx.get("transaction_type", "debit")
+        if tx_type in ("credit", "deposit"):
+            groups[key]["credit"].append(tx)
+        else:
+            groups[key]["debit"].append(tx)
+
+    created = 0
+    for (date, amount), sides in groups.items():
+        credits = sides["credit"]
+        debits = sides["debit"]
+        pairs = min(len(credits), len(debits))
+        for i in range(pairs):
+            c_tx = credits[i]
+            d_tx = debits[i]
+            c_id = str(c_tx["_id"])
+            d_id = str(d_tx["_id"])
+
+            # 既存の transfer match がないか確認
+            existing = await db["matches"].find_one({
+                "corporate_id": corporate_id,
+                "match_type": "transfer",
+                "transaction_ids": {"$all": [c_id, d_id]},
+            })
+            if existing:
+                continue
+
+            match_doc = {
+                "corporate_id": corporate_id,
+                "match_type": "transfer",
+                "transaction_ids": [d_id, c_id],
+                "document_ids": [],
+                "total_transaction_amount": amount,
+                "total_document_amount": 0,
+                "difference": 0,
+                "matched_by": "system",
+                "account_subject": "普通預金",
+                "tax_division": "対象外",
+                "fiscal_period": d_tx.get("fiscal_period", ""),
+                "matched_at": datetime.utcnow(),
+                "is_active": True,
+            }
+            await db["matches"].insert_one(match_doc)
+            from bson import ObjectId
+            await db["transactions"].update_many(
+                {"_id": {"$in": [c_tx["_id"], d_tx["_id"]]}},
+                {"$set": {"status": "transferred"}}
+            )
+            created += 1
+
+    return created
 
 
 @router.post("", summary="明細を一括インポートする")
@@ -43,10 +110,30 @@ async def import_transactions(
     file_result = await ctx.db["bank_import_files"].insert_one(import_file_doc)
     import_file_id = str(file_result.inserted_id)
 
+    # 既存データの重複チェック用キーセットを取得
+    existing_keys = set()
+    existing_cursor = ctx.db["transactions"].find(
+        {"corporate_id": ctx.corporate_id},
+        {"transaction_date": 1, "description": 1, "amount": 1, "source_type": 1},
+    )
+    async for ex in existing_cursor:
+        existing_keys.add((
+            ex.get("transaction_date", ""),
+            ex.get("description", ""),
+            ex.get("amount", 0),
+            ex.get("source_type", ""),
+        ))
+
     docs = []
+    skipped_count = 0
     for t in transactions:
         date_str = t.get("transaction_date", t.get("date", ""))
         fiscal_period = date_str[:7] if date_str else datetime.utcnow().strftime("%Y-%m")
+        dup_key = (date_str, t.get("description", ""), t.get("amount", 0), source_type)
+        if dup_key in existing_keys:
+            skipped_count += 1
+            continue
+        existing_keys.add(dup_key)
         docs.append({
             "corporate_id": ctx.corporate_id,
             "source_type": source_type,
@@ -61,6 +148,14 @@ async def import_transactions(
             "import_file_id": import_file_id,
             "imported_at": datetime.utcnow(),
         })
+
+    if not docs:
+        return {
+            "status": "success",
+            "imported_count": 0,
+            "skipped_count": skipped_count,
+            "import_file_id": import_file_id,
+        }
 
     result = await ctx.db["transactions"].insert_many(docs)
 
@@ -136,16 +231,23 @@ async def import_transactions(
             {"_id": inserted_id},
             {"$set": {"status": "transferred"}}
         )
-
-        account_balance = default_account.get("current_balance", 0)
-        if cash_rule["cash_direction"] == "income":
-            new_balance = account_balance + doc.get("amount", 0)
-        else:
-            new_balance = account_balance - doc.get("amount", 0)
-        await ctx.db["cash_accounts"].update_one(
-            {"_id": default_account["_id"]},
-            {"$set": {"current_balance": new_balance}},
-        )
+        await ctx.db["matches"].insert_one({
+            "corporate_id": ctx.corporate_id,
+            "match_type": "transfer",
+            "transaction_ids": [str(inserted_id)],
+            "document_ids": [],
+            "total_transaction_amount": doc.get("amount", 0),
+            "total_document_amount": 0,
+            "difference": 0,
+            "matched_by": "system",
+            "account_subject": "現金",
+            "tax_division": "対象外",
+            "fiscal_period": doc.get("fiscal_period", ""),
+            "matched_at": datetime.utcnow(),
+            "is_active": True,
+            "auto_rule_key": cash_rule["key"],
+            "no_document_reason": cash_rule["name"],
+        })
 
     # AI Matching Hook: Fetch candidates for fuzzy matching
     try:
@@ -155,9 +257,18 @@ async def import_transactions(
     except Exception as e:
         logger.error(f"Post-import AI analysis failed: {e}")
 
+    # 口座間振替の自動検知
+    try:
+        transfer_count = await detect_and_create_transfers(ctx.db, ctx.corporate_id)
+        if transfer_count > 0:
+            logger.info(f"Auto-detected {transfer_count} transfer pair(s)")
+    except Exception as e:
+        logger.error(f"Transfer detection failed: {e}")
+
     return {
         "status": "success",
         "imported_count": len(result.inserted_ids),
+        "skipped_count": skipped_count,
         "import_file_id": import_file_id,
     }
 
@@ -239,7 +350,22 @@ async def import_pdf(
     file_result = await ctx.db["bank_import_files"].insert_one(import_file_doc)
     import_file_id = str(file_result.inserted_id)
 
+    # 既存データの重複チェック用キーセットを取得
+    existing_keys = set()
+    existing_cursor = ctx.db["transactions"].find(
+        {"corporate_id": ctx.corporate_id},
+        {"transaction_date": 1, "description": 1, "amount": 1, "source_type": 1},
+    )
+    async for ex in existing_cursor:
+        existing_keys.add((
+            ex.get("transaction_date", ""),
+            ex.get("description", ""),
+            ex.get("amount", 0),
+            ex.get("source_type", ""),
+        ))
+
     docs = []
+    skipped_count = 0
     for t in extracted:
         date_str = t.get("transaction_date", "")
         fiscal_period = date_str[:7] if date_str else datetime.utcnow().strftime("%Y-%m")
@@ -248,6 +374,12 @@ async def import_pdf(
         amount = t.get("amount") or max(withdrawal, deposit)
         description = t.get("description", "")
         tx_type = classify_transaction_type(withdrawal, deposit, description)
+
+        dup_key = (date_str, description, amount, source_type)
+        if dup_key in existing_keys:
+            skipped_count += 1
+            continue
+        existing_keys.add(dup_key)
 
         docs.append({
             "corporate_id": ctx.corporate_id,
@@ -266,6 +398,13 @@ async def import_pdf(
         })
 
     if not docs:
+        if skipped_count > 0:
+            return {
+                "status": "success",
+                "imported_count": 0,
+                "skipped_count": skipped_count,
+                "import_file_id": import_file_id,
+            }
         raise HTTPException(status_code=422, detail="有効なデータが抽出されませんでした。")
 
     result = await ctx.db["transactions"].insert_many(docs)
@@ -323,23 +462,39 @@ async def import_pdf(
                     "created_at": datetime.utcnow(),
                 }
                 await ctx.db["cash_transactions"].insert_one(cash_doc)
-                account_balance = default_account.get("current_balance", 0)
-                new_balance = (
-                    account_balance + doc.get("amount", 0)
-                    if cash_rule["cash_direction"] == "income"
-                    else account_balance - doc.get("amount", 0)
-                )
-                await ctx.db["cash_accounts"].update_one(
-                    {"_id": default_account["_id"]},
-                    {"$set": {"current_balance": new_balance}}
-                )
                 await ctx.db["transactions"].update_one(
                     {"_id": inserted_id}, {"$set": {"status": "transferred"}}
                 )
+                await ctx.db["matches"].insert_one({
+                    "corporate_id": ctx.corporate_id,
+                    "match_type": "transfer",
+                    "transaction_ids": [str(inserted_id)],
+                    "document_ids": [],
+                    "total_transaction_amount": doc.get("amount", 0),
+                    "total_document_amount": 0,
+                    "difference": 0,
+                    "matched_by": "system",
+                    "account_subject": "現金",
+                    "tax_division": "対象外",
+                    "fiscal_period": doc.get("fiscal_period", ""),
+                    "matched_at": datetime.utcnow(),
+                    "is_active": True,
+                    "auto_rule_key": cash_rule["key"],
+                    "no_document_reason": cash_rule["name"],
+                })
+
+    # 口座間振替の自動検知
+    try:
+        transfer_count = await detect_and_create_transfers(ctx.db, ctx.corporate_id)
+        if transfer_count > 0:
+            logger.info(f"Auto-detected {transfer_count} transfer pair(s)")
+    except Exception as e:
+        logger.error(f"Transfer detection failed: {e}")
 
     return {
         "status": "success",
         "imported_count": len(result.inserted_ids),
+        "skipped_count": skipped_count,
         "import_file_id": import_file_id,
     }
 
@@ -349,6 +504,7 @@ async def list_transactions(
     source_type: Optional[str] = None,
     status: Optional[str] = None,
     fiscal_period: Optional[str] = None,
+    import_file_id: Optional[str] = None,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     query: dict = {"corporate_id": ctx.corporate_id}
@@ -358,10 +514,46 @@ async def list_transactions(
         query["status"] = status
     if fiscal_period:
         query["fiscal_period"] = fiscal_period
+    if import_file_id:
+        query["import_file_id"] = import_file_id
 
     cursor = ctx.db["transactions"].find(query).sort("transaction_date", -1)
     docs = await cursor.to_list(length=1000)
     return [_serialize(doc) for doc in docs]
+
+
+@router.patch("/{transaction_id}", summary="明細を更新する")
+async def update_transaction(
+    transaction_id: str,
+    payload: dict,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    oid = parse_oid(transaction_id, "transaction")
+
+    doc = await ctx.db["transactions"].find_one({
+        "_id": oid,
+        "corporate_id": ctx.corporate_id,
+    })
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if doc.get("status") == "matched":
+        raise HTTPException(status_code=403, detail="消込済みの明細は編集できません")
+
+    allowed = {"transaction_date", "description", "amount"}
+    update_fields = {k: v for k, v in payload.items() if k in allowed}
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="更新可能なフィールドがありません")
+
+    if "transaction_date" in update_fields:
+        date_str = update_fields["transaction_date"]
+        update_fields["fiscal_period"] = date_str[:7] if date_str else doc.get("fiscal_period", "")
+
+    await ctx.db["transactions"].update_one(
+        {"_id": oid},
+        {"$set": update_fields},
+    )
+    updated = await ctx.db["transactions"].find_one({"_id": oid})
+    return _serialize(updated)
 
 
 @router.delete("/{transaction_id}", summary="明細を削除する")

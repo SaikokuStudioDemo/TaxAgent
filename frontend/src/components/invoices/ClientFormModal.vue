@@ -26,8 +26,14 @@ const newClientName = ref('');
 // ── 編集: タブ ──
 const activeTab = ref<'info' | 'banks'>('info');
 
+// ── 法人判定ヘルパー ──
+const CORP_KEYWORDS = ['株式会社', '有限会社', '合同会社', '合名会社', '合資会社', '一般社団法人', '公益社団法人'];
+const detectCategory = (name: string): 'company' | 'individual' =>
+  CORP_KEYWORDS.some(k => name.includes(k)) ? 'company' : 'individual';
+
 // ── フォームデータ ──
 const formData = ref({
+  clientCategory: 'company' as 'company' | 'individual',
   name: '',
   companyRegistrationNumber: '',
   department: '',
@@ -55,6 +61,7 @@ watch(() => props.show, (val) => {
   errorMsg.value = '';
   formData.value = props.editData
     ? {
+        clientCategory: props.editData.client_category ?? detectCategory(props.editData.name ?? ''),
         name: props.editData.name ?? '',
         companyRegistrationNumber: props.editData.companyRegistrationNumber ?? '',
         department: props.editData.department ?? '',
@@ -66,13 +73,14 @@ watch(() => props.show, (val) => {
         paymentTerms: props.editData.paymentTerms ?? '末日締め翌月末払い',
         internalNotes: props.editData.internalNotes ?? '',
       }
-    : { name: '', companyRegistrationNumber: '', department: '', contactPerson: '',
-        email: '', phone: '', postalCode: '', address: '',
+    : { clientCategory: 'company' as 'company' | 'individual', name: '', companyRegistrationNumber: '',
+        department: '', contactPerson: '', email: '', phone: '', postalCode: '', address: '',
         paymentTerms: '末日締め翌月末払い', internalNotes: '' };
 });
 
 const buildPayload = () => ({
   name: formData.value.name,
+  client_category: formData.value.clientCategory,
   registration_number: formData.value.companyRegistrationNumber,
   department: formData.value.department,
   contact_person: formData.value.contactPerson,
@@ -219,14 +227,44 @@ const handleClose = () => {
               <span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>基本情報
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+              <!-- 個人/法人トグル -->
               <div class="md:col-span-2">
-                <label class="block text-sm font-medium text-slate-700 mb-1">取引先名 (会社名) <span class="text-red-500">*</span></label>
-                <div class="relative">
-                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><Building2 :size="16" /></span>
-                  <input type="text" v-model="formData.name" placeholder="例: 株式会社サンプル" class="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" />
+                <label class="block text-sm font-medium text-slate-700 mb-2">区分 <span class="text-red-500">*</span></label>
+                <div class="flex bg-slate-100 p-1 rounded-lg w-fit gap-1">
+                  <button type="button"
+                    @click="formData.clientCategory = 'company'"
+                    class="flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-bold transition-all"
+                    :class="formData.clientCategory === 'company' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                  >
+                    <Building2 :size="14" />法人
+                  </button>
+                  <button type="button"
+                    @click="formData.clientCategory = 'individual'"
+                    class="flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-bold transition-all"
+                    :class="formData.clientCategory === 'individual' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
+                  >
+                    <User :size="14" />個人
+                  </button>
                 </div>
               </div>
-              <div>
+
+              <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-slate-700 mb-1">
+                  {{ formData.clientCategory === 'company' ? '会社名' : '氏名' }}
+                  <span class="text-red-500">*</span>
+                </label>
+                <div class="relative">
+                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                    <Building2 v-if="formData.clientCategory === 'company'" :size="16" />
+                    <User v-else :size="16" />
+                  </span>
+                  <input type="text" v-model="formData.name"
+                    :placeholder="formData.clientCategory === 'company' ? '例: 株式会社サンプル' : '例: 山田 太郎'"
+                    class="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" />
+                </div>
+              </div>
+              <div v-if="formData.clientCategory === 'company'">
                 <label class="block text-sm font-medium text-slate-700 mb-1">法人番号 / 登録番号</label>
                 <div class="relative">
                   <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><FileText :size="16" /></span>

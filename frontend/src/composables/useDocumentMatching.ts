@@ -8,6 +8,7 @@
 import { ref, computed, isRef, type Ref } from 'vue';
 import { useTransactions, type Transaction as ApiTransaction } from '@/composables/useTransactions';
 import type { ApiCandidatePair } from '@/composables/useTransactions';
+import { sortSelectedFirst, sortByProximity } from '@/utils/matching';
 
 // ── 共通型 ──────────────────────────────────────────────────────
 
@@ -63,6 +64,16 @@ export interface UseDocumentMatchingOptions<T extends MatchableDocument> {
    * Ref を渡すことで reactive に切り替え可能
    */
   transactionTypeFilter?: Ref<'credit' | 'debit'> | 'credit' | 'debit';
+  /**
+   * 請求書種別（candidates API の絞り込みに使用）
+   * 'issued': 入金系取引のみ / 'received': 出金系取引のみ
+   */
+  invoiceType?: 'issued' | 'received';
+  /**
+   * 取引明細を source_type でフィルタする（'bank' / 'card'）
+   * Ref を渡すことで reactive に切り替え可能
+   */
+  sourceTypeFilter?: Ref<'bank' | 'card' | 'all'> | 'bank' | 'card' | 'all';
 }
 
 // ── composable ──────────────────────────────────────────────────
@@ -70,11 +81,17 @@ export interface UseDocumentMatchingOptions<T extends MatchableDocument> {
 export function useDocumentMatching<T extends MatchableDocument>(
   options: UseDocumentMatchingOptions<T>,
 ) {
-  const { fetchDocumentsFn, documents, matchType, getAmount, getDescription, transactionTypeFilter } = options;
+  const { fetchDocumentsFn, documents, matchType, getAmount, getDescription, transactionTypeFilter, invoiceType, sourceTypeFilter } = options;
 
   // transactionTypeFilter を統一的に読む getter
   const getTxTypeFilter = (): string | undefined =>
     isRef(transactionTypeFilter) ? transactionTypeFilter.value : transactionTypeFilter;
+
+  // sourceTypeFilter を統一的に読む getter
+  const getSourceTypeFilter = (): string | undefined => {
+    const v = isRef(sourceTypeFilter) ? sourceTypeFilter.value : sourceTypeFilter;
+    return v === 'all' ? undefined : v;
+  };
 
   const {
     transactions: apiTransactions,
@@ -112,15 +129,15 @@ export function useDocumentMatching<T extends MatchableDocument>(
     source_type: t.source_type,
     transaction_type: t.transaction_type,
     status: t.status ?? 'unmatched',
-    matched: t.status === 'matched',
+    matched: t.status === 'matched' || t.status === 'transferred',
   });
 
   /** matches の内容を documents / rawTransactions の matched フラグに反映 */
   const applyMatches = () => {
-    rawTransactions.value.forEach(t => { t.matched = t.status === 'matched'; });
+    rawTransactions.value.forEach(t => { t.matched = t.status === 'matched' || t.status === 'transferred'; });
     documents.value.forEach(d => { d.matched = false; });
     matches.value
-      .filter((m: any) => m.match_type === matchType)
+      .filter((m: any) => m.match_type === matchType || m.match_type === 'transfer')
       .forEach((m: any) => {
         (m.document_ids ?? []).forEach((did: string) => {
           const doc = documents.value.find(d => d.id === did);
@@ -140,10 +157,19 @@ export function useDocumentMatching<T extends MatchableDocument>(
       fetchTransactions({}),
       fetchMatches({ match_type: matchType }),
     ]);
+    // transfer matches を追加取得して matches に追記（applyMatches で transfer 消込も反映するため）
+    const savedMatches = [...matches.value];
+    await fetchMatches({ match_type: 'transfer' });
+    const transferMatches = matches.value;
+    const merged = [...savedMatches];
+    for (const tm of transferMatches) {
+      if (!merged.some(m => m.id === tm.id)) merged.push(tm);
+    }
+    matches.value = merged;
     rawTransactions.value = apiTransactions.value.map(mapApiToTransaction);
     applyMatches();
     // バックエンドのスコアリングAPIから候補ペアを取得
-    const apiCandidates: ApiCandidatePair[] = await fetchCandidates({ match_type: matchType });
+    const apiCandidates: ApiCandidatePair[] = await fetchCandidates({ match_type: matchType, invoice_type: invoiceType });
     candidatePairs.value = apiCandidates
       .map(c => {
         const doc = documents.value.find(d => d.id === c.document.id);
@@ -160,11 +186,31 @@ export function useDocumentMatching<T extends MatchableDocument>(
   };
 
   // ── computed ────────────────────────────────────────────────
+
+  /** バックエンドのスコアリングAPIから取得した候補ペア（loadData で更新） */
+  const candidatePairs = ref<CandidatePair<T>[]>([]) as Ref<CandidatePair<T>[]>;
+
+  /** 自動消込候補に含まれる取引ID セット（手動消込リストから除外するために使用） */
+  const candidateTxIds = computed(
+    () => new Set(candidatePairs.value.map(p => p.transaction.id)),
+  );
+
+  /** 自動消込候補に含まれるドキュメントID セット（手動消込リストから除外するために使用） */
+  const candidateDocIds = computed(
+    () => new Set(candidatePairs.value.map(p => p.document.id)),
+  );
+
   const unmatchedTransactions = computed(() => {
     const txFilter = getTxTypeFilter();
-    let list = rawTransactions.value.filter(t => !t.matched);
+    const srcFilter = getSourceTypeFilter();
+    let list = rawTransactions.value.filter(
+      t => !t.matched && t.status !== 'transferred' && !candidateTxIds.value.has(t.id),
+    );
     if (txFilter) {
       list = list.filter(t => t.transaction_type === txFilter);
+    }
+    if (srcFilter) {
+      list = list.filter(t => t.source_type === srcFilter);
     }
     if (transactionSearch.value) {
       list = list.filter(
@@ -172,15 +218,17 @@ export function useDocumentMatching<T extends MatchableDocument>(
              t.amount.toString().includes(transactionSearch.value),
       );
     }
-    return list;
+    return sortSelectedFirst(list, selectedTransactionIds.value, t => t.id);
   });
 
   const unmatchedDocuments = computed(() => {
-    let list = documents.value.filter(d => !d.matched);
+    let list = documents.value.filter(d => !d.matched && !candidateDocIds.value.has(d.id));
     if (documentSearch.value) {
-      list = list.filter(d => getDescription(d).includes(documentSearch.value));
+      list = list.filter(d =>
+        d.id.includes(documentSearch.value) || getDescription(d).includes(documentSearch.value),
+      );
     }
-    return list;
+    return sortSelectedFirst(list, selectedDocumentIds.value, d => d.id);
   });
 
   const selectedTransactionSum = computed(() =>
@@ -206,8 +254,33 @@ export function useDocumentMatching<T extends MatchableDocument>(
       .map(d => d.id);
   });
 
-  /** バックエンドのスコアリングAPIから取得した候補ペア（loadData で更新） */
-  const candidatePairs = ref<CandidatePair<T>[]>([]) as Ref<CandidatePair<T>[]>;
+  /** 選択した取引に金額・日付が近いドキュメントを先頭に並び替え（手動消込用） */
+  const sortedUnmatchedDocuments = computed(() => {
+    const list = unmatchedDocuments.value;
+    if (selectedTransactionIds.value.length === 0) return list;
+    const tx = unmatchedTransactions.value.find(t => selectedTransactionIds.value.includes(t.id));
+    return sortByProximity(list, getAmount, () => undefined, selectedTransactionSum.value, tx?.date);
+  });
+
+  /** docId → (txId → score) の O(1) ルックアップ用マップ */
+  const candidateScoreMap = computed(() => {
+    const map = new Map<string, Map<string, number>>();
+    for (const pair of candidatePairs.value) {
+      if (!map.has(pair.document.id)) map.set(pair.document.id, new Map());
+      map.get(pair.document.id)!.set(pair.transaction.id, pair.score ?? 0);
+    }
+    return map;
+  });
+
+  /**
+   * ドキュメントを1件選択中のとき、右ペインの取引明細を金額・日付が近い順でソート（手動消込用）。
+   */
+  const sortedUnmatchedTransactions = computed(() => {
+    const list = unmatchedTransactions.value;
+    if (selectedDocumentIds.value.length === 0) return list;
+    const doc = unmatchedDocuments.value.find(d => selectedDocumentIds.value.includes(d.id));
+    return sortByProximity(list, t => t.amount, t => t.date, selectedDocumentSum.value, (doc as any)?.due_date ?? (doc as any)?.date);
+  });
 
   /** matches テーブルから消込済みペアを構築 */
   const matchedPairs = computed<MatchedPair<T>[]>(() =>
@@ -242,21 +315,25 @@ export function useDocumentMatching<T extends MatchableDocument>(
     else selectedDocumentIds.value.push(id);
   };
 
-  const toggleCandidate = (txId: string) => {
-    const idx = selectedCandidateIds.value.indexOf(txId);
+  /** ペアの一意キー: "docId:txId" */
+  const pairKey = (docId: string, txId: string) => `${docId}:${txId}`;
+
+  const toggleCandidate = (docId: string, txId: string) => {
+    const key = pairKey(docId, txId);
+    const idx = selectedCandidateIds.value.indexOf(key);
     if (idx > -1) selectedCandidateIds.value.splice(idx, 1);
-    else selectedCandidateIds.value.push(txId);
+    else selectedCandidateIds.value.push(key);
   };
 
   const toggleAllCandidates = () => {
     if (selectedCandidateIds.value.length === candidatePairs.value.length) {
       selectedCandidateIds.value = [];
     } else {
-      selectedCandidateIds.value = candidatePairs.value.map(p => p.transaction.id);
+      selectedCandidateIds.value = candidatePairs.value.map(p => pairKey(p.document.id, p.transaction.id));
     }
   };
 
-  const handleMatch = async () => {
+  const handleMatch = async (receiptIds?: string[]) => {
     if (selectedDocumentIds.value.length === 0 || selectedTransactionIds.value.length === 0) return;
 
     if (matchingDifference.value > 1000) {
@@ -276,6 +353,7 @@ export function useDocumentMatching<T extends MatchableDocument>(
       document_ids: [...selectedDocumentIds.value],
       fiscal_period: period,
       auto_suggested: false,
+      ...(receiptIds && receiptIds.length > 0 ? { receipt_ids: receiptIds } : {}),
     });
 
     await fetchMatches({ match_type: matchType });
@@ -286,13 +364,16 @@ export function useDocumentMatching<T extends MatchableDocument>(
 
   const handleBulkMatch = async () => {
     const period = new Date().toISOString().slice(0, 7);
-    for (const txId of selectedCandidateIds.value) {
-      const pair = candidatePairs.value.find(p => p.transaction.id === txId);
+    for (const key of selectedCandidateIds.value) {
+      const [docId, txId] = key.split(':');
+      const pair = candidatePairs.value.find(
+        p => p.document.id === docId && p.transaction.id === txId,
+      );
       if (!pair) continue;
       await createMatch({
         match_type: matchType,
         transaction_ids: [txId],
-        document_ids: [pair.document.id],
+        document_ids: [docId],
         fiscal_period: period,
         auto_suggested: true,
       });
@@ -301,7 +382,7 @@ export function useDocumentMatching<T extends MatchableDocument>(
     await fetchMatches({ match_type: matchType });
     applyMatches();
     // 候補リストを再取得してリフレッシュ
-    const apiCandidates: ApiCandidatePair[] = await fetchCandidates({ match_type: matchType });
+    const apiCandidates: ApiCandidatePair[] = await fetchCandidates({ match_type: matchType, invoice_type: invoiceType });
     candidatePairs.value = apiCandidates
       .map(c => {
         const doc = documents.value.find(d => d.id === c.document.id);
@@ -344,11 +425,14 @@ export function useDocumentMatching<T extends MatchableDocument>(
     confirmMatchAmount,
     unmatchedTransactions,
     unmatchedDocuments,
+    sortedUnmatchedDocuments,
     selectedTransactionSum,
     selectedDocumentSum,
     matchingDifference,
     suggestedDocumentIds,
     candidatePairs,
+    candidateScoreMap,
+    sortedUnmatchedTransactions,
     matchedPairs,
     matchedCount,
     loadData,

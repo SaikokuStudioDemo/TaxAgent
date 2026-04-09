@@ -24,9 +24,13 @@ const docType = computed(() =>
 const title = computed(() =>
   `${props.document_type === 'issued' ? '発行' : '受領'}請求書詳細 : ${props.invoice?.id ?? ''}`
 );
-const subtitle = computed(() =>
-  `${props.document_type === 'issued' ? '取引先' : '仕入先'}: <span class="font-medium text-gray-700">${props.invoice?.client_name ?? ''}</span>`
-);
+const subtitle = computed(() => {
+  const label = props.document_type === 'issued' ? '請求先' : '請求元';
+  const name = props.document_type === 'received'
+    ? (props.invoice?.vendor_name || props.invoice?.client_name || '')
+    : (props.invoice?.client_name ?? '');
+  return `${label}: <span class="font-medium text-gray-700">${name}</span>`;
+});
 const imageUrl = computed(() =>
   (props.invoice?.attachments ?? [])[0] ?? props.invoice?.image_url ?? ''
 );
@@ -130,10 +134,10 @@ const onSave = async (data: Record<string, any>): Promise<boolean> => {
               <dd class="font-medium text-gray-900">{{ invoice.payment_method ?? '請求書払い' }}</dd>
             </div>
             <div class="col-span-2">
-              <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">{{ document_type === 'issued' ? '件名 / 取引内容' : '仕入元' }}</dt>
+              <dt class="text-gray-500 text-[11px] tracking-wide mb-0.5">{{ document_type === 'issued' ? '件名 / 取引内容' : '請求元' }}</dt>
               <dd class="font-medium text-gray-900 bg-gray-50 px-2 py-1 rounded inline-block w-full flex items-center gap-2">
                 <Building2 class="w-3 h-3 text-gray-400" />
-                {{ document_type === 'issued' ? (invoice.invoice_number ?? invoice.client_name ?? '請求書') : invoice.client_name }}
+                {{ document_type === 'issued' ? (invoice.invoice_number ?? invoice.client_name ?? '請求書') : (invoice.vendor_name || invoice.client_name) }}
               </dd>
             </div>
           </div>
@@ -162,7 +166,7 @@ const onSave = async (data: Record<string, any>): Promise<boolean> => {
           </div>
           <!-- 取引先 -->
           <div v-if="fields.includes('client_name')">
-            <label class="block text-xs font-medium text-gray-500 mb-1">{{ document_type === 'issued' ? '取引先' : '仕入元' }}</label>
+            <label class="block text-xs font-medium text-gray-500 mb-1">{{ document_type === 'issued' ? '請求先' : '請求元' }}</label>
             <input v-model="form.client_name" type="text"
               class="block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
           </div>

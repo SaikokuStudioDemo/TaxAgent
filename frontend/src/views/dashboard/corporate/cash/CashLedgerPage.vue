@@ -55,23 +55,26 @@ const transactionsWithBalance = computed(() => {
 
 // ── サマリー ───────────────────────────────────────────────────
 const currentBalance = computed(() => {
-  if (selectedAccountId.value === 'all') {
-    return accounts.value.reduce((s, a) => s + a.current_balance, 0)
+  // 表示は降順なので先頭行が最新残高
+  if (transactionsWithBalance.value.length > 0) {
+    return transactionsWithBalance.value[0].runningBalance
   }
-  return selectedAccount.value?.current_balance ?? 0
+  // 取引なし → initial_balance の合計
+  if (selectedAccountId.value === 'all') {
+    return accounts.value.reduce((s, a) => s + a.initial_balance, 0)
+  }
+  return selectedAccount.value?.initial_balance ?? 0
 })
 
-const thisMonth = new Date().toISOString().slice(0, 7)
-
-const monthlyIncome = computed(() =>
+const totalIncome = computed(() =>
   transactionsWithBalance.value
-    .filter(t => t.fiscal_period === thisMonth && t.direction === 'income')
+    .filter(t => t.direction === 'income')
     .reduce((s, t) => s + t.amount, 0)
 )
 
-const monthlyExpense = computed(() =>
+const totalExpense = computed(() =>
   transactionsWithBalance.value
-    .filter(t => t.fiscal_period === thisMonth && t.direction === 'expense')
+    .filter(t => t.direction === 'expense')
     .reduce((s, t) => s + t.amount, 0)
 )
 
@@ -125,7 +128,7 @@ const txForm = ref<TxForm>({
   amount: 0,
   description: '',
   category: '消耗品費',
-  fiscal_period: thisMonth,
+  fiscal_period: new Date().toISOString().slice(0, 7),
   note: '',
 })
 
@@ -173,7 +176,7 @@ const openNewTx = () => {
     amount: 0,
     description: '',
     category: '消耗品費',
-    fiscal_period: thisMonth,
+    fiscal_period: new Date().toISOString().slice(0, 7),
     note: '',
   }
   categoryQuery.value = '消耗品費'
@@ -282,12 +285,12 @@ onMounted(loadAll)
           <p class="text-2xl font-bold text-slate-900">{{ formatMoney(currentBalance) }}</p>
         </div>
         <div class="bg-white rounded-xl border border-slate-200 p-4">
-          <p class="text-xs text-slate-500 mb-1">今月収入</p>
-          <p class="text-2xl font-bold text-emerald-600">{{ formatMoney(monthlyIncome) }}</p>
+          <p class="text-xs text-slate-500 mb-1">収入合計</p>
+          <p class="text-2xl font-bold text-emerald-600">{{ formatMoney(totalIncome) }}</p>
         </div>
         <div class="bg-white rounded-xl border border-slate-200 p-4">
-          <p class="text-xs text-slate-500 mb-1">今月支出</p>
-          <p class="text-2xl font-bold text-red-500">{{ formatMoney(monthlyExpense) }}</p>
+          <p class="text-xs text-slate-500 mb-1">支出合計</p>
+          <p class="text-2xl font-bold text-red-500">{{ formatMoney(totalExpense) }}</p>
         </div>
       </div>
 

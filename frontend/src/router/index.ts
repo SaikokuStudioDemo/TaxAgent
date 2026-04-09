@@ -41,6 +41,8 @@ const router = createRouter({
             children: [
                 { path: '', name: 'dashboard-corporate-home', component: () => import('@/views/dashboard/corporate/CorporateSummaryPage.vue') },
                 { path: 'receipts/upload', name: 'dashboard-corporate-receipts-upload', component: () => import('@/views/dashboard/corporate/receipts/ReceiptUploadPage.vue') },
+                { path: 'receipts/list', name: 'dashboard-corporate-receipts-list', component: () => import('@/views/dashboard/corporate/receipts/ReceiptListPage.vue') },
+                { path: 'receipts/edit/:id', name: 'dashboard-corporate-receipts-edit', component: () => import('@/views/dashboard/corporate/receipts/ReceiptEditPage.vue') },
                 { path: 'receipts/approvals', name: 'dashboard-corporate-receipts-approvals', component: () => import('@/views/dashboard/corporate/receipts/ApprovalDashboardPage.vue') },
                 { path: 'receipts/matching', name: 'dashboard-corporate-receipts-matching', component: () => import('@/views/dashboard/corporate/receipts/MatchingPage.vue') },
                 {
@@ -60,6 +62,18 @@ const router = createRouter({
                     meta: { title: '受領請求書アップロード' }
                 },
                 {
+                    path: 'invoices/received-list',
+                    name: 'dashboard-corporate-invoices-received-list',
+                    component: () => import('@/views/dashboard/corporate/invoices/ReceivedInvoiceListPage.vue'),
+                    meta: { title: '受取請求書一覧' }
+                },
+                {
+                    path: 'invoices/received-edit/:id',
+                    name: 'dashboard-corporate-invoices-received-edit',
+                    component: () => import('@/views/dashboard/corporate/invoices/ReceivedInvoiceEditPage.vue'),
+                    meta: { title: '受取請求書編集' }
+                },
+                {
                     path: 'invoices/list',
                     name: 'dashboard-corporate-invoices-list',
                     component: () => import('@/views/dashboard/corporate/invoices/InvoiceListPage.vue'),
@@ -73,6 +87,7 @@ const router = createRouter({
                 },
                 { path: 'invoices/matching', name: 'dashboard-corporate-invoices-matching', component: () => import('@/views/dashboard/corporate/invoices/InvoiceMatchingPage.vue'), props: { mode: 'income' } },
                 { path: 'invoices/payment-matching', name: 'dashboard-corporate-invoices-payment-matching', component: () => import('@/views/dashboard/corporate/invoices/InvoiceMatchingPage.vue'), props: { mode: 'payment' } },
+                { path: 'banking/reconciliation', name: 'dashboard-corporate-banking-reconciliation', component: () => import('@/views/dashboard/corporate/banking/ReconciliationPage.vue') },
                 { path: 'banking/import', name: 'dashboard-corporate-banking-import', component: () => import('@/views/dashboard/corporate/banking/BankingImportPage.vue') },
                 { path: 'banking/history', name: 'dashboard-corporate-banking-history', component: () => import('@/views/dashboard/corporate/banking/BankImportHistoryPage.vue') },
                 { path: 'banking/auto-matches', name: 'BankingAutoMatches', component: () => import('@/views/dashboard/corporate/banking/AutoMatchHistoryPage.vue') },

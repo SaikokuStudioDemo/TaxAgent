@@ -13,14 +13,15 @@ export interface Transaction {
     normalized_name?: string;
     amount: number;
     transaction_type: 'credit' | 'debit';
-    status: 'unmatched' | 'matched';
+    status: 'unmatched' | 'matched' | 'transferred';
     fiscal_period: string;
+    import_file_id?: string;
     imported_at: string;
 }
 
 export interface Match {
     id: string;
-    match_type: 'receipt' | 'invoice';
+    match_type: 'receipt' | 'invoice' | 'transfer' | 'auto_expense';
     transaction_ids: string[];
     document_ids: string[];
     total_transaction_amount: number;
@@ -56,6 +57,7 @@ export function useTransactions() {
         source_type?: string;
         status?: string;
         fiscal_period?: string;
+        import_file_id?: string;
     }) => {
         isLoading.value = true;
         error.value = null;
@@ -65,6 +67,30 @@ export function useTransactions() {
             error.value = e.message;
         } finally {
             isLoading.value = false;
+        }
+    };
+
+    const updateTransaction = async (id: string, data: {
+        transaction_date?: string;
+        description?: string;
+        amount?: number;
+    }) => {
+        try {
+            return await api.patch<Transaction>(`/transactions/${id}`, data);
+        } catch (e: any) {
+            error.value = e.message;
+            return null;
+        }
+    };
+
+    const deleteTransaction = async (id: string) => {
+        try {
+            await api.delete(`/transactions/${id}`);
+            transactions.value = transactions.value.filter(t => t.id !== id);
+            return true;
+        } catch (e: any) {
+            error.value = e.message;
+            return false;
         }
     };
 
@@ -147,6 +173,7 @@ export function useTransactions() {
     const fetchCandidates = async (params?: {
         match_type?: string;
         fiscal_period?: string;
+        invoice_type?: string;
     }): Promise<ApiCandidatePair[]> => {
         try {
             const qs = buildQueryString(params);
@@ -163,6 +190,8 @@ export function useTransactions() {
         isLoading,
         error,
         fetchTransactions,
+        updateTransaction,
+        deleteTransaction,
         importTransactions,
         fetchMatches,
         createMatch,

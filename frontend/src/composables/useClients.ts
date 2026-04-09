@@ -4,9 +4,17 @@
 import { ref } from 'vue';
 import { api } from '@/lib/api';
 
+export interface BankDisplayName {
+    pattern: string;
+    source: 'manual' | 'ai';
+    confidence: number;
+    added_at?: string;
+}
+
 export interface Client {
     id: string;
     name: string;
+    client_category?: 'company' | 'individual';
     registration_number?: string;
     email?: string;
     phone?: string;
@@ -16,6 +24,7 @@ export interface Client {
     contact_person?: string;
     postal_code?: string;
     internal_notes?: string;
+    bank_display_names?: BankDisplayName[];
     created_at: string;
 }
 
@@ -79,6 +88,31 @@ export function useClients() {
         }
     };
 
+    const addBankDisplayName = async (clientId: string, pattern: string, source: 'manual' | 'ai' = 'manual') => {
+        try {
+            const updated = await api.post<Client>(`/clients/${clientId}/bank-display-names`, { pattern, source, confidence: 1.0 });
+            const idx = clients.value.findIndex(c => c.id === clientId);
+            if (idx !== -1) clients.value[idx] = updated;
+            return updated;
+        } catch (e: any) {
+            error.value = e.message;
+            return null;
+        }
+    };
+
+    const removeBankDisplayName = async (clientId: string, pattern: string) => {
+        try {
+            const encoded = encodeURIComponent(pattern);
+            const updated = await api.delete<Client>(`/clients/${clientId}/bank-display-names/${encoded}`);
+            const idx = clients.value.findIndex(c => c.id === clientId);
+            if (idx !== -1) clients.value[idx] = updated;
+            return updated;
+        } catch (e: any) {
+            error.value = e.message;
+            return null;
+        }
+    };
+
     return {
         clients,
         isLoading,
@@ -88,5 +122,7 @@ export function useClients() {
         createClient,
         updateClient,
         deleteClient,
+        addBankDisplayName,
+        removeBankDisplayName,
     };
 }

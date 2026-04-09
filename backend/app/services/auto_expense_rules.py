@@ -7,6 +7,7 @@ Auto Expense Rules
 フェーズ2（税理士管理画面）実装時に corporate_auto_rules コレクションへの
 フォールバックロジックをここに追加する。
 """
+import re
 from typing import Optional
 
 AUTO_EXPENSE_RULES = [
@@ -32,6 +33,30 @@ AUTO_EXPENSE_RULES = [
         "source_type": ["bank", "card"],
         "keywords": ["利息"],
         "account_subject": "支払利息",
+        "tax_division": "対象外",
+    },
+    {
+        "key": "social_insurance",
+        "name": "社会保険料",
+        "source_type": "bank",
+        "keywords": ["年金", "社会保険料", "社会保険", "ネンキン", "シャカイホケンリョウ", "シャカイホケン"],
+        "account_subject": "法定福利費",
+        "tax_division": "対象外",
+    },
+    {
+        "key": "completion_payment",
+        "name": "完付金",
+        "source_type": "bank",
+        "keywords": ["完付金", "カンフキン", "カンプキン", "完納金"],
+        "account_subject": "租税公課",
+        "tax_division": "対象外",
+    },
+    {
+        "key": "insurance_refund",
+        "name": "社会保険還付",
+        "source_type": "bank",
+        "keywords": ["ホケンカンプキン", "シャカイホケンカンプキン", "ホケンカンフキン"],
+        "account_subject": "法定福利費",
         "tax_division": "対象外",
     },
 ]
@@ -65,12 +90,33 @@ CASH_DETECTION_RULES = [
         ],
         "category": "現金",
     },
+    {
+        "key": "ad_deposit",
+        "name": "AD現金預入",
+        "source_type": "bank",
+        "transaction_type": "credit",
+        "cash_direction": "expense",
+        "keywords": [],
+        "regex": r"^AD(\d+|\s|$)",
+        "category": "現金",
+    },
+    {
+        "key": "cd_withdrawal",
+        "name": "CD現金引き出し",
+        "source_type": "bank",
+        "transaction_type": "debit",
+        "cash_direction": "income",
+        "keywords": [],
+        "regex": r"^CD(\d+|\s|$)",
+        "category": "現金",
+    },
 ]
 
 
 def match_cash_transaction(transaction: dict) -> Optional[dict]:
     source_type = transaction.get("source_type", "")
-    description = transaction.get("description", "").lower()
+    description = transaction.get("description", "")
+    description_lower = description.lower()
     transaction_type = transaction.get("transaction_type", "")
 
     for rule in CASH_DETECTION_RULES:
@@ -78,8 +124,14 @@ def match_cash_transaction(transaction: dict) -> Optional[dict]:
             continue
         if rule.get("transaction_type") and rule["transaction_type"] != transaction_type:
             continue
+        # regex フィールドがある場合は re.match() で判定
+        if rule.get("regex"):
+            if re.match(rule["regex"], description):
+                return rule
+            continue
+        # 通常のキーワード部分一致
         for keyword in rule["keywords"]:
-            if keyword.lower() in description:
+            if keyword.lower() in description_lower:
                 return rule
     return None
 

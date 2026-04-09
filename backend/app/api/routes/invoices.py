@@ -33,6 +33,28 @@ async def create_invoice(
     # Determine fiscal period from issue_date (YYYY-MM-DD → YYYY-MM)
     fiscal_period = payload.issue_date[:7] if payload.issue_date else datetime.utcnow().strftime("%Y-%m")
 
+    # ── received請求書の特別処理 ──────────────────────────────────
+    if payload.document_type == "received":
+        # client_nameが空の場合は自社名を自動セット
+        if not payload.client_name:
+            profile = await ctx.db["company_profiles"].find_one(
+                {"corporate_id": ctx.corporate_id, "is_default": True}
+            )
+            if not profile:
+                profile = await ctx.db["company_profiles"].find_one(
+                    {"corporate_id": ctx.corporate_id}
+                )
+            if profile:
+                payload = payload.model_copy(update={"client_name": profile.get("company_name", "")})
+                logger.info(f"received invoice: client_name auto-set to '{payload.client_name}'")
+
+        # vendor_nameが空の場合は警告ログ
+        if not payload.vendor_name:
+            logger.warning(
+                f"received invoice created without vendor_name "
+                f"(client_name={payload.client_name!r}, amount={payload.total_amount})"
+            )
+
     # Match approval rules
     rule_id, rule_steps = await evaluate_approval_rules(ctx.corporate_id, f"{payload.document_type}_invoice", payload.model_dump())
 
@@ -57,10 +79,13 @@ async def create_invoice(
         for i, s in enumerate(rule_steps or [])
     ]
 
+    payload_dict = payload.model_dump()
+    submitted_by = payload_dict.pop("submitted_by", None) or ctx.user_id
     doc = {
-        **payload.model_dump(),
+        **payload_dict,
         "corporate_id": ctx.corporate_id,
         "created_by": ctx.user_id,
+        "submitted_by": submitted_by,
         "approval_status": "auto_approved" if is_auto_approved else requested_status,
         "reconciliation_status": "unreconciled",
         "current_step": 1,
@@ -78,6 +103,16 @@ async def create_invoice(
     doc = docs[0]
 
     result = await ctx.db["invoices"].insert_one(doc)
+    await ctx.db["approval_events"].insert_one({
+        "corporate_id": ctx.corporate_id,
+        "document_type": "invoice",
+        "document_id": str(result.inserted_id),
+        "step": 0,
+        "action": "submitted",
+        "approver_id": ctx.user_id,
+        "comment": None,
+        "timestamp": datetime.utcnow(),
+    })
     created = await ctx.db["invoices"].find_one({"_id": result.inserted_id})
     return _serialize(created)
 
@@ -88,6 +123,7 @@ async def list_invoices(
     approval_status: Optional[str] = None,
     fiscal_period: Optional[str] = None,
     reconciliation_status: Optional[str] = None,
+    submitted_by: Optional[str] = None,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     query = build_list_query(
@@ -99,15 +135,21 @@ async def list_invoices(
     query["is_deleted"] = {"$ne": True}
     if reconciliation_status:
         query["reconciliation_status"] = reconciliation_status
+    if submitted_by == "me":
+        query["submitted_by"] = ctx.user_id
+    elif submitted_by:
+        query["submitted_by"] = submitted_by
 
     cursor = ctx.db["invoices"].find(query).sort("created_at", -1)
     docs = await cursor.to_list(length=500)
     user_ids = {doc.get("created_by") for doc in docs if doc.get("created_by")}
-    name_map = await build_name_map(ctx.db, user_ids)
+    submitted_ids = {doc.get("submitted_by") for doc in docs if doc.get("submitted_by")}
+    name_map = await build_name_map(ctx.db, user_ids | submitted_ids)
     result = []
     for doc in docs:
         s = _serialize(doc)
         s["creator_name"] = name_map.get(s.get("created_by", ""), "不明")
+        s["submitter_name"] = name_map.get(s.get("submitted_by", ""), "不明")
         result.append(s)
     return result
 

@@ -37,6 +37,8 @@ export interface Invoice {
     line_items: LineItem[];
     created_by: string;
     creator_name?: string;
+    submitted_by?: string;
+    submitter_name?: string;
     created_at: string;
     paid_at?: string;
     attachments?: string[];
@@ -59,6 +61,7 @@ export function useInvoices() {
         document_type?: string;
         approval_status?: string;
         fiscal_period?: string;
+        submitted_by?: string;
     }) => {
         isLoading.value = true;
         error.value = null;

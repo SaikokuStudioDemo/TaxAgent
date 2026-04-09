@@ -13,8 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 def serialize_doc(doc: dict) -> dict:
-    """Convert ObjectId _id to string id for JSON serialization."""
+    """Convert ObjectId _id to string id, and stringify any remaining ObjectIds."""
     doc["id"] = str(doc.pop("_id"))
+    for k, v in doc.items():
+        if isinstance(v, ObjectId):
+            doc[k] = str(v)
     return doc
 
 

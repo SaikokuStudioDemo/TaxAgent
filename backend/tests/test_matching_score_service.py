@@ -162,15 +162,18 @@ def test_high_score_all_match():
 
 
 def test_low_score_amount_match_but_date_and_name_far():
-    """金額一致・日付遠い・名称不一致 → 低スコア (is_candidate=False の可能性)"""
+    """金額一致・日付遠い・名称不一致 → date=0 or name=0 のため早期除外"""
     r = calculate_match_score(
         _tx(1000, "2025-01-01", "ABCショップ"),
         _receipt(1000, "2025-03-31", "xyz商店"),
         "receipt",
     )
-    # 金額40 + 日付0 + 名称0 = 40点 → is_candidate=False
-    assert r["score"] == 40
+    # date=0 かつ name=0 → score=0, is_candidate=False
+    assert r["score"] == 0
     assert r["is_candidate"] is False
+    assert r["score_breakdown"]["amount"] == 40
+    assert r["score_breakdown"]["date"] == 0
+    assert r["score_breakdown"]["name"] == 0
 
 
 def test_is_candidate_true_when_score_gte_60():

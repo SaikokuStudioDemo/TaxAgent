@@ -10,6 +10,17 @@ const isLoading = ref(true);
 // Key used to store the dev auth token in localStorage
 const DEV_AUTH_TOKEN_KEY = 'DEV_AUTH_TOKEN';
 
+// ページリフレッシュ時もuserProfileを復元するため、
+// モジュールロード時にDEVトークンがあれば自動でプロファイル取得する
+const _devToken = localStorage.getItem(DEV_AUTH_TOKEN_KEY);
+if (_devToken && !userProfile.value) {
+  const _apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+  fetch(`${_apiUrl}/users/me`, { headers: { Authorization: `Bearer ${_devToken}` } })
+    .then(res => (res.ok ? res.json() : null))
+    .then(data => { if (data) { userProfile.value = data; isLoading.value = false; } })
+    .catch(() => { isLoading.value = false; });
+}
+
 export function useAuth() {
     const router = useRouter();
 

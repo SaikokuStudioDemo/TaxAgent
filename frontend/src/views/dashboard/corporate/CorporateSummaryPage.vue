@@ -2,183 +2,472 @@
 import { computed, onMounted } from 'vue';
 import {
   AlertCircle,
-  CreditCard,
-  FileText,
-  CheckCircle,
-  Percent,
   ArrowUpRight,
   Wallet,
+  Receipt,
+  FileText,
+  Building2,
+  CheckCircle2,
+  Clock,
+  CircleDot,
 } from 'lucide-vue-next';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
-import { Doughnut } from 'vue-chartjs';
+import { RouterLink } from 'vue-router';
 import { useInvoices } from '@/composables/useInvoices';
 import { useReceipts } from '@/composables/useReceipts';
 import { useTransactions } from '@/composables/useTransactions';
 import { useCash } from '@/composables/useCash';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 
-ChartJS.register(ArcElement, Tooltip, Legend);
-
-// --- KPI DATA ---
 const { invoices, fetchInvoices } = useInvoices();
 const { receipts, fetchReceipts } = useReceipts();
 const { transactions, matches, fetchTransactions, fetchMatches } = useTransactions();
 const { cashSummary, fetchCashSummary } = useCash();
 
 onMounted(() => {
-    Promise.all([
-        fetchInvoices(),
-        fetchReceipts(),
-        fetchTransactions(),
-        fetchMatches(),
-        fetchCashSummary(),
-    ]);
+  Promise.all([
+    fetchInvoices(),
+    fetchReceipts(),
+    fetchTransactions(),
+    fetchMatches(),
+    fetchCashSummary(),
+  ]);
 });
 
-const kpi = computed(() => {
-    const totalDocs = invoices.value.length + receipts.value.length;
-    const matchCount = matches.value.length;
-    const rate = totalDocs > 0 ? Math.round((matchCount / totalDocs) * 1000) / 10 : 0;
-    return {
-        bankCount: transactions.value.length,
-        docCount: totalDocs,
-        matchCount,
-        matchRate: rate,
-    };
+// ── 経費精算（領収書） ────────────────────────────────
+const expenseStats = computed(() => {
+  const all = receipts.value;
+  const pendingApproval = all.filter(r => r.approval_status === 'pending_approval').length;
+  const approvedUnmatched = all.filter(
+    r => r.approval_status === 'approved' && r.reconciliation_status !== 'reconciled'
+  ).length;
+  const matched = all.filter(r => r.reconciliation_status === 'reconciled').length;
+  return { pendingApproval, approvedUnmatched, matched, total: all.length };
 });
 
-const chartData = {
-  labels: ['請求書', '領収書'],
-  datasets: [
-    {
-      backgroundColor: ['#3b82f6', '#10b981'], // blue-500, emerald-500
-      data: [750000, 450000],
-      borderWidth: 0,
-      hoverOffset: 4
-    }
-  ]
-};
+// ── 受領請求書 ────────────────────────────────────────
+const receivedInvoiceStats = computed(() => {
+  const all = invoices.value.filter(i => i.document_type === 'received');
+  const pendingApproval = all.filter(i => i.approval_status === 'pending_approval').length;
+  const approvedUnmatched = all.filter(
+    i => ['approved', 'auto_approved'].includes(i.approval_status) && i.reconciliation_status !== 'reconciled'
+  ).length;
+  const matched = all.filter(i => i.reconciliation_status === 'reconciled').length;
+  return { pendingApproval, approvedUnmatched, matched, total: all.length };
+});
 
-const chartOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  cutout: '75%',
-  plugins: {
-    legend: {
-      display: false
-    },
-    tooltip: {
-      callbacks: {
-        label: function(context: any) {
-          let label = context.label || '';
-          if (label) {
-            label += ': ';
-          }
-          if (context.parsed !== null) {
-            label += new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY' }).format(context.parsed);
-          }
-          return label;
-        }
-      }
-    }
+// ── 発行請求書 ────────────────────────────────────────
+const issuedInvoiceStats = computed(() => {
+  const all = invoices.value.filter(i => i.document_type === 'issued');
+  const unsent = all.filter(i => !i.delivery_status || i.delivery_status === 'unsent').length;
+  const sentUnmatched = all.filter(
+    i => i.delivery_status === 'sent' && i.reconciliation_status !== 'reconciled'
+  ).length;
+  const matched = all.filter(i => i.reconciliation_status === 'reconciled').length;
+  return { unsent, sentUnmatched, matched, total: all.length };
+});
+
+// ── 銀行口座明細 ──────────────────────────────────────
+const bankStats = computed(() => {
+  const all = transactions.value;
+  const unmatched = all.filter(t => t.status === 'unmatched').length;
+  const autoMatched = matches.value.filter((m: any) => m.match_type === 'auto_expense').length;
+  const manualMatched = all.filter(t => t.status === 'matched').length - autoMatched;
+  const transferred = all.filter(t => t.status === 'transferred').length;
+  return { unmatched, autoMatched, manualMatched: Math.max(0, manualMatched), transferred, total: all.length };
+});
+
+// ── 要対応アラート ────────────────────────────────────
+const alerts = computed(() => {
+  const list: { message: string; to: string; label: string }[] = [];
+  if (expenseStats.value.pendingApproval > 0) {
+    list.push({
+      message: `領収書の承認が ${expenseStats.value.pendingApproval}件 待機中です`,
+      to: '/dashboard/corporate/receipts/approvals',
+      label: '承認画面へ',
+    });
   }
-};
+  if (expenseStats.value.approvedUnmatched > 0) {
+    list.push({
+      message: `承認済み領収書 ${expenseStats.value.approvedUnmatched}件 が未消込です`,
+      to: '/dashboard/corporate/receipts/matching',
+      label: '消込画面へ',
+    });
+  }
+  if (receivedInvoiceStats.value.pendingApproval > 0) {
+    list.push({
+      message: `受領請求書の承認が ${receivedInvoiceStats.value.pendingApproval}件 待機中です`,
+      to: '/dashboard/corporate/invoices/approvals',
+      label: '承認画面へ',
+    });
+  }
+  if (bankStats.value.unmatched > 0) {
+    list.push({
+      message: `銀行口座の未消込明細が ${bankStats.value.unmatched}件 あります`,
+      to: '/dashboard/corporate/receipts/matching',
+      label: '消込画面へ',
+    });
+  }
+  return list;
+});
 </script>
 
 <template>
   <div class="space-y-6">
-    <!-- Header & Alert -->
-    <div class="flex justify-between items-end mb-2">
-      <div>
-        <h1 class="text-2xl font-bold text-gray-900 tracking-tight">顧客サマリー</h1>
-        <p class="text-gray-500 mt-1">最新の経費および請求状況をご確認いただけます</p>
-      </div>
+
+    <!-- Header -->
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900 tracking-tight">処理状況サマリー</h1>
+      <p class="text-gray-500 mt-1 text-sm">承認・消込の処理状況をリアルタイムで確認できます</p>
     </div>
 
-    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-r-lg flex items-start gap-3 shadow-sm">
-      <AlertCircle class="text-yellow-600 mt-0.5" :size="20" />
-      <div>
-        <h3 class="text-sm font-bold text-yellow-800">あと2日で承認状況を100%にしてください</h3>
-        <p class="text-sm text-yellow-700 mt-0.5">現在未承認の領収書が12件残っています。期日までの処理をお願いします。</p>
+    <!-- Alerts -->
+    <div v-if="alerts.length > 0" class="space-y-2">
+      <div
+        v-for="(alert, i) in alerts" :key="i"
+        class="bg-amber-50 border-l-4 border-amber-400 px-4 py-3 rounded-r-lg flex items-center justify-between gap-3 shadow-sm"
+      >
+        <div class="flex items-center gap-2">
+          <AlertCircle class="h-4 w-4 text-amber-600 shrink-0" />
+          <p class="text-sm font-medium text-amber-800">{{ alert.message }}</p>
+        </div>
+        <RouterLink
+          :to="alert.to"
+          class="shrink-0 text-xs font-bold text-amber-700 hover:text-amber-900 flex items-center gap-1 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-lg transition-colors"
+        >
+          {{ alert.label }} <ArrowUpRight class="h-3.5 w-3.5" />
+        </RouterLink>
       </div>
     </div>
+    <div v-else
+      class="bg-emerald-50 border-l-4 border-emerald-400 px-4 py-3 rounded-r-lg flex items-center gap-2 shadow-sm">
+      <CheckCircle2 class="h-4 w-4 text-emerald-600 shrink-0" />
+      <p class="text-sm font-medium text-emerald-800">現在、対応が必要な項目はありません</p>
+    </div>
 
-    <!-- KPI Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-      <!-- Card 1 -->
-      <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-        <div class="flex justify-between items-start mb-4">
-          <div class="p-3 bg-gray-50 rounded-xl"><CreditCard :size="24" class="text-blue-600" /></div>
-          <div class="px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-50 text-emerald-700">+12%</div>
+    <!-- Status Cards: 2x2 grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+      <!-- 経費精算 -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="p-2 bg-indigo-50 rounded-lg">
+              <Receipt class="h-5 w-5 text-indigo-600" />
+            </div>
+            <div>
+              <h2 class="text-sm font-bold text-gray-800">経費精算</h2>
+              <p class="text-xs text-gray-400">領収書 計{{ expenseStats.total }}件</p>
+            </div>
+          </div>
+          <RouterLink to="/dashboard/corporate/receipts/matching"
+            class="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+            消込画面 <ArrowUpRight class="h-3.5 w-3.5" />
+          </RouterLink>
         </div>
-        <h3 class="text-gray-500 text-sm font-medium mb-1">登録された銀行/カード</h3>
-        <p class="text-3xl font-extrabold text-gray-900">{{ kpi.bankCount }}</p>
-      </div>
-      <!-- Card 2 -->
-      <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-        <div class="flex justify-between items-start mb-4">
-          <div class="p-3 bg-gray-50 rounded-xl"><FileText :size="24" class="text-emerald-600" /></div>
-          <div class="px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-50 text-emerald-700">+5%</div>
+        <div class="p-5">
+          <!-- Funnel steps -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Clock class="h-4 w-4 text-amber-500" />
+                <span class="text-sm text-gray-600">承認待ち</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-lg font-extrabold"
+                  :class="expenseStats.pendingApproval > 0 ? 'text-amber-500' : 'text-gray-300'">
+                  {{ expenseStats.pendingApproval }}件
+                </span>
+                <RouterLink v-if="expenseStats.pendingApproval > 0"
+                  to="/dashboard/corporate/receipts/approvals"
+                  class="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full hover:bg-amber-200 transition-colors">
+                  対応する
+                </RouterLink>
+              </div>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <CircleDot class="h-4 w-4 text-blue-500" />
+                <span class="text-sm text-gray-600">承認済・未消込</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-lg font-extrabold"
+                  :class="expenseStats.approvedUnmatched > 0 ? 'text-blue-500' : 'text-gray-300'">
+                  {{ expenseStats.approvedUnmatched }}件
+                </span>
+                <RouterLink v-if="expenseStats.approvedUnmatched > 0"
+                  to="/dashboard/corporate/receipts/matching"
+                  class="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full hover:bg-blue-200 transition-colors">
+                  消込する
+                </RouterLink>
+              </div>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <CheckCircle2 class="h-4 w-4 text-emerald-500" />
+                <span class="text-sm text-gray-600">消込済</span>
+              </div>
+              <span class="text-lg font-extrabold"
+                :class="expenseStats.matched > 0 ? 'text-emerald-500' : 'text-gray-300'">
+                {{ expenseStats.matched }}件
+              </span>
+            </div>
+          </div>
+          <!-- Progress bar -->
+          <div class="mt-4 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div class="h-full bg-emerald-500 rounded-full transition-all"
+              :style="{ width: expenseStats.total > 0 ? `${Math.round(expenseStats.matched / expenseStats.total * 100)}%` : '0%' }">
+            </div>
+          </div>
+          <p class="text-right text-xs text-gray-400 mt-1">
+            消込完了率 {{ expenseStats.total > 0 ? Math.round(expenseStats.matched / expenseStats.total * 100) : 0 }}%
+          </p>
         </div>
-        <h3 class="text-gray-500 text-sm font-medium mb-1">登録された請求書/領収書</h3>
-        <p class="text-3xl font-extrabold text-gray-900">{{ kpi.docCount }}</p>
       </div>
-      <!-- Card 3 -->
-      <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-        <div class="flex justify-between items-start mb-4">
-          <div class="p-3 bg-gray-50 rounded-xl"><CheckCircle :size="24" class="text-indigo-600" /></div>
-          <div class="px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-50 text-emerald-700">+18%</div>
+
+      <!-- 受領請求書 -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="p-2 bg-violet-50 rounded-lg">
+              <FileText class="h-5 w-5 text-violet-600" />
+            </div>
+            <div>
+              <h2 class="text-sm font-bold text-gray-800">受領請求書</h2>
+              <p class="text-xs text-gray-400">計{{ receivedInvoiceStats.total }}件</p>
+            </div>
+          </div>
+          <RouterLink to="/dashboard/corporate/invoices/payment-matching"
+            class="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+            消込画面 <ArrowUpRight class="h-3.5 w-3.5" />
+          </RouterLink>
         </div>
-        <h3 class="text-gray-500 text-sm font-medium mb-1">完了したマッチング</h3>
-        <p class="text-3xl font-extrabold text-gray-900">{{ kpi.matchCount }}</p>
-      </div>
-      <!-- Card 4 -->
-      <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-        <div class="flex justify-between items-start mb-4">
-          <div class="p-3 bg-gray-50 rounded-xl"><Percent :size="24" class="text-purple-600" /></div>
-          <div class="px-2.5 py-1 text-xs font-bold rounded-full bg-red-50 text-red-600">-2.1%</div>
+        <div class="p-5">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Clock class="h-4 w-4 text-amber-500" />
+                <span class="text-sm text-gray-600">承認待ち</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-lg font-extrabold"
+                  :class="receivedInvoiceStats.pendingApproval > 0 ? 'text-amber-500' : 'text-gray-300'">
+                  {{ receivedInvoiceStats.pendingApproval }}件
+                </span>
+                <RouterLink v-if="receivedInvoiceStats.pendingApproval > 0"
+                  to="/dashboard/corporate/invoices/approvals"
+                  class="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full hover:bg-amber-200 transition-colors">
+                  対応する
+                </RouterLink>
+              </div>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <CircleDot class="h-4 w-4 text-blue-500" />
+                <span class="text-sm text-gray-600">承認済・未消込</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-lg font-extrabold"
+                  :class="receivedInvoiceStats.approvedUnmatched > 0 ? 'text-blue-500' : 'text-gray-300'">
+                  {{ receivedInvoiceStats.approvedUnmatched }}件
+                </span>
+                <RouterLink v-if="receivedInvoiceStats.approvedUnmatched > 0"
+                  to="/dashboard/corporate/invoices/payment-matching"
+                  class="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full hover:bg-blue-200 transition-colors">
+                  消込する
+                </RouterLink>
+              </div>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <CheckCircle2 class="h-4 w-4 text-emerald-500" />
+                <span class="text-sm text-gray-600">消込済</span>
+              </div>
+              <span class="text-lg font-extrabold"
+                :class="receivedInvoiceStats.matched > 0 ? 'text-emerald-500' : 'text-gray-300'">
+                {{ receivedInvoiceStats.matched }}件
+              </span>
+            </div>
+          </div>
+          <div class="mt-4 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div class="h-full bg-emerald-500 rounded-full transition-all"
+              :style="{ width: receivedInvoiceStats.total > 0 ? `${Math.round(receivedInvoiceStats.matched / receivedInvoiceStats.total * 100)}%` : '0%' }">
+            </div>
+          </div>
+          <p class="text-right text-xs text-gray-400 mt-1">
+            消込完了率 {{ receivedInvoiceStats.total > 0 ? Math.round(receivedInvoiceStats.matched / receivedInvoiceStats.total * 100) : 0 }}%
+          </p>
         </div>
-        <h3 class="text-gray-500 text-sm font-medium mb-1">マッチング完了率</h3>
-        <p class="text-3xl font-extrabold text-gray-900">{{ kpi.matchRate }}%</p>
       </div>
+
+      <!-- 発行請求書 -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="p-2 bg-blue-50 rounded-lg">
+              <FileText class="h-5 w-5 text-blue-600" />
+            </div>
+            <div>
+              <h2 class="text-sm font-bold text-gray-800">発行請求書</h2>
+              <p class="text-xs text-gray-400">計{{ issuedInvoiceStats.total }}件</p>
+            </div>
+          </div>
+          <RouterLink to="/dashboard/corporate/invoices/matching"
+            class="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+            消込画面 <ArrowUpRight class="h-3.5 w-3.5" />
+          </RouterLink>
+        </div>
+        <div class="p-5">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Clock class="h-4 w-4 text-amber-500" />
+                <span class="text-sm text-gray-600">未送付</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-lg font-extrabold"
+                  :class="issuedInvoiceStats.unsent > 0 ? 'text-amber-500' : 'text-gray-300'">
+                  {{ issuedInvoiceStats.unsent }}件
+                </span>
+                <RouterLink v-if="issuedInvoiceStats.unsent > 0"
+                  to="/dashboard/corporate/invoices/list"
+                  class="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full hover:bg-amber-200 transition-colors">
+                  対応する
+                </RouterLink>
+              </div>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <CircleDot class="h-4 w-4 text-blue-500" />
+                <span class="text-sm text-gray-600">送付済・入金待ち</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-lg font-extrabold"
+                  :class="issuedInvoiceStats.sentUnmatched > 0 ? 'text-blue-500' : 'text-gray-300'">
+                  {{ issuedInvoiceStats.sentUnmatched }}件
+                </span>
+                <RouterLink v-if="issuedInvoiceStats.sentUnmatched > 0"
+                  to="/dashboard/corporate/invoices/matching"
+                  class="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full hover:bg-blue-200 transition-colors">
+                  消込する
+                </RouterLink>
+              </div>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <CheckCircle2 class="h-4 w-4 text-emerald-500" />
+                <span class="text-sm text-gray-600">入金確認済</span>
+              </div>
+              <span class="text-lg font-extrabold"
+                :class="issuedInvoiceStats.matched > 0 ? 'text-emerald-500' : 'text-gray-300'">
+                {{ issuedInvoiceStats.matched }}件
+              </span>
+            </div>
+          </div>
+          <div class="mt-4 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div class="h-full bg-emerald-500 rounded-full transition-all"
+              :style="{ width: issuedInvoiceStats.total > 0 ? `${Math.round(issuedInvoiceStats.matched / issuedInvoiceStats.total * 100)}%` : '0%' }">
+            </div>
+          </div>
+          <p class="text-right text-xs text-gray-400 mt-1">
+            入金完了率 {{ issuedInvoiceStats.total > 0 ? Math.round(issuedInvoiceStats.matched / issuedInvoiceStats.total * 100) : 0 }}%
+          </p>
+        </div>
+      </div>
+
+      <!-- 銀行口座明細 -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="p-2 bg-slate-50 rounded-lg">
+              <Building2 class="h-5 w-5 text-slate-600" />
+            </div>
+            <div>
+              <h2 class="text-sm font-bold text-gray-800">銀行口座明細</h2>
+              <p class="text-xs text-gray-400">計{{ bankStats.total }}件</p>
+            </div>
+          </div>
+          <RouterLink to="/dashboard/corporate/banking/import"
+            class="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+            取込画面 <ArrowUpRight class="h-3.5 w-3.5" />
+          </RouterLink>
+        </div>
+        <div class="p-5">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Clock class="h-4 w-4 text-amber-500" />
+                <span class="text-sm text-gray-600">未消込</span>
+              </div>
+              <span class="text-lg font-extrabold"
+                :class="bankStats.unmatched > 0 ? 'text-amber-500' : 'text-gray-300'">
+                {{ bankStats.unmatched }}件
+              </span>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <CheckCircle2 class="h-4 w-4 text-emerald-400" />
+                <span class="text-sm text-gray-600">自動消込済</span>
+              </div>
+              <span class="text-lg font-extrabold text-emerald-400">{{ bankStats.autoMatched }}件</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <CheckCircle2 class="h-4 w-4 text-emerald-600" />
+                <span class="text-sm text-gray-600">現金移管 / 手動消込済</span>
+              </div>
+              <span class="text-lg font-extrabold text-emerald-600">
+                {{ bankStats.transferred + bankStats.manualMatched }}件
+              </span>
+            </div>
+          </div>
+          <div class="mt-4 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div class="h-full bg-emerald-500 rounded-full transition-all"
+              :style="{ width: bankStats.total > 0 ? `${Math.round((bankStats.total - bankStats.unmatched) / bankStats.total * 100)}%` : '0%' }">
+            </div>
+          </div>
+          <p class="text-right text-xs text-gray-400 mt-1">
+            処理完了率 {{ bankStats.total > 0 ? Math.round((bankStats.total - bankStats.unmatched) / bankStats.total * 100) : 0 }}%
+          </p>
+        </div>
+      </div>
+
     </div>
 
     <!-- 現金出納帳サマリー -->
     <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-      <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center">
+      <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <Wallet :size="20" class="text-emerald-600" />
-          <h2 class="text-lg font-bold text-gray-800">現金出納帳</h2>
+          <div class="p-2 bg-emerald-50 rounded-lg">
+            <Wallet class="h-5 w-5 text-emerald-600" />
+          </div>
+          <h2 class="text-sm font-bold text-gray-800">現金出納帳</h2>
         </div>
-        <RouterLink
-          to="/dashboard/corporate/cash/matching"
-          class="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
-          <span
-            v-if="(cashSummary?.unmatched_count ?? 0) > 0"
+        <RouterLink to="/dashboard/corporate/cash/matching"
+          class="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+          <span v-if="(cashSummary?.unmatched_count ?? 0) > 0"
             class="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full mr-1">
             未消込 {{ cashSummary?.unmatched_count }}件
           </span>
-          消込画面へ
-          <ArrowUpRight :size="16" />
+          消込画面 <ArrowUpRight class="h-3.5 w-3.5" />
         </RouterLink>
       </div>
-      <div class="p-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="p-5 grid grid-cols-2 md:grid-cols-4 gap-4">
         <div class="text-center">
           <p class="text-xs font-semibold text-gray-500 mb-1">現在残高</p>
-          <p class="text-2xl font-extrabold text-gray-900">¥{{ formatAmount(cashSummary?.current_balance ?? 0) }}</p>
+          <p class="text-xl font-extrabold text-gray-900">¥{{ formatAmount(cashSummary?.current_balance ?? 0) }}</p>
         </div>
         <div class="text-center">
           <p class="text-xs font-semibold text-gray-500 mb-1">収入合計</p>
-          <p class="text-2xl font-extrabold text-emerald-600">¥{{ formatAmount(cashSummary?.total_income ?? 0) }}</p>
+          <p class="text-xl font-extrabold text-emerald-600">¥{{ formatAmount(cashSummary?.total_income ?? 0) }}</p>
         </div>
         <div class="text-center">
           <p class="text-xs font-semibold text-gray-500 mb-1">支出合計</p>
-          <p class="text-2xl font-extrabold text-red-500">¥{{ formatAmount(cashSummary?.total_expense ?? 0) }}</p>
+          <p class="text-xl font-extrabold text-red-500">¥{{ formatAmount(cashSummary?.total_expense ?? 0) }}</p>
         </div>
         <div class="text-center">
           <p class="text-xs font-semibold text-gray-500 mb-1">未消込</p>
-          <p class="text-2xl font-extrabold"
-            :class="(cashSummary?.unmatched_count ?? 0) > 0 ? 'text-amber-500' : 'text-gray-400'">
+          <p class="text-xl font-extrabold"
+            :class="(cashSummary?.unmatched_count ?? 0) > 0 ? 'text-amber-500' : 'text-gray-300'">
             {{ cashSummary?.unmatched_count ?? 0 }}件
           </p>
           <p class="text-xs text-gray-400 mt-0.5">¥{{ formatAmount(cashSummary?.unmatched_amount ?? 0) }}</p>
@@ -186,212 +475,5 @@ const chartOptions = {
       </div>
     </div>
 
-    <!-- Main Content Area -->
-    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 pt-4">
-
-      <!-- Table: Department Progress -->
-      <div class="xl:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-        <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center">
-          <h2 class="text-lg font-bold text-gray-800">概要データ (部署別)</h2>
-          <button class="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
-            詳細を見る <ArrowUpRight :size="16" />
-          </button>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-left border-collapse">
-            <thead>
-              <tr class="bg-gray-50/50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                <th class="py-4 px-6 border-b border-gray-100">部署名</th>
-                <th class="py-4 px-6 border-b border-gray-100 text-right">提出済</th>
-                <th class="py-4 px-6 border-b border-gray-100 text-right">承認済</th>
-                <th class="py-4 px-6 border-b border-gray-100 text-right">完了率</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100 text-sm">
-              <tr class="hover:bg-gray-50/50 transition-colors">
-                <td class="py-4 px-6 font-medium text-gray-900">営業部</td>
-                <td class="py-4 px-6 text-right text-gray-600">45件</td>
-                <td class="py-4 px-6 text-right text-gray-600">42件</td>
-                <td class="py-4 px-6 text-right">
-                  <div class="flex items-center justify-end gap-2">
-                    <span class="font-bold text-emerald-600">93.3%</span>
-                    <div class="w-16 h-2 bg-gray-100 rounded-full overflow-hidden inline-block"><div class="w-[93%] h-full bg-emerald-500 rounded-full"></div></div>
-                  </div>
-                </td>
-              </tr>
-              <tr class="hover:bg-gray-50/50 transition-colors">
-                <td class="py-4 px-6 font-medium text-gray-900">開発部</td>
-                <td class="py-4 px-6 text-right text-gray-600">28件</td>
-                <td class="py-4 px-6 text-right text-gray-600">19件</td>
-                <td class="py-4 px-6 text-right">
-                  <div class="flex items-center justify-end gap-2">
-                    <span class="font-bold text-amber-500">67.8%</span>
-                    <div class="w-16 h-2 bg-gray-100 rounded-full overflow-hidden inline-block"><div class="w-[67%] h-full bg-amber-400 rounded-full"></div></div>
-                  </div>
-                </td>
-              </tr>
-              <tr class="hover:bg-gray-50/50 transition-colors">
-                <td class="py-4 px-6 font-medium text-gray-900">広報部</td>
-                <td class="py-4 px-6 text-right text-gray-600">12件</td>
-                <td class="py-4 px-6 text-right text-gray-600">12件</td>
-                <td class="py-4 px-6 text-right">
-                  <div class="flex items-center justify-end gap-2">
-                    <span class="font-bold text-emerald-600">100%</span>
-                    <div class="w-16 h-2 bg-gray-100 rounded-full overflow-hidden inline-block"><div class="w-full h-full bg-emerald-500 rounded-full"></div></div>
-                  </div>
-                </td>
-              </tr>
-              <tr class="hover:bg-gray-50/50 transition-colors">
-                <td class="py-4 px-6 font-medium text-gray-900">人事部</td>
-                <td class="py-4 px-6 text-right text-gray-600">4件</td>
-                <td class="py-4 px-6 text-right text-gray-600">1件</td>
-                <td class="py-4 px-6 text-right">
-                  <div class="flex items-center justify-end gap-2">
-                    <span class="font-bold text-red-500">25.0%</span>
-                    <div class="w-16 h-2 bg-gray-100 rounded-full overflow-hidden inline-block"><div class="w-[25%] h-full bg-red-500 rounded-full"></div></div>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Bottom Visualizations Area -->
-      <div class="xl:col-span-1 bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col h-full">
-        <h3 class="text-gray-800 font-bold self-start mb-6">合計金額内訳</h3>
-        
-        <div class="flex-1 flex flex-col items-center justify-center relative">
-          <!-- Donut Chart -->
-          <div class="w-48 h-48 relative">
-            <Doughnut :data="chartData" :options="chartOptions" />
-            
-            <!-- Center Text Overlay -->
-            <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-1">
-              <span class="block text-2xl font-bold text-gray-800">¥1.2M</span>
-              <span class="block text-[10px] text-gray-500 font-medium">今月累計</span>
-            </div>
-          </div>
-          
-          <!-- Custom Legend -->
-          <div class="flex gap-6 mt-8 text-sm font-medium text-gray-600">
-            <div class="flex items-center gap-2">
-              <div class="w-3 h-3 bg-blue-500 rounded-full"></div>請求書
-            </div>
-            <div class="flex items-center gap-2">
-              <div class="w-3 h-3 bg-emerald-500 rounded-full"></div>領収書
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col h-full">
-        <h3 class="text-gray-800 font-bold mb-6">承認進捗</h3>
-        
-        <div class="space-y-6 flex-1">
-          <!-- Row 1: 係長承認待ち -->
-          <div class="flex items-center justify-between group">
-            <span class="text-sm font-medium text-gray-700 w-32">係長承認待ち</span>
-            <div class="flex items-center gap-6 flex-1 justify-end">
-              <div class="text-center">
-                <span class="block text-[10px] text-gray-400">提出数</span>
-                <span class="block font-bold text-gray-800">120</span>
-              </div>
-              <div class="text-center">
-                <span class="block text-[10px] text-gray-400">承認数</span>
-                <span class="block font-bold text-gray-800">80</span>
-              </div>
-              <div class="text-right ml-4 w-16">
-                <span class="block text-[10px] text-gray-400">完了率</span>
-                <span class="block font-bold text-blue-600">66.7%</span>
-              </div>
-            </div>
-          </div>
-          <div class="h-px bg-gray-100 w-full group-last:hidden"></div>
-
-          <!-- Row 2: 課長承認待ち -->
-          <div class="flex items-center justify-between group">
-            <span class="text-sm font-medium text-gray-700 w-32">課長承認待ち</span>
-            <div class="flex items-center gap-6 flex-1 justify-end">
-              <div class="text-center">
-                <span class="block text-[10px] text-gray-400">提出数</span>
-                <span class="block font-bold text-gray-800">80</span>
-              </div>
-              <div class="text-center">
-                <span class="block text-[10px] text-gray-400">承認数</span>
-                <span class="block font-bold text-gray-800">50</span>
-              </div>
-              <div class="text-right ml-4 w-16">
-                <span class="block text-[10px] text-gray-400">完了率</span>
-                <span class="block font-bold text-blue-600">62.5%</span>
-              </div>
-            </div>
-          </div>
-          <div class="h-px bg-gray-100 w-full group-last:hidden"></div>
-
-          <!-- Row 3: 部長承認待ち -->
-          <div class="flex items-center justify-between group">
-            <span class="text-sm font-medium text-gray-700 w-32">部長承認待ち</span>
-            <div class="flex items-center gap-6 flex-1 justify-end">
-              <div class="text-center">
-                <span class="block text-[10px] text-gray-400">提出数</span>
-                <span class="block font-bold text-gray-800">30</span>
-              </div>
-              <div class="text-center">
-                <span class="block text-[10px] text-gray-400">承認数</span>
-                <span class="block font-bold text-gray-800">15</span>
-              </div>
-              <div class="text-right ml-4 w-16">
-                <span class="block text-[10px] text-gray-400">完了率</span>
-                <span class="block font-bold text-blue-600">50.0%</span>
-              </div>
-            </div>
-          </div>
-          <div class="h-px bg-gray-100 w-full group-last:hidden"></div>
-
-          <!-- Row 4: 社長承認待ち -->
-          <div class="flex items-center justify-between group">
-            <span class="text-sm font-medium text-gray-700 w-32">社長承認待ち</span>
-            <div class="flex items-center gap-6 flex-1 justify-end">
-              <div class="text-center">
-                <span class="block text-[10px] text-gray-400">提出数</span>
-                <span class="block font-bold text-gray-800">10</span>
-              </div>
-              <div class="text-center">
-                <span class="block text-[10px] text-gray-400">承認数</span>
-                <span class="block font-bold text-gray-800">2</span>
-              </div>
-              <div class="text-right ml-4 w-16">
-                <span class="block text-[10px] text-gray-400">完了率</span>
-                <span class="block font-bold text-blue-600">20.0%</span>
-              </div>
-            </div>
-          </div>
-          <div class="h-px bg-gray-100 w-full group-last:hidden"></div>
-
-          <!-- Row 5: 承認完了 -->
-          <div class="flex items-center justify-between group">
-            <span class="text-sm font-medium text-gray-700 w-32">承認完了</span>
-            <div class="flex items-center gap-6 flex-1 justify-end">
-              <div class="text-center">
-                <span class="block text-[10px] text-gray-400">提出数</span>
-                <span class="block font-bold text-gray-800">1,500</span>
-              </div>
-              <div class="text-center">
-                <span class="block text-[10px] text-gray-400">承認数</span>
-                <span class="block font-bold text-gray-800">1,500</span>
-              </div>
-              <div class="text-right ml-4 w-16">
-                <span class="block text-[10px] text-gray-400">完了率</span>
-                <span class="block font-bold text-blue-600">100.0%</span>
-              </div>
-            </div>
-          </div>
-          <div class="h-px bg-gray-100 w-full group-last:hidden"></div>
-
-        </div>
-      </div>
-
-    </div>
   </div>
 </template>

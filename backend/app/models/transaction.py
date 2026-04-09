@@ -16,13 +16,15 @@ class ReceiptCreate(BaseModel):
     tax_rate: int
     payee: str
     category: str
-    payment_method: Literal["立替", "法人カード", "銀行振込"]
+    payment_method: Literal["立替", "法人カード", "銀行振込", "現金"]
+    receipt_type: Literal["expense", "payment_proof"] = "expense"
     line_items: List[ReceiptLineItem] = []
     attachments: List[str] = []
     fiscal_period: str
     ai_extracted: bool = False
     project_id: Optional[str] = None
     custom_approvers: Optional[List[ProjectMember]] = None
+    submitted_by: Optional[str] = None
 
 class ReceiptInDB(ReceiptCreate):
     id: Optional[str] = Field(None, alias="_id")

@@ -143,7 +143,7 @@ const handleStepAdded = (updated: Invoice) => {
 // Fetch invoices filtered by active tab via API parameters
 const loadInvoices = async () => {
     if (activeTab.value === 'issued') {
-        await fetchInvoices({ document_type: 'issued', approval_status: 'approved' });
+        await fetchInvoices({ document_type: 'issued' });
     } else if (activeTab.value === 'received') {
         await fetchInvoices({ document_type: 'received' });
     } else if (activeTab.value === 'pending_approval') {
@@ -156,7 +156,7 @@ const loadInvoices = async () => {
 
 const loadAllTabCounts = async () => {
     const [issued, received, pending, drafts] = await Promise.all([
-        api.get<any[]>('/invoices?document_type=issued&approval_status=approved'),
+        api.get<any[]>('/invoices?document_type=issued'),
         api.get<any[]>('/invoices?document_type=received'),
         api.get<any[]>('/invoices?approval_status=pending_approval'),
         api.get<any[]>('/invoices?approval_status=draft'),
@@ -200,6 +200,7 @@ const filteredInvoices = computed((): DisplayInvoice[] => {
         const q = searchQuery.value.toLowerCase();
         list = list.filter(i =>
             i.client_name?.toLowerCase().includes(q) ||
+            i.vendor_name?.toLowerCase().includes(q) ||
             i.invoice_number?.toLowerCase().includes(q)
         );
     }
@@ -418,7 +419,7 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
                     <input type="checkbox" :checked="isAllSelected" @change="toggleSelectAll" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
                 </th>
                 <th scope="col" class="px-4 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider min-w-[120px]">発行日 / 番号</th>
-                <th scope="col" class="px-4 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider min-w-[150px]">取引先</th>
+                <th scope="col" class="px-4 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider min-w-[150px]">{{ activeTab === 'received' ? '請求元' : '請求先' }}</th>
                 <th scope="col" class="hidden lg:table-cell px-4 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">件名 / プロジェクト</th>
                 <th scope="col" class="px-4 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider min-w-[120px]">金額 (税込)</th>
                 <th scope="col" class="px-4 py-4 text-center text-xs font-bold text-gray-500 uppercase tracking-wider min-w-[140px]">ステータス</th>
@@ -444,9 +445,13 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
                 <td class="px-4 py-4">
                     <div class="flex items-center gap-2 mb-1">
                         <Building2 class="w-4 h-4 shrink-0 text-blue-500" />
-                        <span class="font-bold text-gray-900 text-sm truncate max-w-[120px] md:max-w-none" :title="invoice.client_name">{{ invoice.client_name }}</span>
+                        <span class="font-bold text-gray-900 text-sm truncate max-w-[120px] md:max-w-none"
+                              :title="invoice.document_type === 'received' ? (invoice.vendor_name || invoice.client_name) : invoice.client_name">
+                          {{ invoice.document_type === 'received' ? (invoice.vendor_name || invoice.client_name) : invoice.client_name }}
+                        </span>
                     </div>
-                    <div class="text-[10px] text-gray-400 truncate" :title="invoice.client_id">{{ invoice.client_id }}</div>
+                    <div v-if="invoice.document_type === 'received' && invoice.vendor_name" class="text-[10px] text-gray-400 truncate">宛先: {{ invoice.client_name }}</div>
+                    <div v-else class="text-[10px] text-gray-400 truncate" :title="invoice.client_id">{{ invoice.client_id }}</div>
                 </td>
                 <td class="hidden lg:table-cell px-4 py-4">
                     <div class="font-bold text-gray-900 text-sm mb-1 truncate max-w-[150px]">{{ invoice.invoice_number || invoice.client_name || '請求書' }}</div>

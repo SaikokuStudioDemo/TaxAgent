@@ -290,3 +290,15 @@ async def record_approval_action(
             )
 
     return {"status": "recorded", "action": payload.action}
+
+
+@router.get("/events", summary="承認・消込イベント履歴を取得する")
+async def list_approval_events(
+    document_id: str,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    """document_id に紐づく全イベントを時系列で返す。"""
+    events = await ctx.db["approval_events"].find(
+        {"document_id": document_id, "corporate_id": ctx.corporate_id}
+    ).sort("timestamp", 1).to_list(length=200)
+    return [_serialize(e) for e in events]

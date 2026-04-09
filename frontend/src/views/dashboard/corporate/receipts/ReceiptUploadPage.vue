@@ -15,7 +15,8 @@ interface StagedReceipt {
   date: string;
   amount: number;
   taxRate: number;
-  paymentMethod: '立替' | '法人カード';
+  paymentMethod: '立替' | '法人カード' | '銀行振込' | '現金';
+  receiptType: 'expense' | 'payment_proof';
   projectId?: string;
   payee: string;
   category: string;
@@ -68,6 +69,7 @@ const handleFileSelect = async (event: Event) => {
       amount: 0,
       taxRate: 10,
       paymentMethod: '立替',
+      receiptType: 'expense',
       payee: file.name.split('.')[0],
       category: '消耗品費',
       status: 'new',
@@ -116,15 +118,20 @@ const submitSelected = async () => {
   try {
     const currentMonth = new Date().toISOString().slice(0, 7);
     for (const r of selectedToSubmit) {
+      const submittedBy = userProfile.value?.type === 'employee'
+        ? userProfile.value?.data?._id
+        : userProfile.value?.data?._id;
       const result = await createReceipt({
         date: r.date,
         amount: r.amount,
         tax_rate: r.taxRate,
         payment_method: r.paymentMethod,
+        receipt_type: r.receiptType,
         payee: r.payee,
         category: r.category,
         fiscal_period: currentMonth,
         attachments: r.fileUrl ? [r.fileUrl] : [],
+        ...(submittedBy ? { submitted_by: submittedBy } : {}),
         ...(r.projectId ? { project_id: r.projectId } : {}),
       });
       if (result) saved++;
@@ -245,6 +252,7 @@ const handleAmountInput = (receipt: StagedReceipt, event: Event) => {
               <th class="py-4 px-4 w-36 text-right">金額 (税込)</th>
               <th class="py-4 px-4 w-28">税率</th>
               <th class="py-4 px-4 w-36">決済手段</th>
+              <th class="py-4 px-4 w-32">種別</th>
               <th class="py-4 px-4 w-40">プロジェクト</th>
               <th class="py-4 px-4 w-40">勘定科目</th>
               <th class="py-4 px-4 w-24 text-center">操作</th>
@@ -289,6 +297,14 @@ const handleAmountInput = (receipt: StagedReceipt, event: Event) => {
                 <select v-model="receipt.paymentMethod" :class="{'text-red-600': receipt.status === 'error'}" class="bg-transparent border border-transparent hover:border-gray-300 focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-2 py-1 w-full transition-colors text-gray-900 font-medium">
                   <option value="立替">立替精算</option>
                   <option value="法人カード">法人カード</option>
+                  <option value="銀行振込">銀行振込</option>
+                  <option value="現金">現金</option>
+                </select>
+              </td>
+              <td class="py-4 px-4">
+                <select v-model="receipt.receiptType" :class="{'text-red-600': receipt.status === 'error'}" class="bg-transparent border border-transparent hover:border-gray-300 focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-2 py-1 w-full transition-colors text-gray-900">
+                  <option value="expense">経費精算</option>
+                  <option value="payment_proof">支払証明</option>
                 </select>
               </td>
               <td class="py-4 px-4">

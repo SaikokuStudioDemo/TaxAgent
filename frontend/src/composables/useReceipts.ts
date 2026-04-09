@@ -13,6 +13,7 @@ export interface Receipt {
     payee: string;
     category: string;
     payment_method: string;
+    receipt_type?: 'expense' | 'payment_proof';
     approval_status: string;
     reconciliation_status?: 'unreconciled' | 'reconciled';
     approval_rule_id: string | null;
@@ -44,6 +45,8 @@ export function useReceipts() {
         approval_status?: string;
         fiscal_period?: string;
         submitted_by?: string;
+        receipt_type?: string;
+        reconciliation_status?: string;
     }) => {
         isLoading.value = true;
         error.value = null;

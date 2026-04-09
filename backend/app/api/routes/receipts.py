@@ -86,6 +86,19 @@ async def submit_receipts_batch(
     docs_to_insert = await apply_journal_rules(ctx.db, ctx.corporate_id, docs_to_insert)
 
     result = await ctx.db["receipts"].insert_many(docs_to_insert)
+
+    for oid in result.inserted_ids:
+        await ctx.db["approval_events"].insert_one({
+            "corporate_id": ctx.corporate_id,
+            "document_type": "receipt",
+            "document_id": str(oid),
+            "step": 0,
+            "action": "submitted",
+            "approver_id": ctx.user_id,
+            "comment": None,
+            "timestamp": datetime.utcnow(),
+        })
+
     return {
         "status": "success",
         "message": f"{len(docs_to_insert)} receipts submitted",
@@ -104,10 +117,12 @@ async def create_receipt(
     rule_id, _ = await evaluate_approval_rules(ctx.corporate_id, "receipt", payload.model_dump())
     fiscal_period = payload.date[:7] if payload.date else datetime.utcnow().strftime("%Y-%m")
 
+    payload_dict = payload.model_dump()
+    submitted_by = payload_dict.pop("submitted_by", None) or ctx.user_id
     doc = {
-        **payload.model_dump(),
+        **payload_dict,
         "corporate_id": ctx.corporate_id,
-        "submitted_by": ctx.user_id,
+        "submitted_by": submitted_by,
         "document_type": "receipt",
         "approval_status": "pending_approval",
         "reconciliation_status": "unreconciled",
@@ -117,6 +132,16 @@ async def create_receipt(
         "created_at": datetime.utcnow(),
     }
     result = await ctx.db["receipts"].insert_one(doc)
+    await ctx.db["approval_events"].insert_one({
+        "corporate_id": ctx.corporate_id,
+        "document_type": "receipt",
+        "document_id": str(result.inserted_id),
+        "step": 0,
+        "action": "submitted",
+        "approver_id": ctx.user_id,
+        "comment": None,
+        "timestamp": datetime.utcnow(),
+    })
     created = await ctx.db["receipts"].find_one({"_id": result.inserted_id})
     return _serialize(created)
 
@@ -127,6 +152,7 @@ async def list_receipts(
     fiscal_period: Optional[str] = None,
     submitted_by: Optional[str] = None,
     reconciliation_status: Optional[str] = None,
+    receipt_type: Optional[str] = None,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     query = build_list_query(ctx.corporate_id, approval_status=approval_status, fiscal_period=fiscal_period)
@@ -134,6 +160,8 @@ async def list_receipts(
         query["submitted_by"] = ctx.user_id
     if reconciliation_status:
         query["reconciliation_status"] = reconciliation_status
+    if receipt_type:
+        query["receipt_type"] = receipt_type
 
     cursor = ctx.db["receipts"].find(query).sort("created_at", -1)
     docs = await cursor.to_list(length=500)

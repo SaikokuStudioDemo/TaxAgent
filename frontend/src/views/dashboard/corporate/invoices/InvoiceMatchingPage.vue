@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import {
     Search,
     Link2,
@@ -10,9 +10,12 @@ import {
     ArrowRightLeft,
     MonitorSmartphone,
     ChevronDown,
-    ChevronUp
+    ChevronUp,
+    Paperclip,
+    X,
 } from 'lucide-vue-next';
 import { useInvoices, type Invoice } from '@/composables/useInvoices';
+import { useReceipts, type Receipt } from '@/composables/useReceipts';
 import { useDocumentMatching, type MatchableDocument } from '@/composables/useDocumentMatching';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
 import { MATCHING_STYLES } from '@/constants/matchingStyles';
@@ -107,6 +110,9 @@ const fetchAndMapInvoices = async () => {
 // txTypeFilter は computed なので reactive（mode 変更に追従）
 const txTypeFilter = computed(() => cfg.value.txFilter);
 
+// 銀行 / カード タブ
+const selectedSourceType = ref<'bank' | 'card' | 'all'>('bank');
+
 const {
     activeTab,
     documentSearch: invoiceSearch,
@@ -118,7 +124,10 @@ const {
     confirmMatchResolve,
     confirmMatchAmount,
     unmatchedTransactions,
+    sortedUnmatchedTransactions,
+    candidateScoreMap,
     unmatchedDocuments: unmatchedInvoices,
+    sortedUnmatchedDocuments: sortedUnmatchedInvoices,
     selectedTransactionSum,
     selectedDocumentSum: selectedInvoiceSum,
     matchingDifference,
@@ -140,6 +149,8 @@ const {
     getAmount: i => i.total_amount,
     getDescription: i => [i.client_name, i.vendor_name, i.invoice_number, i.total_amount?.toString()].filter(Boolean).join(' '),
     transactionTypeFilter: txTypeFilter,
+    invoiceType: cfg.value.documentType,
+    sourceTypeFilter: selectedSourceType,
 });
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
@@ -153,6 +164,24 @@ watch(() => props.mode, async () => {
 
 // ── Local state ───────────────────────────────────────────────────────────────
 const expandedInvoiceIds = ref<string[]>([]);
+const subFilter = ref<'candidates' | 'manual'>('candidates');
+const invoiceScrollPane = ref<HTMLElement | null>(null);
+const txScrollPane = ref<HTMLElement | null>(null);
+
+const scrollBothToTop = () => nextTick(() => {
+    invoiceScrollPane.value?.scrollTo({ top: 0 });
+    txScrollPane.value?.scrollTo({ top: 0 });
+});
+
+const handleSelectInvoice = (id: string) => {
+    selectInvoice(id);
+    scrollBothToTop();
+};
+
+const handleSelectTransaction = (id: string) => {
+    selectTransaction(id);
+    scrollBothToTop();
+};
 
 const toggleInvoiceExpansion = (id: string) => {
     const idx = expandedInvoiceIds.value.indexOf(id);
@@ -175,6 +204,65 @@ const matchedFromDB = computed(() =>
             : '',
     }))
 );
+
+// ── 支払証明領収書紐付けモーダル ──────────────────────────────────────────────
+const { receipts: proofReceiptsFetched, fetchReceipts: fetchProofReceipts } = useReceipts();
+
+// invoiceId → 紐付けた領収書リスト
+const attachedReceiptsByInvoice = ref<Record<string, Receipt[]>>({});
+
+// モーダル状態
+const proofModalInvoiceId = ref<string | null>(null);
+const proofReceipts = ref<Receipt[]>([]);
+const proofSelected = ref<string[]>([]);
+const isLoadingProof = ref(false);
+
+const openProofModal = async (invoiceId: string) => {
+    proofModalInvoiceId.value = invoiceId;
+    proofSelected.value = (attachedReceiptsByInvoice.value[invoiceId] ?? []).map(r => r.id);
+    isLoadingProof.value = true;
+    await fetchProofReceipts({ receipt_type: 'payment_proof', reconciliation_status: 'unreconciled' });
+    // 既に紐付け済みのものも表示できるよう、現在の添付も含める
+    const existing = attachedReceiptsByInvoice.value[invoiceId] ?? [];
+    const combined = [...proofReceiptsFetched.value];
+    for (const r of existing) {
+        if (!combined.find(x => x.id === r.id)) combined.push(r);
+    }
+    proofReceipts.value = combined;
+    isLoadingProof.value = false;
+};
+
+const closeProofModal = () => {
+    proofModalInvoiceId.value = null;
+};
+
+const toggleProofReceipt = (id: string) => {
+    const idx = proofSelected.value.indexOf(id);
+    if (idx > -1) proofSelected.value.splice(idx, 1);
+    else proofSelected.value.push(id);
+};
+
+const confirmProofAttach = () => {
+    const invoiceId = proofModalInvoiceId.value;
+    if (!invoiceId) return;
+    attachedReceiptsByInvoice.value[invoiceId] = proofReceipts.value.filter(r =>
+        proofSelected.value.includes(r.id)
+    );
+    closeProofModal();
+};
+
+const removeAttachedReceipt = (invoiceId: string, receiptId: string) => {
+    const list = attachedReceiptsByInvoice.value[invoiceId] ?? [];
+    attachedReceiptsByInvoice.value[invoiceId] = list.filter(r => r.id !== receiptId);
+};
+
+// 消込実行時に紐付き領収書IDを渡す
+const handleMatchWithProof = () => {
+    const receiptIds = selectedInvoiceIds.value.flatMap(
+        invId => (attachedReceiptsByInvoice.value[invId] ?? []).map(r => r.id)
+    );
+    handleMatch(receiptIds.length > 0 ? receiptIds : undefined);
+};
 </script>
 
 <template>
@@ -190,15 +278,7 @@ const matchedFromDB = computed(() =>
           @click="activeTab = 'unmatched'"
           :class="[MATCHING_STYLES.tabBase, 'flex items-center justify-center gap-1.5', activeTab === 'unmatched' ? MATCHING_STYLES.tabActive : MATCHING_STYLES.tabInactive]"
         >
-          未結合 ({{ unmatchedInvoices.length }})
-        </button>
-
-        <button
-          @click="activeTab = 'candidates'"
-          :class="[MATCHING_STYLES.tabBase, 'flex items-center justify-center gap-1.5 relative', activeTab === 'candidates' ? MATCHING_STYLES.tabActive : MATCHING_STYLES.tabInactive]"
-        >
-          <div v-if="candidatePairs.length > 0" class="absolute top-2 right-4 md:right-auto md:-top-1 md:-right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
-          <span class="mr-1">✨</span> 自動結合候補 ({{ candidatePairs.length }})
+          未消込 ({{ candidatePairs.length + unmatchedInvoices.length }})
         </button>
 
         <button
@@ -206,7 +286,7 @@ const matchedFromDB = computed(() =>
           :class="[MATCHING_STYLES.tabBase, 'flex items-center justify-center gap-1.5', activeTab === 'matched' ? MATCHING_STYLES.tabActive : MATCHING_STYLES.tabInactive]"
         >
           <CheckCircle v-if="matchedFromDB.length > 0" class="h-4 w-4 text-emerald-500" />
-          結合済 ({{ matchedFromDB.length }})
+          消込済 ({{ matchedFromDB.length }})
         </button>
       </div>
     </header>
@@ -215,80 +295,171 @@ const matchedFromDB = computed(() =>
 
       <!-- ── Unmatched Tab ── -->
       <template v-if="activeTab === 'unmatched'">
+        <div class="h-full flex flex-col">
 
-        <!-- Action Banner -->
-        <div class="h-[72px] mb-6 relative">
-          <!-- 1. Exact match -->
-          <div v-if="selectedTransactionIds.length > 0 && selectedInvoiceIds.length > 0 && matchingDifference === 0"
-               :class="['absolute inset-0 z-20 flex items-center justify-between', MATCHING_STYLES.guidanceBarActive]">
-            <div class="flex items-center gap-3">
-              <div class="bg-blue-500 rounded-full p-2"><Link2 class="h-5 w-5 text-white" /></div>
-              <div>
-                <div class="flex items-center gap-2">
-                  <p class="font-bold">結合準備完了</p>
-                  <span class="text-[10px] font-bold bg-green-400 text-green-900 px-2 py-0.5 rounded-full shadow-sm">金額ピタリ一致</span>
-                </div>
-                <p class="text-blue-100 text-xs mt-0.5">対象: {{ cfg.txLabel }} {{ selectedTransactionIds.length }}件 × 請求書 {{ selectedInvoiceIds.length }}件</p>
-                <div class="text-[11px] font-medium text-blue-200 mt-1 flex items-center gap-2">
-                  <span>{{ cfg.txLabel }}: ¥{{ formatAmount(selectedTransactionSum) }}</span>
-                  <span>-</span>
-                  <span>請求: ¥{{ formatAmount(selectedInvoiceSum) }}</span>
-                  <span class="font-bold text-white">= 差額: ¥0</span>
-                </div>
-              </div>
-            </div>
-            <button @click="handleMatch" :class="MATCHING_STYLES.matchButton">
-              <CheckCircle class="w-4 h-4" /> この内容で結合する
+          <!-- Sub-filter buttons -->
+          <div class="flex gap-2 mb-4 shrink-0">
+            <button
+              @click="subFilter = 'candidates'"
+              :class="['px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-1.5', subFilter === 'candidates' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50']"
+            >
+              <span>✨</span> 自動消込候補
+              <span class="text-xs font-bold px-1.5 py-0.5 rounded-full" :class="subFilter === 'candidates' ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600'">{{ candidatePairs.length }}</span>
+            </button>
+            <button
+              @click="subFilter = 'manual'"
+              :class="['px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-1.5', subFilter === 'manual' ? 'bg-gray-700 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50']"
+            >
+              手動消込が必要
+              <span class="text-xs font-bold px-1.5 py-0.5 rounded-full" :class="subFilter === 'manual' ? 'bg-gray-600 text-white' : 'bg-gray-100 text-gray-600'">{{ unmatchedInvoices.length }}</span>
             </button>
           </div>
 
-          <!-- 2. Discrepancy -->
-          <div v-else-if="selectedTransactionIds.length > 0 && selectedInvoiceIds.length > 0 && matchingDifference !== 0"
-               :class="['absolute inset-0 z-20 flex items-center justify-between', MATCHING_STYLES.guidanceBarActive]">
-            <div class="flex items-center gap-3">
-              <div class="bg-amber-500 rounded-full p-2"><AlertCircle class="h-5 w-5 text-amber-900" /></div>
-              <div>
-                <div class="flex items-center gap-2">
-                  <p class="font-bold">金額の確認が必要です</p>
-                  <span class="text-[10px] font-bold bg-amber-400 text-amber-900 px-2 py-0.5 rounded-full shadow-sm">差額あり</span>
+          <!-- ── 自動消込候補サブビュー ── -->
+          <div v-if="subFilter === 'candidates'" class="flex-1 relative flex flex-col overflow-hidden">
+            <div class="flex-1 overflow-y-auto pb-24 space-y-4">
+              <div v-if="candidatePairs.length === 0" class="flex flex-col items-center justify-center py-20 text-gray-400">
+                <CheckCircle class="w-12 h-12 mb-3 text-gray-200" />
+                <p class="text-sm font-medium">自動消込候補はありません</p>
+              </div>
+              <div v-for="pair in candidatePairs" :key="`${pair.document.id}:${pair.transaction.id}`"
+                   @click="toggleCandidate(pair.document.id, pair.transaction.id)"
+                   class="bg-indigo-50/30 rounded-xl border transition-shadow relative overflow-hidden flex items-center cursor-pointer hover:shadow-md"
+                   :class="selectedCandidateIds.includes(`${pair.document.id}:${pair.transaction.id}`) ? 'border-indigo-400 ring-1 ring-indigo-400 shadow-sm bg-indigo-50/60' : 'border-indigo-200'"
+              >
+                <div class="pl-4 pr-2 py-6 shrink-0 flex items-center justify-center">
+                  <div class="w-5 h-5 rounded border border-indigo-400 flex items-center justify-center transition-colors"
+                       :class="selectedCandidateIds.includes(`${pair.document.id}:${pair.transaction.id}`) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white'">
+                    <CheckCircle v-if="selectedCandidateIds.includes(`${pair.document.id}:${pair.transaction.id}`)" class="w-4 h-4" />
+                  </div>
                 </div>
-                <p class="text-gray-300 text-xs mt-0.5">対象: {{ cfg.txLabel }} {{ selectedTransactionIds.length }}件 × 請求書 {{ selectedInvoiceIds.length }}件</p>
-                <div class="text-[11px] font-medium text-gray-400 mt-1 flex items-center gap-2">
-                  <span>{{ cfg.txLabel }}: ¥{{ formatAmount(selectedTransactionSum) }}</span>
-                  <span>-</span>
-                  <span>請求: ¥{{ formatAmount(selectedInvoiceSum) }}</span>
-                  <span class="font-bold text-amber-400">= 差額: ¥{{ formatAmount(matchingDifference) }}</span>
+                <div class="flex-1 flex flex-col md:flex-row p-4 gap-4 items-center pl-2">
+                  <div class="flex-1 bg-white border border-gray-200 rounded-lg p-3 w-full shadow-sm">
+                    <div class="text-[10px] text-gray-400 font-bold mb-1 uppercase tracking-wider flex items-center gap-1">
+                      <FileText class="w-3 h-3" /> {{ cfg.docMatchLabel }}
+                    </div>
+                    <p class="text-sm font-bold text-gray-900 truncate mb-1">
+                      {{ cfg.documentType === 'received' ? (pair.invoice.vendor_name || pair.invoice.client_name) : pair.invoice.client_name }}
+                    </p>
+                    <div class="flex justify-between items-center text-xs text-gray-500">
+                      <span>{{ pair.invoice.id }}</span>
+                      <span class="font-bold text-gray-900">¥{{ formatAmount(pair.invoice.total_amount) }}</span>
+                    </div>
+                  </div>
+                  <ArrowRightLeft class="text-indigo-300 shrink-0 w-5 h-5 hidden md:block" />
+                  <div class="flex-1 bg-white border border-gray-200 rounded-lg p-3 w-full shadow-sm">
+                    <div class="text-[10px] text-gray-400 font-bold mb-1 uppercase tracking-wider flex items-center gap-1">
+                      <Building2 class="w-3 h-3" /> {{ cfg.txMatchLabel }}
+                    </div>
+                    <p class="text-sm font-bold text-gray-900 truncate mb-1">{{ pair.transaction.description }}</p>
+                    <div class="flex justify-between items-center text-xs text-gray-500">
+                      <span>{{ pair.transaction.date }}</span>
+                      <span class="font-bold text-gray-900">¥{{ formatAmount(pair.transaction.amount) }}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-            <button @click="handleMatch" class="bg-amber-500 text-amber-950 font-bold px-6 py-2.5 rounded-lg shadow-sm hover:bg-amber-400 transition-colors flex items-center gap-2">
-              <Link2 class="w-4 h-4" /> 差額を許容して強制結合
-            </button>
-          </div>
 
-          <!-- 3. Guidance -->
-          <div v-else-if="selectedTransactionIds.length > 0 || selectedInvoiceIds.length > 0"
-               :class="['absolute inset-0 z-10', MATCHING_STYLES.guidanceBarWarning]">
-            <div class="bg-blue-100 rounded-full p-1.5"><ArrowRightLeft class="h-4 w-4 text-blue-600" /></div>
-            <div>
-              <p class="font-bold text-sm">もう一方のリストから対応するデータを選択してください。</p>
-              <p class="text-[11px] text-blue-600 font-medium">
-                現在選択中:
-                {{ selectedTransactionIds.length > 0 ? `${cfg.txDataLabel} ${selectedTransactionIds.length}件 (¥${formatAmount(selectedTransactionSum)})` : '' }}
-                {{ selectedInvoiceIds.length > 0 ? `${cfg.docMatchLabel} ${selectedInvoiceIds.length}件 (¥${formatAmount(selectedInvoiceSum)})` : '' }}
-              </p>
+            <div v-if="candidatePairs.length > 0"
+                 class="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-[0_-10px_30px_rgba(0,0,0,0.05)] flex items-center justify-between z-10 rounded-t-xl">
+              <div class="flex items-center gap-4">
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    :checked="selectedCandidateIds.length === candidatePairs.length && candidatePairs.length > 0"
+                    @change="toggleAllCandidates"
+                    class="w-4 h-4 rounded accent-indigo-600 cursor-pointer"
+                  />
+                  <span class="text-sm font-bold text-indigo-600">全選択</span>
+                </label>
+                <span class="text-sm font-medium text-gray-600 border-l border-gray-300 pl-4">
+                  <span class="font-bold text-gray-900">{{ selectedCandidateIds.length }}件</span> を選択中
+                </span>
+              </div>
+              <button @click="handleBulkMatch" :disabled="selectedCandidateIds.length === 0"
+                      class="bg-indigo-600 text-white font-bold px-8 py-2.5 rounded-lg shadow-sm hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                <CheckCircle class="w-5 h-5" /> 選択項目を消込する
+              </button>
             </div>
           </div>
 
-          <!-- 4. Default -->
-          <div v-else :class="['absolute inset-0', MATCHING_STYLES.guidanceBarDefault]">
-            <Link2 class="h-5 w-5 opacity-50" />
-            <p class="font-medium text-sm">結合を開始するには、左の{{ cfg.docMatchLabel }}リストまたは右の明細リストから対象を選択してください。</p>
-          </div>
-        </div>
+          <!-- ── 手動消込サブビュー ── -->
+          <template v-else>
 
-        <!-- Split Layout -->
-        <div class="flex h-[calc(100%-96px)] flex-col lg:flex-row gap-6">
+            <!-- Action Banner -->
+            <div class="h-[72px] mb-6 relative shrink-0">
+              <!-- 1. Exact match -->
+              <div v-if="selectedTransactionIds.length > 0 && selectedInvoiceIds.length > 0 && matchingDifference === 0"
+                   :class="['absolute inset-0 z-20 flex items-center justify-between', MATCHING_STYLES.guidanceBarActive]">
+                <div class="flex items-center gap-3">
+                  <div class="bg-blue-500 rounded-full p-2"><Link2 class="h-5 w-5 text-white" /></div>
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <p class="font-bold">消込準備完了</p>
+                      <span class="text-[10px] font-bold bg-green-400 text-green-900 px-2 py-0.5 rounded-full shadow-sm">金額ピタリ一致</span>
+                    </div>
+                    <p class="text-blue-100 text-xs mt-0.5">対象: {{ cfg.txLabel }} {{ selectedTransactionIds.length }}件 × 請求書 {{ selectedInvoiceIds.length }}件</p>
+                    <div class="text-[11px] font-medium text-blue-200 mt-1 flex items-center gap-2">
+                      <span>{{ cfg.txLabel }}: ¥{{ formatAmount(selectedTransactionSum) }}</span>
+                      <span>-</span>
+                      <span>請求: ¥{{ formatAmount(selectedInvoiceSum) }}</span>
+                      <span class="font-bold text-white">= 差額: ¥0</span>
+                    </div>
+                  </div>
+                </div>
+                <button @click="handleMatchWithProof" :class="MATCHING_STYLES.matchButton">
+                  <CheckCircle class="w-4 h-4" /> この内容で消込する
+                </button>
+              </div>
+
+              <!-- 2. Discrepancy -->
+              <div v-else-if="selectedTransactionIds.length > 0 && selectedInvoiceIds.length > 0 && matchingDifference !== 0"
+                   :class="['absolute inset-0 z-20 flex items-center justify-between', MATCHING_STYLES.guidanceBarActive]">
+                <div class="flex items-center gap-3">
+                  <div class="bg-amber-500 rounded-full p-2"><AlertCircle class="h-5 w-5 text-amber-900" /></div>
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <p class="font-bold">金額の確認が必要です</p>
+                      <span class="text-[10px] font-bold bg-amber-400 text-amber-900 px-2 py-0.5 rounded-full shadow-sm">差額あり</span>
+                    </div>
+                    <p class="text-gray-300 text-xs mt-0.5">対象: {{ cfg.txLabel }} {{ selectedTransactionIds.length }}件 × 請求書 {{ selectedInvoiceIds.length }}件</p>
+                    <div class="text-[11px] font-medium text-gray-400 mt-1 flex items-center gap-2">
+                      <span>{{ cfg.txLabel }}: ¥{{ formatAmount(selectedTransactionSum) }}</span>
+                      <span>-</span>
+                      <span>請求: ¥{{ formatAmount(selectedInvoiceSum) }}</span>
+                      <span class="font-bold text-amber-400">= 差額: ¥{{ formatAmount(matchingDifference) }}</span>
+                    </div>
+                  </div>
+                </div>
+                <button @click="handleMatchWithProof" class="bg-amber-500 text-amber-950 font-bold px-6 py-2.5 rounded-lg shadow-sm hover:bg-amber-400 transition-colors flex items-center gap-2">
+                  <Link2 class="w-4 h-4" /> 差額を許容して強制消込
+                </button>
+              </div>
+
+              <!-- 3. Guidance -->
+              <div v-else-if="selectedTransactionIds.length > 0 || selectedInvoiceIds.length > 0"
+                   :class="['absolute inset-0 z-10', MATCHING_STYLES.guidanceBarWarning]">
+                <div class="bg-blue-100 rounded-full p-1.5"><ArrowRightLeft class="h-4 w-4 text-blue-600" /></div>
+                <div>
+                  <p class="font-bold text-sm">もう一方のリストから対応するデータを選択してください。</p>
+                  <p class="text-[11px] text-blue-600 font-medium">
+                    現在選択中:
+                    {{ selectedTransactionIds.length > 0 ? `${cfg.txDataLabel} ${selectedTransactionIds.length}件 (¥${formatAmount(selectedTransactionSum)})` : '' }}
+                    {{ selectedInvoiceIds.length > 0 ? `${cfg.docMatchLabel} ${selectedInvoiceIds.length}件 (¥${formatAmount(selectedInvoiceSum)})` : '' }}
+                  </p>
+                </div>
+              </div>
+
+              <!-- 4. Default -->
+              <div v-else :class="['absolute inset-0', MATCHING_STYLES.guidanceBarDefault]">
+                <Link2 class="h-5 w-5 opacity-50" />
+                <p class="font-medium text-sm">消込を開始するには、左の{{ cfg.docMatchLabel }}リストまたは右の明細リストから対象を選択してください。</p>
+              </div>
+            </div>
+
+            <!-- Split Layout -->
+            <div class="flex flex-1 flex-col lg:flex-row gap-6 min-h-0">
 
           <!-- Left: Invoices -->
           <div :class="MATCHING_STYLES.paneBase">
@@ -308,10 +479,10 @@ const matchedFromDB = computed(() =>
               </div>
             </div>
 
-            <div class="flex-1 overflow-y-auto p-4 space-y-3 relative" :class="cfg.docScrollBg">
+            <div ref="invoiceScrollPane" class="flex-1 overflow-y-auto p-4 space-y-3 relative" :class="cfg.docScrollBg">
               <div
-                v-for="inv in unmatchedInvoices" :key="inv.id"
-                @click="selectInvoice(inv.id)"
+                v-for="inv in sortedUnmatchedInvoices" :key="inv.id"
+                @click="handleSelectInvoice(inv.id)"
                 :class="[
                   MATCHING_STYLES.cardBase, 'flex flex-col justify-between',
                   selectedInvoiceIds.includes(inv.id) ? MATCHING_STYLES.cardSelected : '',
@@ -337,7 +508,14 @@ const matchedFromDB = computed(() =>
 
                 <div class="flex justify-between items-end">
                   <div class="min-w-0 pr-4">
-                    <p class="text-sm font-bold text-gray-900 leading-tight truncate w-[220px]" :title="inv.client_name">{{ inv.client_name }}</p>
+                    <!-- received請求書: vendor_name（請求元）を優先表示 -->
+                    <p class="text-sm font-bold text-gray-900 leading-tight truncate w-[220px]"
+                       :title="cfg.documentType === 'received' ? (inv.vendor_name || inv.client_name) : inv.client_name">
+                      {{ cfg.documentType === 'received' ? (inv.vendor_name || inv.client_name) : inv.client_name }}
+                    </p>
+                    <p v-if="cfg.documentType === 'received' && inv.vendor_name" class="text-[10px] text-gray-400 mt-0.5 truncate w-[220px]">
+                      宛先: {{ inv.client_name }}
+                    </p>
                     <p class="text-[11px] text-gray-500 mt-1 font-medium">{{ cfg.dueLabel }}: {{ inv.due_date }}</p>
                   </div>
                   <div class="shrink-0 flex flex-col items-end gap-2">
@@ -370,6 +548,30 @@ const matchedFromDB = computed(() =>
                     </div>
                   </div>
                 </div>
+
+                <!-- 支払証明紐付け（支払消込モードのみ） -->
+                <div v-if="props.mode === 'payment'" class="mt-3 pt-3 border-t border-gray-100/50">
+                  <!-- 紐付き領収書リスト -->
+                  <div v-if="(attachedReceiptsByInvoice[inv.id] ?? []).length > 0" class="mb-2 space-y-1">
+                    <div v-for="r in attachedReceiptsByInvoice[inv.id]" :key="r.id"
+                         class="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 text-xs">
+                      <div class="flex items-center gap-1.5 min-w-0">
+                        <Paperclip class="w-3 h-3 text-amber-500 shrink-0" />
+                        <span class="font-medium text-amber-900 truncate">{{ r.payee }}</span>
+                        <span class="text-amber-600 font-bold whitespace-nowrap">¥{{ formatAmount(r.amount) }}</span>
+                      </div>
+                      <button @click.stop="removeAttachedReceipt(inv.id, r.id)"
+                              class="ml-2 text-amber-400 hover:text-red-500 transition-colors shrink-0">
+                        <X class="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                  <button @click.stop="openProofModal(inv.id)"
+                          class="flex items-center gap-1 text-[11px] text-amber-600 hover:text-amber-800 font-semibold hover:bg-amber-50 px-2 py-1 rounded-lg transition-colors border border-amber-200 w-full justify-center">
+                    <Paperclip class="w-3 h-3" />
+                    支払証明を紐付ける
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -388,6 +590,21 @@ const matchedFromDB = computed(() =>
                 <Building2 class="text-slate-600 h-5 w-5" />
                 <h2 class="font-bold text-gray-800 text-base">{{ cfg.txDataLabel }}</h2>
                 <span class="bg-slate-200 text-slate-700 text-xs font-bold px-2 py-0.5 rounded-full">{{ unmatchedTransactions.length }}</span>
+                <span v-if="selectedInvoiceIds.length === 1" class="text-[10px] text-indigo-500 font-medium ml-1">↑ 候補順</span>
+              </div>
+              <!-- 銀行 / カード タブ -->
+              <div class="flex gap-1 mt-2">
+                <button
+                  v-for="tab in ([{ key: 'bank', label: '銀行' }, { key: 'card', label: 'カード' }, { key: 'all', label: 'すべて' }] as const)"
+                  :key="tab.key"
+                  @click="selectedSourceType = tab.key"
+                  :class="[
+                    'px-3 py-1 text-xs font-semibold rounded-full border transition-colors',
+                    selectedSourceType === tab.key
+                      ? 'bg-slate-700 text-white border-slate-700'
+                      : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
+                  ]"
+                >{{ tab.label }}</button>
               </div>
             </div>
 
@@ -399,15 +616,20 @@ const matchedFromDB = computed(() =>
               </div>
             </div>
 
-            <div class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/30">
+            <div ref="txScrollPane" class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/30">
               <div
-                v-for="t in unmatchedTransactions" :key="t.id"
-                @click="selectTransaction(t.id)"
+                v-for="t in sortedUnmatchedTransactions" :key="t.id"
+                @click="handleSelectTransaction(t.id)"
                 :class="[MATCHING_STYLES.cardBase, 'flex flex-col justify-between', selectedTransactionIds.includes(t.id) ? MATCHING_STYLES.cardSelected : '']"
               >
                 <div v-if="selectedTransactionIds.includes(t.id)" class="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>
                 <div v-if="selectedTransactionIds.includes(t.id)" class="absolute top-2 right-2 bg-blue-600 text-white rounded-full p-0.5 shadow-sm">
                   <CheckCircle class="w-4 h-4" />
+                </div>
+                <!-- 候補スコアバッジ（請求書選択中 かつ スコアあり かつ 未選択） -->
+                <div v-if="selectedInvoiceIds.length === 1 && (candidateScoreMap.get(selectedInvoiceIds[0])?.get(t.id) ?? 0) > 0 && !selectedTransactionIds.includes(t.id)"
+                     class="absolute top-0 right-0 bg-indigo-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg shadow-sm flex items-center gap-1">
+                  ✨ 候補
                 </div>
                 <div class="flex justify-between items-start mb-2">
                   <div class="flex items-center gap-2">
@@ -427,65 +649,8 @@ const matchedFromDB = computed(() =>
             </div>
           </div>
 
-        </div>
-      </template>
-
-      <!-- ── Candidates Tab ── -->
-      <template v-else-if="activeTab === 'candidates'">
-        <div class="h-full relative flex flex-col">
-          <div class="flex-1 overflow-y-auto pb-24 space-y-4">
-            <div v-for="pair in candidatePairs" :key="pair.transaction.id"
-                 @click="toggleCandidate(pair.transaction.id)"
-                 class="bg-indigo-50/30 rounded-xl border transition-shadow relative overflow-hidden flex items-center cursor-pointer hover:shadow-md"
-                 :class="selectedCandidateIds.includes(pair.transaction.id) ? 'border-indigo-400 ring-1 ring-indigo-400 shadow-sm bg-indigo-50/60' : 'border-indigo-200'"
-            >
-              <div class="pl-4 pr-2 py-6 shrink-0 flex items-center justify-center">
-                <div class="w-5 h-5 rounded border border-indigo-400 flex items-center justify-center transition-colors"
-                     :class="selectedCandidateIds.includes(pair.transaction.id) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white'">
-                  <CheckCircle v-if="selectedCandidateIds.includes(pair.transaction.id)" class="w-4 h-4" />
-                </div>
-              </div>
-              <div class="flex-1 flex flex-col md:flex-row p-4 gap-4 items-center pl-2">
-                <div class="flex-1 bg-white border border-gray-200 rounded-lg p-3 w-full shadow-sm">
-                  <div class="text-[10px] text-gray-400 font-bold mb-1 uppercase tracking-wider flex items-center gap-1">
-                    <FileText class="w-3 h-3" /> {{ cfg.docMatchLabel }}
-                  </div>
-                  <p class="text-sm font-bold text-gray-900 truncate mb-1">{{ pair.invoice.client_name }}</p>
-                  <div class="flex justify-between items-center text-xs text-gray-500">
-                    <span>{{ pair.invoice.id }}</span>
-                    <span class="font-bold text-gray-900">¥{{ formatAmount(pair.invoice.total_amount) }}</span>
-                  </div>
-                </div>
-                <ArrowRightLeft class="text-indigo-300 shrink-0 w-5 h-5 hidden md:block" />
-                <div class="flex-1 bg-white border border-gray-200 rounded-lg p-3 w-full shadow-sm">
-                  <div class="text-[10px] text-gray-400 font-bold mb-1 uppercase tracking-wider flex items-center gap-1">
-                    <Building2 class="w-3 h-3" /> {{ cfg.txMatchLabel }}
-                  </div>
-                  <p class="text-sm font-bold text-gray-900 truncate mb-1">{{ pair.transaction.description }}</p>
-                  <div class="flex justify-between items-center text-xs text-gray-500">
-                    <span>{{ pair.transaction.date }}</span>
-                    <span class="font-bold text-gray-900">¥{{ formatAmount(pair.transaction.amount) }}</span>
-                  </div>
-                </div>
-              </div>
             </div>
-          </div>
-
-          <div v-if="candidatePairs.length > 0"
-               class="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-[0_-10px_30px_rgba(0,0,0,0.05)] flex items-center justify-between z-10 rounded-t-xl">
-            <div class="flex items-center gap-4">
-              <button @click="toggleAllCandidates" class="text-sm font-bold text-indigo-600 hover:text-indigo-800 transition-colors px-2 py-1 rounded hover:bg-indigo-50">
-                {{ selectedCandidateIds.length === candidatePairs.length ? '全選択を解除' : 'すべて選択' }}
-              </button>
-              <span class="text-sm font-medium text-gray-600 border-l border-gray-300 pl-4">
-                <span class="font-bold text-gray-900">{{ selectedCandidateIds.length }}件</span> を選択中
-              </span>
-            </div>
-            <button @click="handleBulkMatch" :disabled="selectedCandidateIds.length === 0"
-                    class="bg-indigo-600 text-white font-bold px-8 py-2.5 rounded-lg shadow-sm hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
-              <CheckCircle class="w-5 h-5" /> 選択項目を消込する
-            </button>
-          </div>
+          </template>
         </div>
       </template>
 
@@ -506,7 +671,9 @@ const matchedFromDB = computed(() =>
               <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="flex flex-col">
                   <span class="text-[10px] text-gray-500 font-bold mb-0.5">{{ cfg.docMatchLabel }}</span>
-                  <span class="text-sm font-bold text-gray-900">{{ item.invoice.client_name }}</span>
+                  <span class="text-sm font-bold text-gray-900">
+                    {{ cfg.documentType === 'received' ? (item.invoice.vendor_name || item.invoice.client_name) : item.invoice.client_name }}
+                  </span>
                   <span class="text-[11px] text-gray-500">{{ item.invoice.id }}</span>
                 </div>
                 <div class="flex flex-col border-l border-emerald-200/50 pl-4">
@@ -547,7 +714,7 @@ const matchedFromDB = computed(() =>
         <h3 class="text-lg font-bold text-gray-900 mb-2">差額の確認</h3>
         <p class="text-sm text-gray-500 mb-6 font-medium leading-relaxed">
           差額が <span class="text-amber-600 font-bold">¥{{ formatAmount(confirmMatchAmount) }}</span> あります。<br>
-          このまま結合を続行してもよろしいですか？<br>
+          このまま消込を続行してもよろしいですか？<br>
           <span class="text-[11px] mt-2 block">※差額は振込手数料等の雑損失として処理されます。</span>
         </p>
         <div class="flex items-center gap-3">
@@ -555,8 +722,74 @@ const matchedFromDB = computed(() =>
             キャンセル
           </button>
           <button @click="confirmMatchResolve?.(true)" class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-colors shadow-sm shadow-blue-600/20">
-            結合する
+            消込する
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 支払証明紐付けモーダル -->
+    <div v-if="proofModalInvoiceId" class="fixed inset-0 z-[120] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" @click="closeProofModal"></div>
+      <div class="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-lg relative z-10 flex flex-col max-h-[80vh]">
+        <!-- Header -->
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div class="flex items-center gap-2">
+            <Paperclip class="w-5 h-5 text-amber-500" />
+            <h3 class="text-base font-bold text-gray-900">支払証明を紐付ける</h3>
+          </div>
+          <button @click="closeProofModal" class="text-gray-400 hover:text-gray-600 transition-colors">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+
+        <!-- Body -->
+        <div class="flex-1 overflow-y-auto p-4">
+          <div v-if="isLoadingProof" class="flex items-center justify-center py-12">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500"></div>
+          </div>
+          <div v-else-if="proofReceipts.length === 0" class="text-center py-12 text-gray-400">
+            <Paperclip class="w-10 h-10 mx-auto mb-3 text-gray-200" />
+            <p class="text-sm font-medium">支払証明の領収書がありません</p>
+            <p class="text-xs mt-1">領収書登録時に「支払証明」を選択してください</p>
+          </div>
+          <div v-else class="space-y-2">
+            <div v-for="r in proofReceipts" :key="r.id"
+                 @click="toggleProofReceipt(r.id)"
+                 :class="[
+                   'flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors',
+                   proofSelected.includes(r.id)
+                     ? 'bg-amber-50 border-amber-400 ring-1 ring-amber-400'
+                     : 'bg-white border-gray-200 hover:border-amber-300'
+                 ]">
+              <div :class="[
+                'w-5 h-5 rounded border flex items-center justify-center shrink-0',
+                proofSelected.includes(r.id) ? 'bg-amber-500 border-amber-500' : 'border-gray-300 bg-white'
+              ]">
+                <CheckCircle v-if="proofSelected.includes(r.id)" class="w-4 h-4 text-white" />
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-bold text-gray-900 truncate">{{ r.payee }}</p>
+                <p class="text-xs text-gray-500 mt-0.5">{{ r.date }}</p>
+              </div>
+              <span class="text-sm font-bold text-gray-900 whitespace-nowrap">¥{{ formatAmount(r.amount) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
+          <span class="text-sm text-gray-500">{{ proofSelected.length }}件 選択中</span>
+          <div class="flex gap-2">
+            <button @click="closeProofModal"
+                    class="px-4 py-2 text-sm font-bold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors">
+              キャンセル
+            </button>
+            <button @click="confirmProofAttach"
+                    class="px-5 py-2 text-sm font-bold text-white bg-amber-500 rounded-xl hover:bg-amber-600 transition-colors shadow-sm">
+              紐付ける
+            </button>
+          </div>
         </div>
       </div>
     </div>

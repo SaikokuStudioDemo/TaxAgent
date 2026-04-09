@@ -15,6 +15,7 @@ class InvoiceCreate(BaseModel):
     invoice_number: str
     client_id: Optional[str] = None
     client_name: str
+    vendor_name: Optional[str] = None  # 請求元会社名（received請求書で使用）
     recipient_email: str # Used as "送付先" in the frontend
     issue_date: str # YYYY-MM-DD
     due_date: str # YYYY-MM-DD
@@ -30,6 +31,7 @@ class InvoiceCreate(BaseModel):
     approval_status: Optional[str] = None
     project_id: Optional[str] = None
     custom_approvers: Optional[List[ProjectMember]] = None
+    submitted_by: Optional[str] = None
 
 class InvoiceInDB(InvoiceCreate):
     id: Optional[str] = Field(None, alias="_id")

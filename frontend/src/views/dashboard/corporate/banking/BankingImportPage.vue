@@ -251,7 +251,7 @@ const handleRegister = async () => {
     <div v-if="showSuccess"
       class="bg-emerald-50 text-emerald-800 p-4 rounded-xl border border-emerald-200 flex items-center gap-3 shrink-0 animate-in fade-in slide-in-from-top-2">
       <CheckCircle class="h-5 w-5 text-emerald-500 shrink-0" />
-      <p class="text-sm font-medium">データの登録が完了しました。マッチング画面で確認・結合を行ってください。</p>
+      <p class="text-sm font-medium">データの登録が完了しました。マッチング画面で確認・消込を行ってください。</p>
     </div>
 
     <!-- Upload Area -->

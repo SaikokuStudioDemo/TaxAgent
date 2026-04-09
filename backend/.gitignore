@@ -15,6 +15,9 @@ firebase-admin-key.json
 .vscode/
 .idea/
 
-# テストデータ（個人情報を含むため絶対にコミットしない）
+# テストデータ・匿名化マップ（個人情報を含むため絶対にコミットしない）
 scripts/test_data/source/
 scripts/test_data/*.json
+anonymization_map.json
+token.pickle
+credentials.json

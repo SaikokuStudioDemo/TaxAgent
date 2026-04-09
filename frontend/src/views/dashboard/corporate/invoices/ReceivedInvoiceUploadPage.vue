@@ -120,11 +120,14 @@ const submitSelected = async () => {
   try {
     const fiscal_period = new Date().toISOString().slice(0, 7);
     for (const inv of selectedToSubmit) {
+      const submittedBy = userProfile.value?.type === 'employee'
+        ? userProfile.value?.data?._id
+        : userProfile.value?.data?._id;
       const result = await createInvoice({
         document_type: 'received',
-        invoice_number: `REC-${Date.now().toString().slice(-6)}`, // Generated number for received doc
+        invoice_number: `REC-${Date.now().toString().slice(-6)}`,
         client_name: inv.issuer,
-        recipient_email: '', // TODO: populate from company settings or client record
+        recipient_email: '',
         issue_date: inv.issueDate,
         due_date: inv.dueDate,
         subtotal: Math.round(inv.amount / 1.1),
@@ -137,7 +140,8 @@ const submitSelected = async () => {
           amount: inv.amount,
           tax_rate: inv.taxRate
         }],
-        attachments: inv.fileUrl ? [inv.fileUrl] : []
+        attachments: inv.fileUrl ? [inv.fileUrl] : [],
+        ...(submittedBy ? { submitted_by: submittedBy } : {}),
       });
       if (result) saved++;
     }

@@ -68,6 +68,7 @@ onMounted(() => {
       <!-- Call to Action / Branding -->
       <div class="space-y-8 pr-8 hidden md:block">
         <div>
+          <img src="/logo.png" alt="Tax Agent" class="h-12 w-auto object-contain mb-6" />
           <h1 class="text-4xl font-extrabold text-gray-900 tracking-tight mb-4">
             AIバックオフィス業務代行システム<br/>
             <span class="text-indigo-600">Tax-Agent</span>
@@ -99,6 +100,7 @@ onMounted(() => {
       <!-- Login Form Card -->
       <div class="bg-white p-8 sm:p-12 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100">
         <div class="text-center mb-8">
+          <img src="/logo.png" alt="Tax Agent" class="h-10 w-auto object-contain mx-auto mb-4" />
           <h2 class="text-2xl font-bold text-gray-900">ログイン</h2>
           <p class="text-gray-500 mt-2">Tax-Agentのアカウントにログインしてください</p>
         </div>
