@@ -69,7 +69,7 @@ async def seed():
             for col in [
                 "employees", "receipts", "invoices", "approval_rules",
                 "clients", "company_profiles", "bank_accounts", "notifications",
-                "bank_transactions", "matches", "approval_events",
+                "bank_transactions", "matches", "audit_logs",
                 "departments", "projects",
                 "matching_rules", "journal_rules",
             ]:

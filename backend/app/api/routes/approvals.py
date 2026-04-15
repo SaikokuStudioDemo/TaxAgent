@@ -167,7 +167,7 @@ async def record_approval_action(
         "approver_id": ctx.user_id,
         "timestamp": datetime.utcnow(),
     }
-    await ctx.db["approval_events"].insert_one(event_doc)
+    await ctx.db["audit_logs"].insert_one(event_doc)
 
     # Update the parent document's approval_status
     collection = "receipts" if payload.document_type == "receipt" else "invoices"
@@ -292,13 +292,29 @@ async def record_approval_action(
     return {"status": "recorded", "action": payload.action}
 
 
-@router.get("/events", summary="承認・消込イベント履歴を取得する")
+@router.get("/events", summary="承認・消込イベント履歴を取得する（後方互換）")
 async def list_approval_events(
     document_id: str,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     """document_id に紐づく全イベントを時系列で返す。"""
-    events = await ctx.db["approval_events"].find(
+    events = await ctx.db["audit_logs"].find(
         {"document_id": document_id, "corporate_id": ctx.corporate_id}
     ).sort("timestamp", 1).to_list(length=200)
+    return [_serialize(e) for e in events]
+
+
+@router.get("/audit-logs", summary="監査ログを取得する")
+async def list_audit_logs(
+    document_id: Optional[str] = None,
+    transaction_id: Optional[str] = None,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    """document_id または transaction_id に紐づく全監査ログを時系列で返す。"""
+    query: dict = {"corporate_id": ctx.corporate_id}
+    if document_id:
+        query["document_id"] = document_id
+    if transaction_id:
+        query["transaction_id"] = transaction_id
+    events = await ctx.db["audit_logs"].find(query).sort("timestamp", 1).to_list(length=200)
     return [_serialize(e) for e in events]

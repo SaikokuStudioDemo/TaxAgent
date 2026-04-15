@@ -28,6 +28,7 @@ import {
   Upload,
   ShieldCheck,
   Database,
+  KeyRound,
   Send as SendIcon,
   Paperclip as PaperclipIcon
 } from 'lucide-vue-next';
@@ -35,11 +36,9 @@ import {
 const isLeftSidebarOpen = ref(true);
 const isRightSidebarOpen = ref(true);
 
-const { currentUser, getToken, signOut } = useAuth();
+const { signOut, displayName, displayRole, isAdmin, isAccountingOrAbove } = useAuth();
 const { messages, isLoading, sendMessage, initChat } = useAdvisor();
 
-const profileName = ref('読込中...');
-const role = ref('法人管理者');
 const userInput = ref('');
 
 // ── 承認待ちバッジ ────────────────────────────────────────────
@@ -63,30 +62,9 @@ const handleChatSend = () => {
     userInput.value = '';
 };
 
-onMounted(async () => {
+onMounted(() => {
     initChat();
     fetchPendingCounts();
-    if (!currentUser.value) return;
-    try {
-        const token = await getToken();
-        const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
-        const response = await fetch(`${apiUrl}/users/me`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (response.ok) {
-            const resData = await response.json();
-            if (resData.type === 'corporate') {
-                profileName.value = resData.data?.companyName || 'Unknown Company';
-                role.value = '法人代表';
-            } else if (resData.type === 'employee') {
-                profileName.value = resData.data?.name || 'Unknown User';
-                role.value = resData.data?.role === 'admin' ? '管理者' : 'スタッフ';
-            }
-        }
-    } catch (err) {
-        console.error("Failed to fetch profile", err);
-        profileName.value = 'エラー';
-    }
 });
 </script>
 
@@ -201,8 +179,11 @@ onMounted(async () => {
               <RouterLink to="/dashboard/corporate/cash/matching" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="現金消込">
                 <CheckCircle :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">現金消込</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/banking/reconciliation" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="支払照合">
-                <Link2 :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">支払照合</span>
+              <RouterLink to="/dashboard/corporate/banking/outflow" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="出金明細照合">
+                <Link2 :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">出金明細照合</span>
+              </RouterLink>
+              <RouterLink to="/dashboard/corporate/banking/inflow" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="入金明細照合">
+                <Link2 :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">入金明細照合</span>
               </RouterLink>
             </div>
           </div>
@@ -214,16 +195,16 @@ onMounted(async () => {
               <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">データ管理</p>
             </div>
             <div class="space-y-1" :class="{'mt-4': !isLeftSidebarOpen}">
-              <RouterLink to="/dashboard/corporate/banking/import" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="銀行明細アップロード">
+              <RouterLink v-if="isAccountingOrAbove" to="/dashboard/corporate/banking/import" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="銀行明細アップロード">
                 <CreditCard :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">銀行明細アップロード</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/cash/ledger" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="現金出納帳">
+              <RouterLink v-if="isAccountingOrAbove" to="/dashboard/corporate/cash/ledger" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="現金出納帳">
                 <Wallet :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">現金出納帳</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/banking/history" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="インポート履歴">
+              <RouterLink v-if="isAccountingOrAbove" to="/dashboard/corporate/banking/history" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="インポート履歴">
                 <History :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">インポート履歴</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/banking/auto-matches" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="自動消込履歴">
+              <RouterLink v-if="isAccountingOrAbove" to="/dashboard/corporate/banking/auto-matches" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="自動消込履歴">
                 <Zap :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">自動消込履歴</span>
               </RouterLink>
             </div>
@@ -236,13 +217,13 @@ onMounted(async () => {
               <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">ルール設定</p>
             </div>
             <div class="space-y-1" :class="{'mt-4': !isLeftSidebarOpen}">
-              <RouterLink to="/dashboard/corporate/rules/approvals" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="承認ルール">
+              <RouterLink v-if="isAdmin" to="/dashboard/corporate/rules/approvals" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="承認ルール">
                 <ShieldCheck :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">承認ルール</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/settings/matching-rules" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="消込条件ルール">
+              <RouterLink v-if="isAccountingOrAbove" to="/dashboard/corporate/settings/matching-rules" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="消込条件ルール">
                 <ArrowRightLeft :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">消込条件ルール</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/settings/journal-rules" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="自動仕訳ルール">
+              <RouterLink v-if="isAccountingOrAbove" to="/dashboard/corporate/settings/journal-rules" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="自動仕訳ルール">
                 <BookText :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">自動仕訳ルール</span>
               </RouterLink>
             </div>
@@ -255,17 +236,20 @@ onMounted(async () => {
               <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">マスター管理</p>
             </div>
             <div class="space-y-1" :class="{'mt-4': !isLeftSidebarOpen}">
-              <RouterLink to="/dashboard/corporate/settings/organization" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="部門・プロジェクト">
+              <RouterLink v-if="isAdmin" to="/dashboard/corporate/settings/organization" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="部門・プロジェクト">
                 <Users :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">部門・プロジェクト</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/settings/company" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="自社情報管理">
+              <RouterLink v-if="isAdmin" to="/dashboard/corporate/settings/company" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="自社情報管理">
                 <Building2 :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">自社情報管理</span>
               </RouterLink>
               <RouterLink to="/dashboard/corporate/settings/clients" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="取引先管理">
                 <Building2 :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">取引先管理</span>
               </RouterLink>
-              <RouterLink to="/dashboard/corporate/users" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="ユーザー一覧">
+              <RouterLink v-if="isAdmin" to="/dashboard/corporate/users" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="ユーザー一覧">
                 <Users :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">ユーザー一覧</span>
+              </RouterLink>
+              <RouterLink v-if="isAdmin" to="/dashboard/corporate/settings/permissions" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="権限設定">
+                <KeyRound :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">権限設定</span>
               </RouterLink>
             </div>
           </div>
@@ -276,8 +260,8 @@ onMounted(async () => {
           <div class="flex items-center gap-3 px-2 py-2 cursor-pointer hover:bg-slate-100 rounded-lg transition-colors w-full" :class="{'justify-center': !isLeftSidebarOpen}" title="プロフィール設定">
             <UserCircle :size="32" class="text-slate-400 shrink-0" />
             <div class="flex-1 min-w-0" v-if="isLeftSidebarOpen">
-              <p class="text-sm font-medium text-slate-800 truncate" :title="profileName">{{ profileName !== '読込中...' ? profileName : '...' }}</p>
-              <p class="text-xs text-slate-500 truncate">{{ role }}</p>
+              <p class="text-sm font-medium text-slate-800 truncate" :title="displayName">{{ displayName !== '読込中...' ? displayName : '...' }}</p>
+              <p class="text-xs text-slate-500 truncate">{{ displayRole }}</p>
             </div>
             <Settings :size="16" class="text-slate-400 shrink-0" v-if="isLeftSidebarOpen" />
           </div>

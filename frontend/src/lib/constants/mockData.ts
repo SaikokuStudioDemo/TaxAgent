@@ -1,18 +1,18 @@
 export const PLANS = [
     {
-        id: 'plan-basic',
+        id: 'plan_basic',
         name: 'ベーシックプラン',
         price: 15000,
         features: ['基本機能', '月間500件までのデータ処理', 'メールサポート'],
     },
     {
-        id: 'plan-standard',
+        id: 'plan_standard',
         name: 'スタンダードプラン',
         price: 30000,
         features: ['全機能アクセス', '無制限のデータ処理', 'チャット・電話サポート', '優先処理'],
     },
     {
-        id: 'plan-premium',
+        id: 'plan_premium',
         name: 'プレミアムプラン',
         price: 50000,
         features: ['AIによる自動仕訳', '専任サポート担当', 'カスタムレポート作成', 'SLA保証'],

@@ -38,6 +38,8 @@ class InvoiceInDB(InvoiceCreate):
     corporate_id: str
     approval_status: str = "draft"
     delivery_status: Literal["unsent", "sent"] = "unsent"
+    delivery_method: Optional[Literal["email", "hand"]] = None
+    sent_at: Optional[datetime] = None
     reconciliation_status: Literal["unreconciled", "reconciled"] = "unreconciled"
     current_step: int = 1
     approval_rule_id: Optional[str] = None

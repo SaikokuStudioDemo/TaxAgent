@@ -138,15 +138,23 @@ export function useInvoices() {
         }
     };
 
-    const bulkAction = async (ids: string[], action: 'delete' | 'send') => {
+    const bulkAction = async (ids: string[], action: 'delete' | 'send' | 'submit') => {
         try {
-            await api.post('/invoices/bulk-action', { ids, action });
-            if (action === 'delete') {
-                invoices.value = invoices.value.filter(i => !ids.includes(i.id));
-            } else if (action === 'send') {
+            if (action === 'submit') {
+                // 一括申請: 各請求書を個別に PATCH
+                await Promise.all(ids.map(id => api.patch(`/invoices/${id}`, { approval_status: 'pending_approval' })));
                 invoices.value.forEach(i => {
-                    if (ids.includes(i.id)) i.delivery_status = 'sent';
+                    if (ids.includes(i.id)) i.approval_status = 'pending_approval';
                 });
+            } else {
+                await api.post('/invoices/bulk-action', { ids, action });
+                if (action === 'delete') {
+                    invoices.value = invoices.value.filter(i => !ids.includes(i.id));
+                } else if (action === 'send') {
+                    invoices.value.forEach(i => {
+                        if (ids.includes(i.id)) i.delivery_status = 'sent';
+                    });
+                }
             }
             return true;
         } catch (e: any) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue';
-import { XCircle, FileText, Plus, CheckCircle, Pen } from 'lucide-vue-next';
+import { XCircle, FileText, Plus, CheckCircle, Pen, Send, Mail, HandMetal } from 'lucide-vue-next';
 import { useApprovals, type AddedStep } from '@/composables/useApprovals';
 import { APPROVAL_LEVELS, getRankFromRoleId } from '@/lib/constants/mockData';
 import ApprovalStepper from '@/components/approvals/ApprovalStepper.vue';
@@ -25,8 +25,14 @@ const props = defineProps<{
   editable?: boolean;
   /** 編集可能なフィールド名リスト */
   editableFields?: string[];
-  /** 保存処理（成功なら true を返す） */
-  onSave?: (data: Record<string, any>) => Promise<boolean>;
+  /** 保存処理（成功なら true を返す）。submit=true の場合は申請として保存 */
+  onSave?: (data: Record<string, any>, submit?: boolean) => Promise<boolean>;
+  /** 下書き状態か（「申請する」ボタンを編集エリアに追加表示） */
+  isDraft?: boolean;
+  /** 承認済みで未送付か（発行請求書のみ） */
+  isPendingSend?: boolean;
+  /** 送付処理（method: 'email' | 'hand'） */
+  onSend?: (method: 'email' | 'hand') => Promise<boolean>;
 }>();
 
 const emit = defineEmits<{
@@ -50,11 +56,11 @@ const cancelEdit = () => {
   isEditing.value = false;
 };
 
-const saveEdit = async () => {
+const saveEdit = async (submit = false) => {
   if (!props.onSave) return;
   isSaving.value = true;
   try {
-    const success = await props.onSave(editForm);
+    const success = await props.onSave(editForm, submit);
     if (success) isEditing.value = false;
   } finally {
     isSaving.value = false;
@@ -199,6 +205,23 @@ const handleReject = async () => {
 
   if (success) emit('action-completed');
 };
+
+// ─── 送付アクション（発行請求書） ────────────────────────
+const selectedSendMethod = ref<'email' | 'hand' | ''>('');
+const isSending = ref(false);
+const handleSend = async () => {
+  if (!selectedSendMethod.value || !props.onSend) return;
+  isSending.value = true;
+  try {
+    const success = await props.onSend(selectedSendMethod.value);
+    if (success) {
+      selectedSendMethod.value = '';
+      emit('action-completed');
+    }
+  } finally {
+    isSending.value = false;
+  }
+};
 </script>
 
 <template>
@@ -253,24 +276,34 @@ const handleReject = async () => {
               </template>
 
               <!-- 保存/キャンセルボタン（編集中のみ） -->
-              <div v-if="isEditing" class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex gap-3">
+              <div v-if="isEditing" class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex gap-2">
                 <button
                   @click="cancelEdit"
-                  class="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 rounded-lg text-sm font-semibold transition-colors"
+                  class="flex-1 px-3 py-2.5 border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 rounded-lg text-sm font-semibold transition-colors"
                 >
                   キャンセル
                 </button>
                 <button
-                  @click="saveEdit"
+                  @click="saveEdit(false)"
                   :disabled="isSaving"
-                  class="flex-[2] bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-lg shadow-sm flex justify-center items-center transition-all text-sm disabled:opacity-50 gap-2"
+                  class="flex-[2] bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-3 rounded-lg shadow-sm flex justify-center items-center transition-all text-sm disabled:opacity-50 gap-1.5"
                 >
                   <svg v-if="isSaving" class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
                   <CheckCircle v-else class="w-4 h-4" />
-                  {{ isSaving ? '保存中...' : '保存する' }}
+                  {{ isSaving ? '保存中...' : (isDraft ? '下書き保存' : '保存する') }}
+                </button>
+                <!-- 下書き時のみ「申請する」ボタンを追加 -->
+                <button
+                  v-if="isDraft"
+                  @click="saveEdit(true)"
+                  :disabled="isSaving"
+                  class="flex-[2] bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-lg shadow-sm flex justify-center items-center transition-all text-sm disabled:opacity-50 gap-1.5"
+                >
+                  <Send class="w-4 h-4" />
+                  申請する
                 </button>
               </div>
 
@@ -347,9 +380,51 @@ const handleReject = async () => {
                 </div>
               </div>
 
-              <!-- 承認アクションエリア -->
+              <!-- 送付アクションエリア（発行請求書 承認済み・未送付） -->
               <div
-                v-if="isPending"
+                v-if="isPendingSend"
+                class="bg-white border border-indigo-200 rounded-xl p-5 shadow-sm"
+              >
+                <h3 class="text-sm font-bold text-gray-900 mb-3">送付方法を選択してください</h3>
+                <div class="flex gap-3 mb-4">
+                  <button
+                    @click="selectedSendMethod = 'email'"
+                    :class="selectedSendMethod === 'email'
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-300'
+                      : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'"
+                    class="flex-1 flex flex-col items-center gap-2 py-4 border-2 rounded-xl text-sm font-semibold transition-all"
+                  >
+                    <Mail class="w-5 h-5" />
+                    メール送付
+                  </button>
+                  <button
+                    @click="selectedSendMethod = 'hand'"
+                    :class="selectedSendMethod === 'hand'
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-300'
+                      : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'"
+                    class="flex-1 flex flex-col items-center gap-2 py-4 border-2 rounded-xl text-sm font-semibold transition-all"
+                  >
+                    <HandMetal class="w-5 h-5" />
+                    手渡し・郵送
+                  </button>
+                </div>
+                <button
+                  @click="handleSend"
+                  :disabled="!selectedSendMethod || isSending"
+                  class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl shadow-md flex justify-center items-center gap-2 text-sm transition-all disabled:opacity-40"
+                >
+                  <svg v-if="isSending" class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <Send v-else class="w-4 h-4" />
+                  {{ isSending ? '送付中...' : '送付を確定する' }}
+                </button>
+              </div>
+
+              <!-- 承認アクションエリア（承認待ち状態） -->
+              <div
+                v-else-if="isPending"
                 class="bg-white border border-gray-200 rounded-xl p-5 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.1)]"
               >
                 <div class="mb-4">

@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from bson import ObjectId
 from fastapi import HTTPException, Depends
-from typing import Set
+from typing import Set, Optional, List
 from app.db.mongodb import get_database
 from app.api.deps import get_current_user
 
@@ -49,12 +49,22 @@ async def resolve_corporate_id(firebase_uid: str) -> tuple[str, str]:
     )
 
 
+FULL_ACCESS_ROLES = {"admin", "accounting", "manager"}
+
+
 @dataclass
 class CorporateContext:
     corporate_id: str
     user_id: str
     firebase_uid: str
     db: object  # AsyncIOMotorDatabase
+    role: str = "staff"
+    department_id: Optional[str] = None
+    project_ids: List[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.project_ids is None:
+            self.project_ids = []
 
 
 async def get_corporate_context(
@@ -64,12 +74,58 @@ async def get_corporate_context(
     firebase_uid = current_user.get("uid")
     corporate_id, user_id = await resolve_corporate_id(firebase_uid)
     db = get_database()
+
+    role = "staff"
+    department_id = None
+    project_ids: List[str] = []
+
+    # Corporate admin: full access, no department/project filter
+    corporate = await db["corporates"].find_one({"firebase_uid": firebase_uid})
+    if corporate:
+        role = "admin"
+    else:
+        employee = await db["employees"].find_one({"firebase_uid": firebase_uid})
+        if employee:
+            role = employee.get("role", "staff")
+            department_id = employee.get("department_id")
+            # Collect project IDs this employee belongs to
+            proj_cursor = db["project_members"].find(
+                {"employee_id": user_id},
+                {"project_id": 1},
+            )
+            proj_docs = await proj_cursor.to_list(length=200)
+            project_ids = [p["project_id"] for p in proj_docs if p.get("project_id")]
+
     return CorporateContext(
         corporate_id=corporate_id,
         user_id=user_id,
         firebase_uid=firebase_uid,
         db=db,
+        role=role,
+        department_id=department_id,
+        project_ids=project_ids,
     )
+
+
+def build_scope_filter(ctx: CorporateContext) -> dict:
+    """Return a MongoDB filter dict that restricts documents to the user's scope.
+
+    Full-access roles (admin, accounting, manager) see everything → returns {}.
+    Others see documents that match at least one of:
+      - department_id matches the user's department
+      - project_id is in the user's project list
+      - submitted_by equals the user's own user_id
+    """
+    if ctx.role in FULL_ACCESS_ROLES:
+        return {}
+
+    or_clauses = [{"submitted_by": ctx.user_id}]
+    if ctx.department_id:
+        or_clauses.append({"department_id": ctx.department_id})
+    if ctx.project_ids:
+        or_clauses.append({"project_id": {"$in": ctx.project_ids}})
+
+    return {"$or": or_clauses}
 
 
 def parse_oid(doc_id: str, label: str = "document") -> ObjectId:
@@ -96,10 +152,10 @@ async def enrich_with_approval_history(
     document_id: str,
     document_type,
 ) -> dict:
-    """approval_events から承認履歴を取得してドキュメントに付加する共通ヘルパー。
+    """audit_logs から承認履歴を取得してドキュメントに付加する共通ヘルパー。
     document_type は文字列または文字列のリストを受け取る。"""
     dt_filter = {"$in": list(document_type)} if not isinstance(document_type, str) else document_type
-    events_cursor = db["approval_events"].find(
+    events_cursor = db["audit_logs"].find(
         {"document_id": document_id, "document_type": dt_filter}
     ).sort("timestamp", 1)
     events = await events_cursor.to_list(length=100)

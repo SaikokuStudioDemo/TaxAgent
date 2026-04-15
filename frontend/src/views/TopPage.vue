@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase/config';
+import { signInWithEmailAndPassword, signOut as firebaseSignOut, sendEmailVerification, getAuth } from 'firebase/auth';
+import { initializeApp } from 'firebase/app';
+import { auth, firebaseConfig } from '@/lib/firebase/config';
 import { useAuth } from '@/composables/useAuth';
 import { Building2, Landmark, LogIn, Loader2, Eye, EyeOff } from 'lucide-vue-next';
 
@@ -20,23 +21,50 @@ const handleLogin = async () => {
   errorMsg.value = '';
   isSubmitting.value = true;
   try {
-    await signInWithEmailAndPassword(auth, email.value, password.value);
+    const userCredential = await signInWithEmailAndPassword(auth, email.value, password.value);
+    if (!userCredential.user.emailVerified) {
+      await firebaseSignOut(auth);
+      throw new Error(
+        'メールアドレスの確認が完了していません。\n' +
+        '登録時に送信した確認メールのリンクをクリックしてください。\n' +
+        '※確認メールが届いていない場合は下のリンクから再送信できます。'
+      );
+    }
     // onAuthStateChanged in useAuth will pick this up and fetch the profile.
   } catch (err: any) {
     console.error("Login failed:", err);
-    errorMsg.value = 'メールアドレスまたはパスワードが間違っています。';
+    errorMsg.value = err.message?.includes('メールアドレスの確認')
+      ? err.message
+      : 'メールアドレスまたはパスワードが間違っています。';
     isSubmitting.value = false;
   }
 };
 
-// Redirect effectively when profile is loaded
+const resendVerificationEmail = async () => {
+  if (!email.value || !password.value) {
+    alert('メールアドレスとパスワードを入力してください。');
+    return;
+  }
+  try {
+    // セカンダリアプリ経由でログインし、メインのonAuthStateChangedを汚染しない
+    const tempApp = initializeApp(firebaseConfig, `ResendApp-${Date.now()}`);
+    const tempAuth = getAuth(tempApp);
+    const credential = await signInWithEmailAndPassword(tempAuth, email.value, password.value);
+    await sendEmailVerification(credential.user);
+    await tempAuth.signOut();
+    alert('確認メールを再送信しました。');
+  } catch (err) {
+    alert('再送信に失敗しました。メールアドレスとパスワードを確認してください。');
+  }
+};
+
+// ログイン操作後にプロフィールが確定したらダッシュボードへリダイレクト
+// immediate: true は不要（ログイン済みの場合は router guard の guestOnly で処理される）
 watch(userProfile, (newVal) => {
   if (newVal) {
-    // The endpoint returns: { type: 'employee', parent_type: 'tax_firm', data: {...} }
-    // Or for admins: { type: 'tax_firm', data: {...} }
     const isTaxFirm = newVal.type === 'tax_firm' || newVal.parent_type === 'tax_firm';
     const isAdmin = newVal.type === 'admin';
-    
+
     if (isAdmin) {
       router.push('/dashboard/admin');
     } else if (isTaxFirm) {
@@ -45,13 +73,12 @@ watch(userProfile, (newVal) => {
       router.push('/dashboard/corporate');
     }
   }
-}, { immediate: true });
+});
 
 onMounted(() => {
-  // Start auth listener if not already started
-  if (isLoading.value) {
-      initAuth();
-  }
+  // isLoading の状態に関わらず initAuth() を呼ぶ
+  // 内部フラグで二重登録を防止しているため安全
+  initAuth();
 });
 </script>
 
@@ -106,8 +133,16 @@ onMounted(() => {
         </div>
 
         <form @submit.prevent="handleLogin" class="space-y-6">
-          <div v-if="errorMsg" class="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium border border-red-100 text-center">
-            {{ errorMsg }}
+          <div v-if="errorMsg" class="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium border border-red-100 text-center space-y-2">
+            <p class="whitespace-pre-line">{{ errorMsg }}</p>
+            <button
+              v-if="errorMsg.includes('メールアドレスの確認')"
+              type="button"
+              @click="resendVerificationEmail"
+              class="text-indigo-600 underline hover:text-indigo-500 font-semibold text-sm"
+            >
+              確認メールを再送信する
+            </button>
           </div>
           <div>
             <label class="block text-sm font-semibold text-gray-700 mb-2">メールアドレス</label>

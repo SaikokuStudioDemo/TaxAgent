@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
+from typing import Optional
+from pydantic import BaseModel
 
 from app.api.helpers import (
     serialize_doc as _serialize,
@@ -12,6 +14,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+VALID_MEMBER_ROLES = {"admin", "approver", "member"}
+
+
+class ProjectMemberAdd(BaseModel):
+    user_id: str
+    role: str = "member"
 
 
 @router.get("", summary="プロジェクト一覧を取得する")
@@ -81,3 +90,107 @@ async def delete_project(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"status": "deleted", "project_id": project_id}
+
+
+# ─────────────────────────────────────────────────────────────
+# Project Members（role フィールドつき）
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/{project_id}/members", summary="プロジェクトメンバー一覧を取得する")
+async def list_project_members(
+    project_id: str,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    oid = parse_oid(project_id, "project")
+    project = await ctx.db["projects"].find_one({"_id": oid, "corporate_id": ctx.corporate_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    cursor = ctx.db["project_members"].find({"project_id": project_id})
+    members = await cursor.to_list(length=200)
+    result = []
+    for m in members:
+        m["role"] = m.get("role", "member")  # 既存データへのフォールバック
+        result.append(_serialize(m))
+    return result
+
+
+@router.post("/{project_id}/members", summary="プロジェクトメンバーを追加する")
+async def add_project_member(
+    project_id: str,
+    payload: ProjectMemberAdd,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    if payload.role not in VALID_MEMBER_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"role は {VALID_MEMBER_ROLES} のいずれかを指定してください",
+        )
+    oid = parse_oid(project_id, "project")
+    project = await ctx.db["projects"].find_one({"_id": oid, "corporate_id": ctx.corporate_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    existing = await ctx.db["project_members"].find_one({
+        "project_id": project_id,
+        "employee_id": payload.user_id,
+    })
+    if existing:
+        raise HTTPException(status_code=400, detail="このユーザーは既にメンバーです")
+
+    doc = {
+        "project_id": project_id,
+        "employee_id": payload.user_id,
+        "role": payload.role,
+        "joined_at": datetime.utcnow(),
+    }
+    result = await ctx.db["project_members"].insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return _serialize(doc)
+
+
+@router.patch("/{project_id}/members/{user_id}", summary="プロジェクトメンバーのロールを更新する")
+async def update_project_member_role(
+    project_id: str,
+    user_id: str,
+    payload: dict,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    role = payload.get("role")
+    if not role or role not in VALID_MEMBER_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"role は {VALID_MEMBER_ROLES} のいずれかを指定してください",
+        )
+    oid = parse_oid(project_id, "project")
+    project = await ctx.db["projects"].find_one({"_id": oid, "corporate_id": ctx.corporate_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    result = await ctx.db["project_members"].update_one(
+        {"project_id": project_id, "employee_id": user_id},
+        {"$set": {"role": role}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="メンバーが見つかりません")
+    return {"status": "updated", "user_id": user_id, "role": role}
+
+
+@router.delete("/{project_id}/members/{user_id}", summary="プロジェクトメンバーを削除する")
+async def remove_project_member(
+    project_id: str,
+    user_id: str,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    oid = parse_oid(project_id, "project")
+    project = await ctx.db["projects"].find_one({"_id": oid, "corporate_id": ctx.corporate_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    result = await ctx.db["project_members"].delete_one({
+        "project_id": project_id,
+        "employee_id": user_id,
+    })
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="メンバーが見つかりません")
+    return {"status": "removed", "user_id": user_id}

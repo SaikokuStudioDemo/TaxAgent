@@ -34,8 +34,12 @@ const subtitle = computed(() => {
 const imageUrl = computed(() =>
   (props.invoice?.attachments ?? [])[0] ?? props.invoice?.image_url ?? ''
 );
-const isPending = computed(() =>
-  !['approved', 'auto_approved', 'rejected'].includes(props.invoice?.approval_status ?? '')
+const isDraft = computed(() => props.invoice?.approval_status === 'draft');
+const isPending = computed(() => props.invoice?.approval_status === 'pending_approval');
+const isPendingSend = computed(() =>
+  props.document_type === 'issued'
+  && ['approved', 'auto_approved'].includes(props.invoice?.approval_status ?? '')
+  && props.invoice?.delivery_status !== 'sent'
 );
 const approveLabel = computed(() =>
   props.document_type === 'issued' ? '承認して次へ' : '支払承認する'
@@ -71,17 +75,31 @@ const editableFields = computed((): string[] => {
 // ─── 保存処理 ─────────────────────────────────────────
 const { updateInvoice } = useInvoices();
 
-const onSave = async (data: Record<string, any>): Promise<boolean> => {
+const onSave = async (data: Record<string, any>, submit = false): Promise<boolean> => {
   if (!props.invoice) return false;
   const payload: Record<string, any> = {};
   for (const field of editableFields.value) {
     if (data[field] !== undefined) payload[field] = data[field];
   }
-  // 差戻し後の再提出
-  if (props.invoice.approval_status === 'rejected') {
+  // 「申請する」ボタン or 差戻し後の再保存 → pending_approval に遷移
+  if (submit || props.invoice.approval_status === 'rejected') {
     payload.approval_status = 'pending_approval';
   }
   const result = await updateInvoice(props.invoice.id, payload);
+  if (result) {
+    emit('action-completed');
+    return true;
+  }
+  return false;
+};
+
+const onSend = async (method: 'email' | 'hand'): Promise<boolean> => {
+  if (!props.invoice) return false;
+  const result = await updateInvoice(props.invoice.id, {
+    delivery_status: 'sent',
+    delivery_method: method,
+    sent_at: new Date().toISOString(),
+  });
   if (result) {
     emit('action-completed');
     return true;
@@ -98,11 +116,14 @@ const onSave = async (data: Record<string, any>): Promise<boolean> => {
     :title="title"
     :subtitle="subtitle"
     :image-url="imageUrl"
+    :is-draft="isDraft"
     :is-pending="isPending"
+    :is-pending-send="isPendingSend"
     :approve-label="approveLabel"
     :editable="editable"
     :editable-fields="editableFields"
     :on-save="onSave"
+    :on-send="onSend"
     @close="emit('close')"
     @action-completed="emit('action-completed')"
     @step-added="(doc) => emit('step-added', doc as Invoice)"

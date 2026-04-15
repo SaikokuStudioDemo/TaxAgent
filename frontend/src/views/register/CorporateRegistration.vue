@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { api } from '@/lib/api';
 import { auth, db } from '@/lib/firebase/config';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, sendEmailVerification } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import ContractInfoForm from '@/components/registration/ContractInfoForm.vue';
 import PlanSelectionCard from '@/components/registration/PlanSelectionCard.vue';
@@ -14,8 +14,13 @@ import type { UserData } from '@/components/registration/UserPermissionList.vue'
 import { calculateMonthlyFee } from '@/lib/utils/pricing';
 
 const router = useRouter();
+const route = useRoute();
 
-const selectedPlanId = ref<string>('plan-standard');
+// 招待トークン関連（Task#5 の onMounted で設定される）
+const invitationToken = ref<string | null>(null);
+const invitationTaxFirmId = ref<string | null>(null);
+
+const selectedPlanId = ref<string>('plan_standard');
 const selectedOptions = ref<string[]>([]);
 const isSubmitting = ref(false);
 const users = ref<UserData[]>([]);
@@ -35,8 +40,30 @@ const fetchDepartments = async () => {
   }
 };
 
-onMounted(() => {
+onMounted(async () => {
   fetchDepartments();
+
+  // 招待トークンの処理
+  const token = route.query.token as string | undefined;
+  if (token) {
+    invitationToken.value = token;
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+    try {
+      const res = await fetch(`${apiUrl}/invitations/verify?token=${token}`);
+      const data = await res.json();
+      if (data.valid) {
+        invitationTaxFirmId.value = data.tax_firm_id;
+        if (data.invited_email) {
+          formState.value.loginEmail = data.invited_email;
+        }
+      } else {
+        invitationToken.value = null;
+        alert('この招待リンクは無効または期限切れです。税理士法人に再発行を依頼してください。');
+      }
+    } catch (e) {
+      console.error('招待トークン検証エラー:', e);
+    }
+  }
 });
 
 const formState = ref<Partial<ContractFormValues>>({
@@ -45,7 +72,8 @@ const formState = ref<Partial<ContractFormValues>>({
   address: '',
   loginEmail: '',
   loginPassword: '',
-  maIntent: 'none'
+  phone: '',
+  registrationNumber: ''
 });
 
 const formErrors = ref<Record<string, string>>({});
@@ -84,29 +112,40 @@ const onSubmit = async () => {
       companyName: data.companyName,
       companyUrl: data.companyUrl || null,
       address: data.address,
-      maIntent: data.maIntent || null,
       loginEmail: data.loginEmail,
+      phone: data.phone || null,
+      registrationNumber: data.registrationNumber || null,
       corporateType: "corporate",
       createdAt: new Date().toISOString()
     });
 
-    // 3. Get the JWT Token
+    // 3. Send email verification (failure is non-fatal)
+    try {
+      await sendEmailVerification(userCredential.user);
+    } catch (err) {
+      console.error('Failed to send verification email:', err);
+    }
+
+    // 4. Get the JWT Token
     const idToken = await userCredential.user.getIdToken();
 
-    // 4. Prepare payload for FastAPI (NO PII allowed)
+    // 5. Prepare payload for FastAPI
     const payload = {
       corporateType: "corporate",
       companyUrl: data.companyUrl || null,
-      maIntent: data.maIntent || null,
       planId: selectedPlanId.value,
       selectedOptions: selectedOptions.value,
       monthlyFee: calculateMonthlyFee(selectedPlanId.value, selectedOptions.value),
       sales_agent_id: null,
       referrer_id: null,
-      advising_tax_firm_id: null
+      advising_tax_firm_id: invitationTaxFirmId.value || null,
+      companyName: data.companyName,
+      phone: data.phone || null,
+      address: data.address,
+      registrationNumber: data.registrationNumber || null
     };
 
-    // 4. Send to FastAPI Backend
+    // 6. Send to FastAPI Backend
     const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
     const response = await fetch(`${apiUrl}/users/register`, {
       method: 'POST',
@@ -122,7 +161,7 @@ const onSubmit = async () => {
       throw new Error(errorData.detail || 'Failed to register with backend');
     }
 
-    // 5. Submit Employees to Backend
+    // 7. Submit Employees to Backend
     const validUsers = users.value.filter(u => u.name.trim() !== '' && u.email.trim() !== '' && u.email.includes('@'));
 
     if (validUsers.length > 0) {
@@ -147,11 +186,30 @@ const onSubmit = async () => {
       }
     }
 
-    // 6. Success! Redirect to dashboard
-    alert('登録が完了しました！ダッシュボードへ移動します。');
+    // 8. 招待トークンを使用済みにする（失敗しても登録は完了扱い）
+    if (invitationToken.value) {
+      const acceptUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+      await fetch(`${acceptUrl}/invitations/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: invitationToken.value })
+      }).catch(e => console.error('招待トークンのacceptに失敗しました:', e));
+    }
+
+    // 9. Success! Redirect to dashboard
+    alert('登録が完了しました。\n確認メールを送信しましたので、メール内のリンクをクリックしてメールアドレスの確認を完了してください。');
     router.push('/dashboard/corporate');
 
   } catch (error) {
+    // Firebase Auth ロールバック（APIエラー時にゴミユーザーが残らないよう削除）
+    if (userCredential?.user) {
+      try {
+        await userCredential.user.delete();
+        console.log('Firebase Auth user rolled back successfully');
+      } catch (deleteError) {
+        console.error('Failed to rollback Firebase Auth user:', deleteError);
+      }
+    }
     console.error('Registration Error:', error);
     const errMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     alert(`登録エラー: ${errMessage}`);

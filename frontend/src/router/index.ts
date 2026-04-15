@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { auth } from '@/lib/firebase/config'
+import { userProfile } from '@/composables/useAuth'
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -87,7 +88,8 @@ const router = createRouter({
                 },
                 { path: 'invoices/matching', name: 'dashboard-corporate-invoices-matching', component: () => import('@/views/dashboard/corporate/invoices/InvoiceMatchingPage.vue'), props: { mode: 'income' } },
                 { path: 'invoices/payment-matching', name: 'dashboard-corporate-invoices-payment-matching', component: () => import('@/views/dashboard/corporate/invoices/InvoiceMatchingPage.vue'), props: { mode: 'payment' } },
-                { path: 'banking/reconciliation', name: 'dashboard-corporate-banking-reconciliation', component: () => import('@/views/dashboard/corporate/banking/ReconciliationPage.vue') },
+                { path: 'banking/outflow', name: 'dashboard-corporate-banking-outflow', component: () => import('@/views/dashboard/corporate/banking/ReconciliationPage.vue'), props: { direction: 'debit' } },
+                { path: 'banking/inflow', name: 'dashboard-corporate-banking-inflow', component: () => import('@/views/dashboard/corporate/banking/ReconciliationPage.vue'), props: { direction: 'credit' } },
                 { path: 'banking/import', name: 'dashboard-corporate-banking-import', component: () => import('@/views/dashboard/corporate/banking/BankingImportPage.vue') },
                 { path: 'banking/history', name: 'dashboard-corporate-banking-history', component: () => import('@/views/dashboard/corporate/banking/BankImportHistoryPage.vue') },
                 { path: 'banking/auto-matches', name: 'BankingAutoMatches', component: () => import('@/views/dashboard/corporate/banking/AutoMatchHistoryPage.vue') },
@@ -99,7 +101,8 @@ const router = createRouter({
                 { path: 'settings/journal-rules', name: 'dashboard-corporate-settings-journal-rules', component: () => import('@/views/dashboard/corporate/settings/JournalRulesPage.vue') },
                 { path: 'cash/ledger', name: 'CashLedger', component: () => import('@/views/dashboard/corporate/cash/CashLedgerPage.vue') },
                 { path: 'cash/matching', name: 'CashMatching', component: () => import('@/views/dashboard/corporate/cash/CashMatchingPage.vue') },
-                { path: 'users', name: 'dashboard-corporate-users', component: () => import('@/views/dashboard/shared/UserManagementPage.vue') }
+                { path: 'users', name: 'dashboard-corporate-users', component: () => import('@/views/dashboard/shared/UserManagementPage.vue') },
+                { path: 'settings/permissions', name: 'dashboard-corporate-settings-permissions', component: () => import('@/views/dashboard/corporate/settings/PermissionSettingsPage.vue') }
             ]
         },
         {
@@ -115,10 +118,21 @@ const router = createRouter({
 
 router.beforeEach(async (to, _from, next) => {
     const requiresAuth = to.matched.some(record => record.meta.requiresAuth);
+    const isGuestOnly = to.matched.some(record => record.meta.guestOnly);
     const isDevLogin = !!localStorage.getItem('DEV_AUTH_TOKEN');
+    const isAuthenticated = !!auth.currentUser || isDevLogin;
 
-    if (requiresAuth && !auth.currentUser && !isDevLogin) {
+    if (requiresAuth && !isAuthenticated) {
         next('/');
+    } else if (isGuestOnly && isAuthenticated) {
+        const profile = userProfile.value;
+        if (profile?.type === 'admin') {
+            next('/dashboard/admin');
+        } else if (profile?.type === 'tax_firm' || profile?.parent_type === 'tax_firm') {
+            next('/dashboard/tax-firm');
+        } else {
+            next('/dashboard/corporate');
+        }
     } else {
         next();
     }

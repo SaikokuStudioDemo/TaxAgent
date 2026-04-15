@@ -71,31 +71,19 @@ const handleBulkDelete = () => {
     });
 };
 
-const handleBulkSend = () => {
+const handleBulkSubmit = () => {
     if (!selectedInvoiceIds.value.length) return;
-
-    // Evaluate approval requirements
-    const unapproved = invoices.value.filter(i =>
-        selectedInvoiceIds.value.includes(i.id) &&
-        i.approval_rule_id &&
-        i.approval_status !== 'approved' && i.approval_status !== 'auto_approved'
-    );
-
-    if (unapproved.length > 0) {
-        alert('承認プロセスが完了していない請求書が含まれています（または承認待ちです）。\nすべて承認済みの請求書のみ発行可能です。');
-        return;
-    }
-
     openConfirmModal({
-        title: '一括発行の確認',
-        message: `${selectedInvoiceIds.value.length}件の請求書を一括で発行・送付しますか？`,
-        confirmText: '発行する',
+        title: '一括承認申請の確認',
+        message: `${selectedInvoiceIds.value.length}件の下書き請求書を承認申請します。よろしいですか？`,
+        confirmText: '申請する',
         isDanger: false,
         confirmAction: async () => {
-            const ok = await bulkAction(selectedInvoiceIds.value, 'send');
+            const ok = await bulkAction(selectedInvoiceIds.value, 'submit');
             if (ok) {
                 selectedInvoiceIds.value = [];
-                await fetchInvoices();
+                await loadInvoices();
+                await loadAllTabCounts();
             }
         }
     });
@@ -177,14 +165,20 @@ watch(activeTab, async () => {
 });
 
 // Map API invoice to display format
-type InvoiceStatus = 'draft' | 'pending_approval' | 'pending_send' | 'sent_unmatched' | 'reconciled' | 'overdue_unmatched' | 'received_unmatched' | 'received_reconciled';
+type InvoiceStatus = 'draft' | 'pending_approval' | 'pending_send' | 'sent_unmatched' | 'reconciled' | 'overdue_unmatched' | 'received_unmatched' | 'received_approved' | 'received_reconciled';
 type DisplayInvoice = Invoice & { displayStatus: InvoiceStatus };
 
 const mapStatus = (inv: Invoice): InvoiceStatus => {
     if (inv.approval_status === 'draft') return 'draft';
     if (inv.approval_status === 'pending_approval') return 'pending_approval';
-    if (inv.reconciliation_status === 'reconciled') return inv.document_type === 'received' ? 'received_reconciled' : 'reconciled';
-    if (inv.document_type === 'received') return 'received_unmatched';
+    if (inv.document_type === 'received') {
+        // 受領請求書: 消込済み → 承認済み（支払い待ち） → 未消込の順で判定
+        if (inv.reconciliation_status === 'reconciled') return 'received_reconciled';
+        if (['approved', 'auto_approved'].includes(inv.approval_status)) return 'received_approved';
+        return 'received_unmatched';
+    }
+    // 発行請求書
+    if (inv.reconciliation_status === 'reconciled') return 'reconciled';
     if (inv.delivery_status === 'sent') return 'sent_unmatched';
     return 'pending_send';
 };
@@ -245,8 +239,12 @@ const receivedSummary = computed(() => {
     const list = invoices.value.filter(i => i.document_type === 'received');
     const thisMonth = list.filter(i => i.issue_date?.startsWith(currentMonth));
     const matched = list.filter(i => i.reconciliation_status === 'reconciled');
-    const unmatched = list.filter(i => i.reconciliation_status !== 'reconciled' && i.approval_status !== 'draft');
-    
+    // 承認済みで未消込（支払い待ち）のみ未払い合計に含める
+    const unmatched = list.filter(i =>
+        i.reconciliation_status !== 'reconciled' &&
+        ['approved', 'auto_approved'].includes(i.approval_status)
+    );
+
     return {
         totalPlanned: thisMonth.reduce((s, i) => s + (i.total_amount || 0), 0),
         totalMatched: matched.reduce((s, i) => s + (i.total_amount || 0), 0),
@@ -262,6 +260,7 @@ const getStatusBadge = (status: InvoiceStatus) => {
         case 'overdue_unmatched': return { label: '未消込 (期限超過)', classes: 'bg-red-50 text-red-700 border-red-200', icon: Clock };
         case 'draft': return { label: '下書き', classes: 'bg-gray-100 text-gray-700 border-gray-200', icon: FileText };
         case 'pending_approval': return { label: '承認待ち', classes: 'bg-orange-100 text-orange-700 border-orange-200', icon: Clock };
+        case 'received_approved': return { label: '承認済 (支払い待ち)', classes: 'bg-blue-50 text-blue-700 border-blue-200', icon: CheckCircle };
         case 'received_unmatched': return { label: '未消込 (支払待ち)', classes: 'bg-amber-50 text-amber-700 border-amber-200', icon: Clock };
         case 'received_reconciled': return { label: '消込済 (支払完了)', classes: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle };
         default: return { label: '不明', classes: 'bg-gray-100 text-gray-700 border-gray-200', icon: FileText };
@@ -469,6 +468,15 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
                     <span class="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold border shrink-0" :class="getStatusBadge(invoice.displayStatus).classes">
                         {{ getStatusBadge(invoice.displayStatus).label }}
                     </span>
+                    <span
+                        v-if="activeTab === 'drafts' || activeTab === 'pending_approval'"
+                        class="mt-1 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border block"
+                        :class="invoice.document_type === 'received'
+                            ? 'bg-purple-50 text-purple-700 border-purple-200'
+                            : 'bg-blue-50 text-blue-700 border-blue-200'"
+                    >
+                        {{ invoice.document_type === 'received' ? '受領' : '発行' }}
+                    </span>
                 </td>
                 <td v-if="activeTab === 'received'" class="hidden md:table-cell px-4 py-4 whitespace-nowrap text-center">
                     <span class="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold border" :class="getReviewBadge(invoice.approval_status).classes">
@@ -563,12 +571,12 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
           </div>
           
           <div class="flex items-center gap-3">
-            <button 
+            <button
               v-if="activeTab === 'drafts'"
-              @click="handleBulkSend"
+              @click="handleBulkSubmit"
               class="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-bold transition-colors"
             >
-              <Send class="w-4 h-4" /> 一括発行・送付
+              <Send class="w-4 h-4" /> 一括申請する
             </button>
             <button 
               @click="handleBulkDelete"

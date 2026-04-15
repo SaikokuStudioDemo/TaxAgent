@@ -3,6 +3,7 @@ from app.models.user import CorporateUserCreate, CorporateUserInDB
 from app.api.deps import get_current_user
 from app.db.mongodb import get_database
 from typing import List
+from datetime import datetime
 
 router = APIRouter()
 
@@ -41,9 +42,23 @@ async def register_corporate_user(
         advising_tax_firm_id=payload.advising_tax_firm_id
     )
 
-    # Insert into MongoDB
-    await db["corporates"].insert_one(db_record.model_dump())
+    # Insert into MongoDB（戻り値から _id を取得）
+    result = await db["corporates"].insert_one(db_record.model_dump())
+    corporate_id = str(result.inserted_id)
     print(f">>> REGISTERED CORPORATE: UID={firebase_uid}, TYPE={payload.corporateType}")
+
+    # company_profiles のデフォルトレコードを自動生成
+    await db["company_profiles"].insert_one({
+        "corporate_id": corporate_id,
+        "profile_name": "メインプロファイル",
+        "company_name": payload.companyName or "",
+        "phone": payload.phone or None,
+        "address": payload.address or None,
+        "registration_number": payload.registrationNumber or None,
+        "is_default": True,
+        "created_at": datetime.utcnow()
+    })
+    print(f">>> CREATED DEFAULT COMPANY_PROFILE: CORPORATE_ID={corporate_id}")
 
     return {"message": "Corporate profile successfully linked to Firebase Auth.", "data": db_record.model_dump()}
 
@@ -545,6 +560,8 @@ async def update_client(
     if "companyUrl" in payload: fs_update["companyUrl"] = payload["companyUrl"]
     if "address" in payload: fs_update["address"] = payload["address"]
     if "maIntent" in payload: fs_update["maIntent"] = payload["maIntent"]
+    if "phone" in payload: fs_update["phone"] = payload["phone"]
+    if "registrationNumber" in payload: fs_update["registrationNumber"] = payload["registrationNumber"]
 
     if fs_update:
         from firebase_admin import firestore
@@ -614,6 +631,8 @@ async def get_client_detail(
         client_doc["address"] = pii.get("address", "")
         client_doc["maIntent"] = pii.get("maIntent", client_doc.get("maIntent", ""))
         client_doc["loginEmail"] = pii.get("loginEmail", "")
+        client_doc["phone"] = pii.get("phone", None)
+        client_doc["registrationNumber"] = pii.get("registrationNumber", None)
         
     # 3. Fetch Employees for this client
     employees_cursor = db["employees"].find({"corporate_id": client_corporate_id})

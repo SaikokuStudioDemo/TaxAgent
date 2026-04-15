@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { auth, db } from '@/lib/firebase/config';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, sendEmailVerification } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import ContractInfoForm from '@/components/registration/ContractInfoForm.vue';
 import PlanSelectionCard from '@/components/registration/PlanSelectionCard.vue';
@@ -14,7 +14,7 @@ import { calculateMonthlyFee } from '@/lib/utils/pricing';
 
 const router = useRouter();
 
-const selectedPlanId = ref<string>('plan-standard');
+const selectedPlanId = ref<string>('plan_standard');
 const selectedOptions = ref<string[]>([]);
 const isSubmitting = ref(false);
 const users = ref<UserData[]>([]);
@@ -25,7 +25,9 @@ const formState = ref<Partial<ContractFormValues>>({
   address: '',
   loginEmail: '',
   loginPassword: '',
-  maIntent: 'none'
+  maIntent: 'none',
+  phone: '',
+  registrationNumber: ''
 });
 
 const formErrors = ref<Record<string, string>>({});
@@ -66,14 +68,23 @@ const onSubmit = async () => {
       address: data.address,
       maIntent: data.maIntent || null,
       loginEmail: data.loginEmail,
+      phone: data.phone || null,
+      registrationNumber: data.registrationNumber || null,
       corporateType: "tax_firm",
       createdAt: new Date().toISOString()
     });
 
-    // 3. Get the JWT Token
+    // 3. Send email verification (failure is non-fatal)
+    try {
+      await sendEmailVerification(userCredential.user);
+    } catch (err) {
+      console.error('Failed to send verification email:', err);
+    }
+
+    // 4. Get the JWT Token
     const idToken = await userCredential.user.getIdToken();
 
-    // 4. Prepare payload for FastAPI (NO PII allowed)
+    // 5. Prepare payload for FastAPI
     const payload = {
       corporateType: "tax_firm",
       companyUrl: data.companyUrl || null,
@@ -83,10 +94,14 @@ const onSubmit = async () => {
       monthlyFee: calculateMonthlyFee(selectedPlanId.value, selectedOptions.value),
       sales_agent_id: null,
       referrer_id: null,
-      advising_tax_firm_id: null
+      advising_tax_firm_id: null,
+      companyName: data.companyName,
+      phone: data.phone || null,
+      address: data.address,
+      registrationNumber: data.registrationNumber || null
     };
 
-    // 4. Send to FastAPI Backend
+    // 6. Send to FastAPI Backend
     const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
     const response = await fetch(`${apiUrl}/users/register`, {
       method: 'POST',
@@ -102,7 +117,7 @@ const onSubmit = async () => {
       throw new Error(errorData.detail || 'Failed to register with backend');
     }
 
-    // 5. Submit Employees to Backend
+    // 7. Submit Employees to Backend
     const validUsers = users.value.filter(u => u.name.trim() !== '' && u.email.trim() !== '' && u.email.includes('@'));
 
     if (validUsers.length > 0) {
@@ -127,11 +142,20 @@ const onSubmit = async () => {
       }
     }
 
-    // 6. Success! Redirect to dashboard (mock placeholder for now)
-    alert('登録が完了しました！ダッシュボードへ移動します。');
+    // 8. Success! Redirect to dashboard
+    alert('登録が完了しました。\n確認メールを送信しましたので、メール内のリンクをクリックしてメールアドレスの確認を完了してください。');
     router.push('/dashboard/tax-firm');
 
   } catch (error) {
+    // Firebase Auth ロールバック（APIエラー時にゴミユーザーが残らないよう削除）
+    if (userCredential?.user) {
+      try {
+        await userCredential.user.delete();
+        console.log('Firebase Auth user rolled back successfully');
+      } catch (deleteError) {
+        console.error('Failed to rollback Firebase Auth user:', deleteError);
+      }
+    }
     console.error('Registration Error:', error);
     const errMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     alert(`登録エラー: ${errMessage}`);

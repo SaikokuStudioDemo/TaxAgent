@@ -18,7 +18,7 @@ router = APIRouter()
 
 
 async def _write_match_events(db, corporate_id: str, document_ids: list, action: str, user_id: str = "system", comment=None):
-    """document_ids に紐づく approval_events（matched / unmatched）を書き込む共通ヘルパー。"""
+    """document_ids に紐づく audit_logs（matched / unmatched）を書き込む共通ヘルパー。"""
     now = datetime.utcnow()
     for did in document_ids:
         # receipts / invoices どちらか判断
@@ -29,7 +29,7 @@ async def _write_match_events(db, corporate_id: str, document_ids: list, action:
                 doc_type = "invoice"
         except Exception:
             doc_type = "invoice"
-        await db["approval_events"].insert_one({
+        await db["audit_logs"].insert_one({
             "corporate_id": corporate_id,
             "document_type": doc_type,
             "document_id": did,
@@ -182,10 +182,26 @@ async def create_match(
             except Exception:
                 pass
 
+        # transaction-level イベントは書類の有無にかかわらず常に記録
+        account_subject = payload.get("account_subject", "")
+        memo = payload.get("memo", "")
+        now = datetime.utcnow()
+        for tid in transaction_ids:
+            await ctx.db["audit_logs"].insert_one({
+                "corporate_id": ctx.corporate_id,
+                "entity_type": "transaction",
+                "transaction_id": tid,
+                "action": "matched",
+                "approver_id": ctx.user_id,
+                "account_subject": account_subject,
+                "comment": memo or f"照合確定（{account_subject}）",
+                "timestamp": now,
+            })
+
+        # document-level イベント（書類が紐付いている場合）
         if document_ids:
-            account_subject = payload.get("account_subject", "")
             await _write_match_events(ctx.db, ctx.corporate_id, document_ids, "matched",
-                                      ctx.user_id, f"支払照合で消込（{account_subject}）")
+                                      ctx.user_id, f"照合確定（{account_subject}）")
 
         created = await ctx.db["matches"].find_one({"_id": result.inserted_id})
         return _serialize(created)
@@ -760,6 +776,9 @@ async def ai_suggest_bank_names(
     await _process_group(issued_invoices, "client_id", "credit")
 
     # ── 2. received請求書（vendor_idベース・出金系取引）─────────────
+    # 承認状態に関わらずマッチング対象とする
+    # 正常フローでは承認前に銀行取引が存在しないため自然にマッチしない
+    # 例外的に支払いが先行した場合は自動マッチングして実態を正しく反映する
     received_query: dict = {
         "corporate_id": ctx.corporate_id,
         "reconciliation_status": {"$in": ["unreconciled", None, ""]},
@@ -902,8 +921,21 @@ async def delete_match(
         {"$set": {"is_active": False, "inactivated_at": datetime.utcnow()}},
     )
 
+    # transaction-level イベント（reconciliation タイプは常に記録）
+    if match.get("match_type") == "reconciliation":
+        for tid in match.get("transaction_ids", []):
+            await ctx.db["audit_logs"].insert_one({
+                "corporate_id": ctx.corporate_id,
+                "entity_type": "transaction",
+                "transaction_id": tid,
+                "action": "unmatched",
+                "approver_id": ctx.user_id,
+                "comment": "照合を取り消し",
+                "timestamp": datetime.utcnow(),
+            })
+
     all_doc_ids = list(match.get("document_ids", [])) + list(match.get("receipt_ids", []))
     if all_doc_ids:
-        await _write_match_events(ctx.db, ctx.corporate_id, all_doc_ids, "unmatched", ctx.user_id, "消込を取り消し")
+        await _write_match_events(ctx.db, ctx.corporate_id, all_doc_ids, "unmatched", ctx.user_id, "照合を取り消し")
 
     return {"status": "unmatched", "match_id": match_id}

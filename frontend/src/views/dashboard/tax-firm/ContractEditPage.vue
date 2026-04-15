@@ -28,7 +28,9 @@ const formState = ref<Partial<ContractFormValues>>({
   address: '',
   loginEmail: '',
   loginPassword: '',
-  maIntent: 'none'
+  maIntent: 'none',
+  phone: '',
+  registrationNumber: ''
 });
 
 const formErrors = ref<Record<string, string>>({});
@@ -54,6 +56,8 @@ onMounted(async () => {
         formState.value.maIntent = clientData.maIntent || 'none';
         formState.value.loginEmail = clientData.loginEmail || '';
         formState.value.loginPassword = 'DummyPassword123!';
+        formState.value.phone = clientData.phone || '';
+        formState.value.registrationNumber = clientData.registrationNumber || '';
 
         const empData = data.data.employees || [];
         users.value = empData.map((e: any) => ({
@@ -106,6 +110,8 @@ const onSubmit = async () => {
                 companyUrl: data.companyUrl || null,
                 address: data.address,
                 maIntent: data.maIntent || null,
+                phone: data.phone || null,
+                registrationNumber: data.registrationNumber || null,
             };
 
             const response = await fetch(`${apiUrl}/users/clients/${editModeClientId.value}`, {
@@ -179,6 +185,8 @@ const onSubmit = async () => {
             address: data.address,
             maIntent: data.maIntent || null,
             loginEmail: data.loginEmail,
+            phone: data.phone || null,
+            registrationNumber: data.registrationNumber || null,
             corporateType: "corporate",
             createdAt: new Date().toISOString()
         });
@@ -186,17 +194,21 @@ const onSubmit = async () => {
         // 3. Get the JWT Token for the NEW user
         const idToken = await userCredential.user.getIdToken();
 
-        // 4. Prepare payload for FastAPI (NO PII allowed)
+        // 4. Prepare payload for FastAPI
         const payload = {
             corporateType: 'corporate',
             companyUrl: data.companyUrl || null,
             maIntent: data.maIntent || null,
-            planId: 'plan-tax-firm-managed',
+            planId: 'plan_tax_firm_managed',
             monthlyFee: 0,
             advising_tax_firm_id: currentUser.value.uid,
             selectedOptions: [],
             sales_agent_id: null,
-            referrer_id: null
+            referrer_id: null,
+            companyName: data.companyName,
+            phone: data.phone || null,
+            address: data.address,
+            registrationNumber: data.registrationNumber || null
         };
 
         const response = await fetch(`${apiUrl}/users/register`, {
@@ -255,6 +267,15 @@ const onSubmit = async () => {
         router.push('/dashboard/tax-firm/customers');
 
     } catch (error) {
+        // Firebase Auth ロールバック（新規登録モードのみ・Secondary App のユーザーを削除）
+        if (!editModeClientId.value && userCredential?.user) {
+          try {
+            await userCredential.user.delete();
+            console.log('Firebase Auth (secondary) user rolled back successfully');
+          } catch (deleteError) {
+            console.error('Failed to rollback Firebase Auth user:', deleteError);
+          }
+        }
         console.error('Client Registration Error:', error);
         const errMessage = error instanceof Error ? error.message : 'Unknown error occurred';
         alert(`登録エラー: ${errMessage}`);

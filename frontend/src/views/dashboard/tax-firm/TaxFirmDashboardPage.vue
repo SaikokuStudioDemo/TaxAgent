@@ -5,8 +5,7 @@ import { formatCurrency, calculateTaxInclusive } from '@/lib/utils/formatters';
 import { Users, Banknote, ShieldCheck, Loader2 } from 'lucide-vue-next';
 import { PLANS } from '@/lib/constants/mockData';
 
-const { currentUser, getToken } = useAuth();
-const profile = ref<any>(null);
+const { currentUser, getToken, userProfile, displayName } = useAuth();
 const clients = ref<any[]>([]);
 const isLoading = ref(true);
 
@@ -14,23 +13,13 @@ onMounted(async () => {
     if (!currentUser.value) return;
     try {
         const token = await getToken();
-        if(!token) return;
+        if (!token) return;
         const headers = { 'Authorization': `Bearer ${token}` };
         const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
 
-        const [profileRes, clientsRes] = await Promise.all([
-            fetch(`${apiUrl}/users/me`, { headers }),
-            fetch(`${apiUrl}/users/clients`, { headers })
-        ]);
-
-        if (profileRes.ok) {
-            const profileData = await profileRes.json();
-            profile.value = profileData.data;
-        }
-
+        const clientsRes = await fetch(`${apiUrl}/users/clients`, { headers });
         if (clientsRes.ok) {
-            const clientsData = await clientsRes.json();
-            clients.value = clientsData.data || [];
+            clients.value = (await clientsRes.json()).data || [];
         }
     } catch (err) {
         console.error("Failed to load dashboard data:", err);
@@ -41,8 +30,8 @@ onMounted(async () => {
 
 const totalUsageFee = () => clients.value.reduce((sum, client) => sum + (client.totalUsageFee || 0), 0);
 const planName = () => {
-    const plan = PLANS.find((p: any) => p.id === profile.value?.planId);
-    return plan?.name || '未設定';
+    const plan = PLANS.find((p: any) => p.id === userProfile.value?.data?.planId);
+    return plan?.name || 'プラン情報なし';
 };
 </script>
 
@@ -87,11 +76,11 @@ const planName = () => {
                 <div class="text-2xl font-bold text-gray-900 mb-1">
                     {{ planName() }}
                 </div>
-                <p v-if="profile?.monthlyFee !== undefined" class="text-lg font-bold text-indigo-600 mb-2">
-                    {{ formatCurrency(calculateTaxInclusive(profile.monthlyFee)) }} <span class="text-sm font-medium text-gray-500">/ 月</span>
-                    <span class="block text-xs text-gray-400 font-normal mt-0.5">(税抜 {{ formatCurrency(profile.monthlyFee) }})</span>
+                <p v-if="userProfile?.data?.monthlyFee !== undefined" class="text-lg font-bold text-indigo-600 mb-2">
+                    {{ formatCurrency(calculateTaxInclusive(userProfile?.data?.monthlyFee)) }} <span class="text-sm font-medium text-gray-500">/ 月</span>
+                    <span class="block text-xs text-gray-400 font-normal mt-0.5">(税抜 {{ formatCurrency(userProfile?.data?.monthlyFee) }})</span>
                 </p>
-                <p class="text-xs text-gray-400">{{ profile?.companyName }}</p>
+                <p class="text-xs text-gray-400">{{ displayName }}</p>
             </div>
         </div>
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { Building, Mail, MapPin, Lock, Globe, Handshake, AlertCircle, Eye, EyeOff } from 'lucide-vue-next';
+import { Building, Mail, MapPin, Lock, Globe, Handshake, AlertCircle, Eye, EyeOff, Phone, FileText } from 'lucide-vue-next';
 import type { ContractFormValues } from '@/lib/utils/validations';
 
 defineProps<{
@@ -166,6 +166,57 @@ const showPassword = ref(false);
         </div>
         <p v-if="errors?.address" class="text-xs text-red-500 flex items-center gap-1 mt-1">
           <AlertCircle :size="14" /> {{ errors.address }}
+        </p>
+      </div>
+
+      <!-- Phone (Optional) -->
+      <div class="space-y-2">
+        <label for="phone" class="block text-sm font-medium text-gray-700">
+          電話番号
+        </label>
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none" :class="errors?.phone ? 'text-red-400' : 'text-gray-400'">
+            <Phone :size="18" />
+          </div>
+          <input
+            type="tel"
+            id="phone"
+            v-model="formState.phone"
+            class="block w-full pl-10 pr-3 py-2.5 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-gray-50 text-gray-900 transition-colors"
+            :class="errors?.phone ? 'border-red-300 focus:border-red-500' : 'border-gray-300 focus:border-indigo-500'"
+            placeholder="03-1234-5678"
+          />
+        </div>
+        <p v-if="errors?.phone" class="text-xs text-red-500 flex items-center gap-1 mt-1">
+          <AlertCircle :size="14" /> {{ errors.phone }}
+        </p>
+      </div>
+
+      <!-- Registration Number (Optional) -->
+      <div class="space-y-2">
+        <label for="registrationNumber" class="block text-sm font-medium text-gray-700">
+          適格請求書発行事業者登録番号
+        </label>
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none" :class="errors?.registrationNumber ? 'text-red-400' : 'text-gray-400'">
+            <FileText :size="18" />
+          </div>
+          <div class="absolute inset-y-0 left-10 flex items-center pointer-events-none">
+            <span class="text-gray-500 font-medium text-sm">T</span>
+          </div>
+          <input
+            type="text"
+            id="registrationNumber"
+            :value="formState.registrationNumber ? formState.registrationNumber.replace(/^T/, '') : ''"
+            @input="(e) => { formState.registrationNumber = 'T' + (e.target as HTMLInputElement).value.replace(/^T/, '') }"
+            class="block w-full pl-14 pr-3 py-2.5 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-gray-50 text-gray-900 transition-colors"
+            :class="errors?.registrationNumber ? 'border-red-300 focus:border-red-500' : 'border-gray-300 focus:border-indigo-500'"
+            placeholder="1234567890123"
+            maxlength="13"
+          />
+        </div>
+        <p v-if="errors?.registrationNumber" class="text-xs text-red-500 flex items-center gap-1 mt-1">
+          <AlertCircle :size="14" /> {{ errors.registrationNumber }}
         </p>
       </div>
 

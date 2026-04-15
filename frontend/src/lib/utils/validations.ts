@@ -28,6 +28,16 @@ export const contractSchema = z.object({
         .enum(['none', 'considering', 'immediate'])
         .optional()
         .or(z.literal('')), // 税理士法人のみ使用・任意で未選択(空)も許容
+    phone: z
+        .string()
+        .regex(/^[\d\-+().\s]+$/, { message: '正しい電話番号の形式で入力してください' })
+        .optional()
+        .or(z.literal('')),
+    registrationNumber: z
+        .string()
+        .regex(/^T\d{13}$/, { message: 'T+13桁の数字で入力してください（例: T1234567890123）' })
+        .optional()
+        .or(z.literal('')),
 });
 
 export type ContractFormValues = z.infer<typeof contractSchema>;

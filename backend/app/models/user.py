@@ -11,9 +11,14 @@ class CorporateUserCreate(BaseModel):
     """
     corporateType: Literal["tax_firm", "corporate"]
     
-    # Optional fields (can be handled without PII)
+    # Optional fields
     companyUrl: Optional[str] = None
     maIntent: Optional[str] = None
+    # company_profiles 生成用（Section 3.2 に基づく意図的な追加）
+    companyName: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    registrationNumber: Optional[str] = None
     
     # Operations
     planId: str

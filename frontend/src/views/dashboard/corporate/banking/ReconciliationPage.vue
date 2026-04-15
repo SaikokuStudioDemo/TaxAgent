@@ -2,7 +2,8 @@
 import { ref, computed, onMounted } from 'vue';
 import {
   Link2, CheckCircle2, FileText, Receipt, ChevronRight,
-  Loader2, AlertCircle, Check, X, Lock, Search, RotateCcw, Clock
+  Loader2, AlertCircle, Check, X, Lock, Search, RotateCcw, Clock,
+  ArrowRightLeft, Upload, UserCheck, UserX, Unlink, FilePlus,
 } from 'lucide-vue-next';
 import { formatCurrency } from '@/lib/utils/formatters';
 import { useTransactions, type Transaction } from '@/composables/useTransactions';
@@ -20,6 +21,18 @@ const ACCOUNT_SUBJECTS = [
   '減価償却費', 'リース料', '保険料', '租税公課',
   '支払利息', '雑損失', '貸倒損失', '現金',
 ];
+
+// ── Props ─────────────────────────────────────────────────────
+const props = defineProps<{ direction: 'debit' | 'credit' }>();
+
+// ── Mode config ────────────────────────────────────────────────
+const isDebit = computed(() => props.direction === 'debit');
+const pageTitle = computed(() => isDebit.value ? '出金明細照合' : '入金明細照合');
+const pageDesc  = computed(() =>
+  isDebit.value
+    ? '銀行・カードの出金明細に勘定科目と証憑書類を紐付けて消込します'
+    : '銀行・カードの入金明細に勘定科目と発行請求書を紐付けて消込します'
+);
 
 // ── composables ──────────────────────────────────────────────
 const { transactions, fetchTransactions } = useTransactions();
@@ -67,14 +80,15 @@ const clearSearch = () => {
 };
 
 // ── filtered transactions ─────────────────────────────────────
+const txDirection = computed(() => props.direction);
 const unmatchedTxs = computed(() =>
-  transactions.value.filter(t => t.source_type === txTab.value && t.status === 'unmatched')
+  transactions.value.filter(t => t.source_type === txTab.value && t.status === 'unmatched' && t.transaction_type === txDirection.value)
 );
 const matchedTxs = computed(() =>
-  transactions.value.filter(t => t.source_type === txTab.value && t.status === 'matched')
+  transactions.value.filter(t => t.source_type === txTab.value && t.status === 'matched' && t.transaction_type === txDirection.value)
 );
 const transferredTxs = computed(() =>
-  transactions.value.filter(t => t.source_type === txTab.value && t.status === 'transferred')
+  transactions.value.filter(t => t.source_type === txTab.value && t.status === 'transferred' && t.transaction_type === txDirection.value)
 );
 const displayedTxs = computed(() => {
   let list = statusTab.value === 'matched' ? matchedTxs.value
@@ -94,8 +108,9 @@ const displayedTxs = computed(() => {
 });
 
 // ── 紐付け候補（未消込フォーム用・金額近い順）────────────────
+// 出金モードのみ：支払証明領収書
 const candidateReceipts = computed<ReceiptDoc[]>(() => {
-  if (!selectedTx.value) return [];
+  if (!selectedTx.value || !isDebit.value) return [];
   const targetAmt = selectedTx.value.amount;
   return [...receipts.value]
     .filter(r =>
@@ -109,9 +124,11 @@ const candidateReceipts = computed<ReceiptDoc[]>(() => {
 const candidateInvoices = computed<Invoice[]>(() => {
   if (!selectedTx.value) return [];
   const targetAmt = selectedTx.value.amount;
+  // 出金：受取請求書（支払うべき請求書）、入金：発行済み請求書（受け取るべき請求書）
+  const docType = isDebit.value ? 'received' : 'issued';
   return [...invoices.value]
     .filter(inv =>
-      inv.document_type === 'received' &&
+      inv.document_type === docType &&
       (inv.reconciliation_status === 'unreconciled' || !inv.reconciliation_status) &&
       (inv.approval_status === 'approved' || inv.approval_status === 'auto_approved')
     )
@@ -192,14 +209,21 @@ const selectMatchedTx = async (tx: Transaction) => {
     }
     matchDocuments.value = docs;
 
-    // 書類に紐づく監査ログを取得
+    // 監査ログ取得：取引レベル（常に）+ 書類レベル（紐付きがある場合）
     const events: any[] = [];
+
+    try {
+      const txEvs = await api.get<any[]>(`/approvals/audit-logs?transaction_id=${tx.id}`);
+      events.push(...txEvs);
+    } catch { /* skip */ }
+
     for (const docId of found.document_ids ?? []) {
       try {
-        const evs = await api.get<any[]>(`/approvals/events?document_id=${docId}`);
-        events.push(...evs);
+        const docEvs = await api.get<any[]>(`/approvals/audit-logs?document_id=${docId}`);
+        events.push(...docEvs);
       } catch { /* skip */ }
     }
+
     events.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
     auditEvents.value = events;
   } catch (e: any) {
@@ -312,19 +336,59 @@ const switchStatusTab = (tab: 'unmatched' | 'matched' | 'transferred') => {
 };
 
 // ── 監査イベントのラベル・スタイル ───────────────────────────
-const eventLabel = (action: string) => ({
-  submitted: '提出', approved: '承認', rejected: '差戻し',
-  returned: '返却', matched: '消込', unmatched: '消込取り消し',
-}[action] ?? action);
+// ── 監査ログ：セクション分割 ──────────────────────────────────
+const txAuditEvents = computed(() =>
+  auditEvents.value.filter(ev => ev.entity_type === 'transaction')
+);
+const docAuditEvents = computed(() =>
+  auditEvents.value.filter(ev => ev.entity_type !== 'transaction')
+);
+
+const eventLabel = (ev: any) => {
+  const labels: Record<string, string> = {
+    submitted: '登録・申請', approved: '承認', rejected: '差戻し',
+    returned: '返却', matched: '照合確定', unmatched: '照合取消',
+    uploaded: '書類登録',
+  };
+  return labels[ev.action] ?? ev.action;
+};
+
+const eventEntityLabel = (ev: any) => {
+  if (ev.entity_type === 'transaction') return '取引';
+  if (ev.document_type === 'receipt') return '領収書';
+  if (ev.document_type === 'invoice') return '請求書';
+  return '';
+};
 
 const eventStyle = (action: string) => ({
   submitted:  'bg-blue-100 text-blue-700',
+  uploaded:   'bg-blue-100 text-blue-700',
   approved:   'bg-emerald-100 text-emerald-700',
   rejected:   'bg-rose-100 text-rose-700',
   returned:   'bg-amber-100 text-amber-700',
   matched:    'bg-violet-100 text-violet-700',
   unmatched:  'bg-slate-100 text-slate-600',
 }[action] ?? 'bg-slate-100 text-slate-600');
+
+const eventIcon = (action: string) => ({
+  submitted:  FilePlus,
+  uploaded:   Upload,
+  approved:   UserCheck,
+  rejected:   UserX,
+  returned:   RotateCcw,
+  matched:    Link2,
+  unmatched:  Unlink,
+}[action] ?? FileText);
+
+const eventIconBg = (action: string) => ({
+  submitted:  'bg-blue-50 text-blue-500',
+  uploaded:   'bg-blue-50 text-blue-500',
+  approved:   'bg-emerald-50 text-emerald-500',
+  rejected:   'bg-rose-50 text-rose-500',
+  returned:   'bg-amber-50 text-amber-500',
+  matched:    'bg-violet-50 text-violet-500',
+  unmatched:  'bg-slate-100 text-slate-400',
+}[action] ?? 'bg-slate-100 text-slate-400');
 
 // ── 日時フォーマット ──────────────────────────────────────────
 const fmtDatetime = (iso: string) => {
@@ -336,10 +400,17 @@ const fmtDatetime = (iso: string) => {
 };
 
 onMounted(async () => {
+  const docFetches = props.direction === 'debit'
+    ? [
+        fetchReceipts({ receipt_type: 'payment_proof', reconciliation_status: 'unreconciled' }),
+        fetchInvoices({ document_type: 'received' }),
+      ]
+    : [
+        fetchInvoices({ document_type: 'issued' }),
+      ];
   await Promise.all([
     fetchTransactions({ source_type: 'bank' }),
-    fetchReceipts({ receipt_type: 'payment_proof', reconciliation_status: 'unreconciled' }),
-    fetchInvoices({ document_type: 'received' }),
+    ...docFetches,
   ]);
 });
 </script>
@@ -353,8 +424,8 @@ onMounted(async () => {
           <Link2 :size="20" />
         </div>
         <div>
-          <h1 class="text-2xl font-bold text-slate-900 tracking-tight">支払照合</h1>
-          <p class="text-sm text-slate-500 mt-0.5">銀行・カード明細に勘定科目を紐付けて消込します</p>
+          <h1 class="text-2xl font-bold text-slate-900 tracking-tight">{{ pageTitle }}</h1>
+          <p class="text-sm text-slate-500 mt-0.5">{{ pageDesc }}</p>
         </div>
       </div>
     </header>
@@ -594,11 +665,11 @@ onMounted(async () => {
                   <p class="text-sm font-medium text-slate-700 truncate">
                     {{ item.type === 'receipt'
                       ? (item.doc.payee || '（発行元不明）')
-                      : (item.doc.vendor_name || item.doc.client_name || '（取引先不明）') }}
+                      : (isDebit ? (item.doc.vendor_name || item.doc.client_name) : (item.doc.client_name || item.doc.vendor_name)) || '（取引先不明）' }}
                   </p>
                   <p class="text-xs text-slate-400">
                     {{ item.type === 'receipt' ? item.doc.date : (item.doc.issue_date || item.doc.due_date) }}
-                    · {{ item.type === 'receipt' ? '支払証明' : '受取請求書' }}
+                    · {{ item.type === 'receipt' ? '支払証明' : (isDebit ? '受取請求書' : '発行済み請求書') }}
                   </p>
                 </div>
               </div>
@@ -621,28 +692,79 @@ onMounted(async () => {
             </button>
           </div>
 
-          <!-- 監査タイムライン -->
-          <div v-if="auditEvents.length > 0" class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <div class="flex items-center gap-2 text-sm font-bold text-slate-700 mb-4">
+          <!-- 監査ログ -->
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="flex items-center gap-2 px-6 py-4 border-b border-slate-100">
               <Clock :size="14" class="text-slate-400" />
-              承認・消込履歴
+              <span class="text-sm font-bold text-slate-700">監査ログ</span>
             </div>
-            <div class="relative">
-              <div class="absolute left-3 top-0 bottom-0 w-px bg-slate-200" />
-              <div v-for="(ev, i) in auditEvents" :key="i" class="relative flex items-start gap-4 mb-4 last:mb-0">
-                <div class="w-6 h-6 rounded-full bg-white border-2 border-slate-200 flex items-center justify-center shrink-0 z-10">
-                  <div class="w-2 h-2 rounded-full bg-slate-400" />
-                </div>
-                <div class="flex-1 min-w-0 pt-0.5">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full', eventStyle(ev.action)]">
-                      {{ eventLabel(ev.action) }}
-                    </span>
-                    <span class="text-xs text-slate-500">{{ fmtDatetime(ev.timestamp) }}</span>
+
+            <div v-if="auditEvents.length === 0" class="px-6 py-8 text-sm text-slate-400 text-center">
+              ログがありません
+            </div>
+
+            <div v-else class="divide-y divide-slate-100">
+
+              <!-- 消込明細の履歴 -->
+              <div class="px-6 py-4">
+                <div class="flex items-center gap-2 mb-4">
+                  <div class="w-6 h-6 rounded-md bg-violet-100 text-violet-600 flex items-center justify-center">
+                    <ArrowRightLeft :size="12" />
                   </div>
-                  <p v-if="ev.comment" class="text-xs text-slate-500 mt-1">{{ ev.comment }}</p>
+                  <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">消込明細の履歴</span>
+                </div>
+                <div v-if="txAuditEvents.length === 0" class="text-xs text-slate-400 italic pl-2">記録なし</div>
+                <div v-else class="relative">
+                  <div class="absolute left-3 top-0 bottom-0 w-px bg-slate-100" />
+                  <div v-for="(ev, i) in txAuditEvents" :key="i" class="relative flex items-start gap-3 mb-3 last:mb-0">
+                    <div :class="['w-6 h-6 rounded-full flex items-center justify-center shrink-0 z-10', eventIconBg(ev.action)]">
+                      <component :is="eventIcon(ev.action)" :size="12" />
+                    </div>
+                    <div class="flex-1 min-w-0 pt-0.5">
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full', eventStyle(ev.action)]">
+                          {{ eventLabel(ev) }}
+                        </span>
+                        <span class="text-xs text-slate-400">{{ fmtDatetime(ev.timestamp) }}</span>
+                      </div>
+                      <p v-if="ev.account_subject" class="text-xs text-slate-500 mt-1">科目：{{ ev.account_subject }}</p>
+                      <p v-if="ev.comment" class="text-xs text-slate-400 mt-0.5">{{ ev.comment }}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
+
+              <!-- 紐付き書類の履歴 -->
+              <div class="px-6 py-4">
+                <div class="flex items-center gap-2 mb-4">
+                  <div class="w-6 h-6 rounded-md bg-blue-100 text-blue-600 flex items-center justify-center">
+                    <FileText :size="12" />
+                  </div>
+                  <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">紐付き書類の履歴</span>
+                </div>
+                <div v-if="docAuditEvents.length === 0" class="text-xs text-slate-400 italic pl-2">記録なし</div>
+                <div v-else class="relative">
+                  <div class="absolute left-3 top-0 bottom-0 w-px bg-slate-100" />
+                  <div v-for="(ev, i) in docAuditEvents" :key="i" class="relative flex items-start gap-3 mb-3 last:mb-0">
+                    <div :class="['w-6 h-6 rounded-full flex items-center justify-center shrink-0 z-10', eventIconBg(ev.action)]">
+                      <component :is="eventIcon(ev.action)" :size="12" />
+                    </div>
+                    <div class="flex-1 min-w-0 pt-0.5">
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span :class="['text-[11px] font-bold px-2 py-0.5 rounded-full', eventStyle(ev.action)]">
+                          {{ eventLabel(ev) }}
+                        </span>
+                        <span class="text-xs text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">
+                          {{ ev.document_type === 'receipt' ? '領収書' : '請求書' }}
+                        </span>
+                        <span class="text-xs text-slate-400">{{ fmtDatetime(ev.timestamp) }}</span>
+                      </div>
+                      <p v-if="ev.comment" class="text-xs text-slate-400 mt-0.5">{{ ev.comment }}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
 
@@ -725,8 +847,8 @@ onMounted(async () => {
               書類を紐付ける <span class="text-slate-400 font-normal text-xs ml-1">任意 · 1件まで</span>
             </p>
 
-            <!-- 支払証明領収書 -->
-            <div class="mb-4">
+            <!-- 支払証明領収書（出金モードのみ） -->
+            <div v-if="isDebit" class="mb-4">
               <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">支払証明（領収書）</p>
               <div v-if="candidateReceipts.length === 0" class="text-sm text-slate-400 italic py-2">該当する支払証明はありません</div>
               <div
@@ -757,10 +879,14 @@ onMounted(async () => {
               </div>
             </div>
 
-            <!-- 受取請求書 -->
+            <!-- 請求書（出金：受取請求書 / 入金：発行済み請求書） -->
             <div>
-              <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">受取請求書</p>
-              <div v-if="candidateInvoices.length === 0" class="text-sm text-slate-400 italic py-2">未消込の受取請求書はありません</div>
+              <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                {{ isDebit ? '受取請求書' : '発行済み請求書' }}
+              </p>
+              <div v-if="candidateInvoices.length === 0" class="text-sm text-slate-400 italic py-2">
+                {{ isDebit ? '未消込の受取請求書はありません' : '未消込の発行済み請求書はありません' }}
+              </div>
               <div
                 v-for="inv in candidateInvoices.slice(0, 5)"
                 :key="inv.id"
@@ -776,7 +902,7 @@ onMounted(async () => {
                     <FileText :size="14" />
                   </div>
                   <div class="min-w-0">
-                    <p class="text-sm font-medium text-slate-800 truncate">{{ inv.vendor_name || inv.client_name || '（取引先不明）' }}</p>
+                    <p class="text-sm font-medium text-slate-800 truncate">{{ isDebit ? (inv.vendor_name || inv.client_name) : (inv.client_name || inv.vendor_name) || '（取引先不明）' }}</p>
                     <p class="text-xs text-slate-400">{{ inv.issue_date || inv.due_date }}</p>
                   </div>
                 </div>

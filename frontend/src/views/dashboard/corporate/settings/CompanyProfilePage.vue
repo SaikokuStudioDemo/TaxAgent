@@ -1,10 +1,42 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { Plus, Edit2, Trash2, Building2, CheckCircle } from 'lucide-vue-next';
+import { Plus, Edit2, Trash2, Building2, CheckCircle, Link } from 'lucide-vue-next';
 import { useCompanyProfiles, type CompanyProfile } from '@/composables/useCompanyProfiles';
 import BankAccountSection from '@/components/shared/BankAccountSection.vue';
+import { useAuth } from '@/composables/useAuth';
 
 const { profiles, isLoading: profilesLoading, fetchProfiles, createProfile, updateProfile, deleteProfile } = useCompanyProfiles();
+const { userProfile, getToken } = useAuth();
+
+// 税理士法人との紐付けリクエスト
+const taxFirmEmail = ref('');
+const isRequestingLinkage = ref(false);
+const linkageRequestSent = ref(false);
+
+const requestLinkage = async () => {
+  if (!taxFirmEmail.value) return;
+  isRequestingLinkage.value = true;
+  try {
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+    const token = await getToken();
+    const res = await fetch(`${apiUrl}/invitations/linkage-request`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ tax_firm_email: taxFirmEmail.value })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      alert(err.detail || 'エラーが発生しました');
+      return;
+    }
+    linkageRequestSent.value = true;
+  } finally {
+    isRequestingLinkage.value = false;
+  }
+};
 
 // Profile modal state
 const isProfileModalOpen = ref(false);
@@ -139,6 +171,38 @@ const removeProfile = async (id: string) => {
         <!-- Bank Accounts Section -->
         <div class="p-5">
           <BankAccountSection owner-type="corporate" :profile-id="profile.id" />
+        </div>
+      </div>
+    </div>
+
+    <!-- 税理士法人との連携セクション（未紐付けの場合のみ表示） -->
+    <div v-if="userProfile && !userProfile.advising_tax_firm_id" class="mt-10 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      <div class="p-5 border-b border-gray-100 bg-gray-50 flex items-center gap-3">
+        <Link :size="20" class="text-indigo-500 shrink-0" />
+        <div>
+          <h3 class="font-bold text-gray-900">税理士法人との連携</h3>
+          <p class="text-sm text-gray-500 mt-0.5">担当税理士法人のメールアドレスを入力すると、承認リクエストを送信します。税理士法人が承認するとデータの共有が開始されます。</p>
+        </div>
+      </div>
+      <div class="p-5">
+        <div v-if="linkageRequestSent" class="flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
+          <CheckCircle :size="18" class="shrink-0 mt-0.5" />
+          <p>承認リクエストを送信しました。税理士法人からの承認をお待ちください。</p>
+        </div>
+        <div v-else class="flex gap-3">
+          <input
+            v-model="taxFirmEmail"
+            type="email"
+            placeholder="tax-firm@example.com"
+            class="flex-1 border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+          />
+          <button
+            @click="requestLinkage"
+            :disabled="isRequestingLinkage || !taxFirmEmail"
+            class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+          >
+            {{ isRequestingLinkage ? '送信中...' : '連携リクエストを送信する' }}
+          </button>
         </div>
       </div>
     </div>

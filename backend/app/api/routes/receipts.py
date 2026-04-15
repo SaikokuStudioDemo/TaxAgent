@@ -9,6 +9,7 @@ from app.api.helpers import (
     parse_oid,
     get_doc_or_404,
     build_list_query,
+    build_scope_filter,
     enrich_with_approval_history,
     build_name_map,
 )
@@ -88,7 +89,7 @@ async def submit_receipts_batch(
     result = await ctx.db["receipts"].insert_many(docs_to_insert)
 
     for oid in result.inserted_ids:
-        await ctx.db["approval_events"].insert_one({
+        await ctx.db["audit_logs"].insert_one({
             "corporate_id": ctx.corporate_id,
             "document_type": "receipt",
             "document_id": str(oid),
@@ -156,6 +157,9 @@ async def list_receipts(
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     query = build_list_query(ctx.corporate_id, approval_status=approval_status, fiscal_period=fiscal_period)
+    scope = build_scope_filter(ctx)
+    if scope:
+        query.update(scope)
     if submitted_by == "me":
         query["submitted_by"] = ctx.user_id
     if reconciliation_status:

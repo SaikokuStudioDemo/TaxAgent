@@ -27,12 +27,12 @@ async def clean_collections():
     """Clear test collections before each test."""
     db = get_database()
     for col in ["corporates", "employees", "receipts", "invoices",
-                "approval_rules", "approval_events", "notifications",
+                "approval_rules", "audit_logs", "notifications",
                 "bank_transactions", "matches"]:
         await db[col].delete_many({})
     yield
     for col in ["corporates", "employees", "receipts", "invoices",
-                "approval_rules", "approval_events", "notifications",
+                "approval_rules", "audit_logs", "notifications",
                 "bank_transactions", "matches"]:
         await db[col].delete_many({})
 

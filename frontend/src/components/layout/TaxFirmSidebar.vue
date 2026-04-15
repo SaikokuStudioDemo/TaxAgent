@@ -1,39 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { Home, Users, Settings, LogOut, ArrowRightLeft, BookText } from 'lucide-vue-next';
 import { useAuth } from '@/composables/useAuth';
 
 const route = useRoute();
-const { currentUser, getToken, signOut } = useAuth();
-const companyName = ref('読込中...');
-const role = ref('管理者');
-
-onMounted(async () => {
-    if (!currentUser.value) return;
-    try {
-        const token = await getToken();
-        if (token) {
-             const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
-             const response = await fetch(`${apiUrl}/users/me`, {
-                 headers: { 'Authorization': `Bearer ${token}` }
-             });
-             if (response.ok) {
-                 const resData = await response.json();
-                 if (resData.data?.companyName) {
-                     companyName.value = resData.data.companyName;
-                 }
-                 if (resData.type === 'employee') {
-                     companyName.value = resData.data?.name || 'ユーザー';
-                     role.value = resData.data?.role === 'admin' ? '管理者' : 'スタッフ';
-                 }
-             }
-        }
-    } catch (err) {
-        console.error("Failed to fetch profile", err);
-        companyName.value = 'エラー';
-    }
-});
+const { signOut, displayName, displayRole } = useAuth();
 
 const isActive = (path: string) => {
     if (path === '/dashboard/tax-firm' && route.path === '/dashboard/tax-firm') return true;
@@ -105,11 +76,11 @@ const isActive = (path: string) => {
     <div class="p-4 border-t border-gray-200">
       <div class="flex items-center gap-3">
         <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold uppercase">
-          {{ companyName !== '読込中...' ? companyName.charAt(0) : '-' }}
+          {{ displayName !== '読込中...' ? displayName.charAt(0) : '-' }}
         </div>
         <div class="overflow-hidden">
-          <p class="text-sm font-bold text-gray-900 truncate" :title="companyName">{{ companyName }}</p>
-          <p class="text-xs text-gray-500">{{ role }}</p>
+          <p class="text-sm font-bold text-gray-900 truncate" :title="displayName">{{ displayName }}</p>
+          <p class="text-xs text-gray-500">{{ displayRole }}</p>
         </div>
       </div>
     </div>

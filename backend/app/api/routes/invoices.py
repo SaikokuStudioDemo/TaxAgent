@@ -10,6 +10,7 @@ from app.api.helpers import (
     parse_oid,
     get_doc_or_404,
     build_list_query,
+    build_scope_filter,
     enrich_with_approval_history,
     build_name_map,
 )
@@ -103,7 +104,7 @@ async def create_invoice(
     doc = docs[0]
 
     result = await ctx.db["invoices"].insert_one(doc)
-    await ctx.db["approval_events"].insert_one({
+    await ctx.db["audit_logs"].insert_one({
         "corporate_id": ctx.corporate_id,
         "document_type": "invoice",
         "document_id": str(result.inserted_id),
@@ -133,6 +134,9 @@ async def list_invoices(
         fiscal_period=fiscal_period,
     )
     query["is_deleted"] = {"$ne": True}
+    scope = build_scope_filter(ctx)
+    if scope:
+        query.update(scope)
     if reconciliation_status:
         query["reconciliation_status"] = reconciliation_status
     if submitted_by == "me":
