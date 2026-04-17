@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 from datetime import datetime
 from bson import ObjectId
+from pydantic import BaseModel
 
 from app.api.helpers import (
     serialize_doc as _serialize,
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 from app.api.routes.templates import router as templates_router
+from app.services.duplicate_detector import check_duplicate_invoice
 router.include_router(templates_router, prefix="/templates", tags=["invoice-templates"])
 
 
@@ -275,3 +277,35 @@ async def bulk_action(
         raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
 
     return {"status": "success", "action": action, "count": len(ids)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task#25：二重計上チェックエンドポイント
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CheckDuplicateInvoiceRequest(BaseModel):
+    issue_date: str
+    total_amount: int
+    client_name: str
+    document_type: str  # "issued" | "received"
+    exclude_id: Optional[str] = None
+
+
+@router.post("/check-duplicate", summary="請求書の二重計上チェックを行う")
+async def check_duplicate_invoice_endpoint(
+    payload: CheckDuplicateInvoiceRequest,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    """
+    登録前の事前確認用エンドポイント。
+    同日・同金額・同取引先の請求書が既に存在するか確認する。
+    DB への書き込みは行わない（読み取りのみ）。
+    """
+    return await check_duplicate_invoice(
+        corporate_id=ctx.corporate_id,
+        issue_date=payload.issue_date,
+        total_amount=payload.total_amount,
+        client_name=payload.client_name,
+        document_type=payload.document_type,
+        exclude_id=payload.exclude_id,
+    )

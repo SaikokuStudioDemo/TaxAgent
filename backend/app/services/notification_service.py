@@ -85,6 +85,69 @@ async def notify_next_approver(
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# メール送信プレースホルダー（Task#23）
+# 実際の送信は Task#47（メール送信インフラ選定後）に実装する。
+# 現時点ではログ出力のみ行い、DB 通知記録は create_notification が担う。
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def send_email_notification(
+    recipient_email: str,
+    subject: str,
+    body: str,
+) -> bool:
+    """
+    メール送信のプレースホルダー。
+    実際の送信は Task#47（SendGrid / Resend 等のインフラ選定後）に差し替える。
+    現時点ではログ出力のみ。戻り値は常に True（送信試行成功扱い）。
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    if not recipient_email:
+        return False
+
+    logger.info(
+        f"[EMAIL PLACEHOLDER] To: {recipient_email} | Subject: {subject}"
+    )
+    # TODO: Task#47 で SendGrid / Resend 等に差し替える
+    return True
+
+
+async def create_notification_with_email(
+    corporate_id: str,
+    notification_type: str,
+    recipient_employee_id: str,
+    recipient_email: str,
+    related_document_type: str,
+    related_document_id: str,
+    message: str,
+) -> None:
+    """
+    通知を DB に記録し、メール送信プレースホルダーも呼ぶ。
+    アラートバッチから将来この関数に差し替えることで
+    メール送信を一括で有効化できる。
+
+    現状: create_notification（DB記録） + send_email_notification（ログのみ）
+    将来: send_email_notification 内を実メール送信に差し替えるだけで完了。
+    """
+    await create_notification(
+        corporate_id=corporate_id,
+        notification_type=notification_type,
+        recipient_employee_id=recipient_employee_id,
+        recipient_email=recipient_email,
+        related_document_type=related_document_type,
+        related_document_id=related_document_id,
+        message=message,
+    )
+    subject = f"【Tax-Agent】{message[:30]}..."
+    await send_email_notification(
+        recipient_email=recipient_email,
+        subject=subject,
+        body=message,
+    )
+
+
 async def notify_submitter(
     corporate_id: str,
     document_type: str,

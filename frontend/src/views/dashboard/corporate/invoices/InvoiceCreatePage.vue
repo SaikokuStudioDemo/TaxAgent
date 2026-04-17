@@ -42,85 +42,11 @@ interface LineItem {
     taxRate: number;
 }
 
-const defaultHtml = `
-<div style="font-family: 'Helvetica', sans-serif; padding: 60px; color: #1e293b; background: white; max-width: 800px; margin: auto;">
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 60px;">
-        <div>
-            <h1 style="font-size: 3rem; font-weight: 800; color: #2563eb; margin: 0; letter-spacing: -0.05em;">INVOICE</h1>
-            <p style="color: #64748b; font-weight: 600; margin-top: 4px;">No. {{ invoice_number }}</p>
-        </div>
-        <div style="text-align: right;">
-            <p style="font-size: 1.25rem; font-weight: 700; margin: 0;">{{ client_name }} 御中</p>
-            <div style="color: #64748b; font-size: 0.875rem; margin-top: 8px; line-height: 1.6;">
-                {{ client_details }}
-            </div>
-        </div>
-    </div>
+// ⑥ モックデータを削除。テンプレートは API から動的取得する。
+const templates = ref<InvoiceTemplate[]>([]);
 
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-bottom: 60px;">
-        <div>
-            <p style="text-transform: uppercase; font-size: 0.75rem; font-weight: 700; color: #94a3b8; letter-spacing: 0.1em; margin-bottom: 8px;">Dates</p>
-            <p style="margin: 0; font-weight: 600;">Issued: {{ issue_date }}</p>
-            <p style="margin: 4px 0 0 0; font-weight: 600;">Due: {{ due_date }}</p>
-        </div>
-        <div style="text-align: right;">
-            <p style="text-transform: uppercase; font-size: 0.75rem; font-weight: 700; color: #94a3b8; letter-spacing: 0.1em; margin-bottom: 8px;">From</p>
-            <p style="margin: 0; font-weight: 600;">{{ sender_name }}</p>
-            <div style="color: #64748b; font-size: 0.875rem; margin-top: 4px; line-height: 1.6;">
-                {{ sender_details }}
-            </div>
-        </div>
-    </div>
-
-    <div style="border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; margin-bottom: 40px;">
-        <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-                <tr style="background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-                    <th style="padding: 16px; text-align: left; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Description</th>
-                    <th style="padding: 16px; text-align: right; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Qty</th>
-                    <th style="padding: 16px; text-align: right; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Price</th>
-                    <th style="padding: 16px; text-align: right; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Total</th>
-                </tr>
-            </thead>
-            <tbody>
-                {{ item_list }}
-            </tbody>
-        </table>
-    </div>
-
-    <div style="display: flex; justify-content: flex-end; margin-bottom: 60px;">
-        <div style="width: 300px;">
-            <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f1f5f9; color: #64748b;">
-                <span>Subtotal</span>
-                <span>¥{{ subtotal }}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f1f5f9; color: #64748b;">
-                <span>Tax (10%)</span>
-                <span>¥{{ tax_amount }}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; padding: 16px 0; font-size: 1.5rem; font-weight: 800; color: #0f172a;">
-                <span>Total</span>
-                <span>¥{{ total_amount }}</span>
-            </div>
-        </div>
-    </div>
-
-    <div style="border-top: 2px solid #f1f5f9; padding-top: 40px;">
-        <p style="text-transform: uppercase; font-size: 0.75rem; font-weight: 700; color: #94a3b8; letter-spacing: 0.1em; margin-bottom: 12px;">Notes</p>
-        <p style="color: #475569; font-size: 0.875rem; line-height: 1.8;">{{ note }}</p>
-    </div>
-</div>
-`;
-
-const templates = ref<InvoiceTemplate[]>([
-    { id: 'T-001', name: '請求書A', description: '標準的でプロフェッショナルなレイアウト', thumbnail: 'bg-blue-50 border-blue-200', isActive: true, html: defaultHtml },
-    { id: 'T-002', name: '請求書B', description: 'シンプルでミニマルなデザイン', thumbnail: 'bg-gray-50 border-gray-200', isActive: false, html: defaultHtml.replace('#2563eb', '#1e293b').replace('INVOICE', 'BILLING') },
-    { id: 'T-003', name: '請求書C', description: '内訳が豊富な詳細フォーマット', thumbnail: 'bg-slate-50 border-slate-200', isActive: false, html: defaultHtml.replace('#2563eb', '#059669') },
-    { id: 'T-004', name: '請求書D', description: 'モダンでスタイリッシュな外観', thumbnail: 'bg-purple-50 border-purple-200', isActive: false, html: defaultHtml.replace('#2563eb', '#7c3aed') },
-]);
-
-const selectedTemplateId = ref('T-001');
-const templateHtml = ref(templates.value[0].html);
+const selectedTemplateId = ref('');
+const templateHtml = ref('');
 const templateName = ref('default_invoice_template.html');
 const latestExtractedHtml = ref('');
 const latestExtractedName = ref('');
@@ -395,23 +321,21 @@ const onDragEnd = () => {
 
 const fetchTemplates = async () => {
     try {
-        const dbTemplates = await api.get('/invoices/templates');
+        // ⑥ モックデータを排除し API から invoice テンプレートのみ取得
+        const dbTemplates = await api.get<any[]>('/invoices/templates?template_type=invoice');
         if (dbTemplates && Array.isArray(dbTemplates)) {
-            const builtInIds = ['T-001', 'T-002', 'T-003', 'T-004'];
-            const filteredDb = dbTemplates.filter((t: any) => !builtInIds.includes(t.id));
-            const formattedDb = filteredDb.map((t: any) => ({
+            templates.value = dbTemplates.map((t: any) => ({
                 id: t.id,
                 name: t.name,
-                description: t.description || 'AI生成テンプレート',
+                description: t.description || '',
                 thumbnail: t.thumbnail || 'bg-emerald-50 border-emerald-200',
                 isActive: t.is_active !== undefined ? t.is_active : true,
-                html: t.html
+                html: t.html || '',
             }));
-            templates.value = [...formattedDb, ...templates.value.filter(t => builtInIds.includes(t.id))];
-            
+
             sortTemplates();
-            
-            // 編集モードでなければ一番左（0番目）をデフォルト選択
+
+            // 編集モードでなければ先頭をデフォルト選択
             if (!editingInvoiceId.value && templates.value.length > 0) {
                 selectTemplate(templates.value[0].id);
             }
@@ -737,7 +661,14 @@ function handleClientSelection() {
                            <p class="text-[10px] text-blue-600 mt-2 text-center">レイアウトを抽出して<br>フォームブロックを生成</p>
                       </div>
 
-                      <div v-for="(templ, index) in templates" :key="templ.id" 
+                      <!-- ⑥ テンプレートが0件の場合のメッセージ -->
+                      <div v-if="templates.length === 0"
+                           class="w-[220px] shrink-0 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+                        <p class="text-sm text-slate-400">テンプレートがありません。</p>
+                        <p class="text-xs text-slate-400 mt-1">テンプレート管理から追加してください。</p>
+                      </div>
+
+                      <div v-for="(templ, index) in templates" :key="templ.id"
                            draggable="true"
                            @dragstart="onDragStart($event, index)"
                            @dragenter.prevent="onDragEnter(index)"

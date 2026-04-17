@@ -20,11 +20,6 @@ from app.models.master import MatchingPatternCreate
 router = APIRouter()
 
 
-def _serialize_pattern(doc: dict) -> dict:
-    doc = dict(doc)
-    doc["id"] = str(doc.pop("_id"))
-    return doc
-
 
 @router.get("", summary="マッチングパターン一覧を取得する")
 async def list_matching_patterns(
@@ -40,7 +35,7 @@ async def list_matching_patterns(
         query["client_id"] = client_id
 
     docs = await ctx.db["matching_patterns"].find(query).sort("created_at", -1).to_list(length=5000)
-    return [_serialize_pattern(d) for d in docs]
+    return [_serialize(d) for d in docs]
 
 
 @router.post("", summary="マッチングパターンを手動追加する")
@@ -68,7 +63,7 @@ async def create_matching_pattern(
     }
     result = await ctx.db["matching_patterns"].insert_one(doc)
     created = await ctx.db["matching_patterns"].find_one({"_id": result.inserted_id})
-    return _serialize_pattern(created)
+    return _serialize(created)
 
 
 @router.delete("/{pattern_id}", summary="マッチングパターンを削除する")

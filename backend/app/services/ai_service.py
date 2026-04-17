@@ -1,5 +1,7 @@
 import os
 import logging
+import anthropic
+from anthropic._exceptions import OverloadedError as AnthropicOverloadedError
 import google.generativeai as genai
 from typing import List, Optional, Dict, Any
 from app.core.config import settings
@@ -13,11 +15,38 @@ if api_key:
 else:
     logger.warning("GOOGLE_API_KEY not found in settings.")
 
+# Warn if Anthropic API key is missing
+if not settings.ANTHROPIC_API_KEY:
+    logger.warning("ANTHROPIC_API_KEY not found in settings.")
+
 # Model aliases
 MODELS = {
     "pro": "gemini-2.5-pro",
     "flash": "gemini-2.5-flash",
 }
+
+def _format_pending_documents(docs: list) -> str:
+    """未承認書類リストを日本語文字列にフォーマットする。"""
+    if not docs:
+        return "なし"
+    lines = []
+    for d in docs:
+        lines.append(
+            f"- {d['type']} {d['amount']:,}円"
+            f"（{d['submitter_name']}・{d['date']}・{d['pending_days']}日経過・document_id:{d['id']}）"
+        )
+    return "\n".join(lines)
+
+
+def _format_recent_deposits(deposits: list) -> str:
+    """未消込入金リストを日本語文字列にフォーマットする。"""
+    if not deposits:
+        return "なし"
+    lines = []
+    for d in deposits:
+        lines.append(f"- {d['date']} {d['description']} {d['amount']:,}円 transaction_id:{d['id']}")
+    return "\n".join(lines)
+
 
 class AIService:
     @staticmethod
@@ -82,34 +111,130 @@ class AIService:
     @staticmethod
     async def chat_advisor(query: str, context: Dict[str, Any]) -> str:
         """
-        High-level chat advisor using Gemini 3.1 Pro.
-        Injects corporate context (RAM/DB data) to provide accurate answers.
+        Claude Sonnet を使ったチャットアドバイザー。
+        コーポレートコンテキスト（RAMデータ）を注入して回答を生成する。
         """
-        model = genai.GenerativeModel(MODELS["pro"])
-        
-        system_instruction = f"""
-        あなたは「Tax-Agent」の専属AIアドバイザーです。
-        ユーザーは企業の経理担当者または経営者です。
+        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-        以下の制約を厳守してください：
-        1. 提供された「コーポレート・コンテキスト」に基づいた情報のみを事実として扱ってください。
-        2. 他の企業のデータや無関係な情報を捏造しないでください。
-        3. 質問がコーポレート・コンテキストの範囲外で、法令・税務の専門知識が必要な場合は、回答せずに必ず「[[LAW_AGENT_REQUIRED]]」とだけ返してください。それ以外の文言は一切含めないでください。
+        system_prompt = f"""あなたは「Tax-Agent」の専属AIアドバイザーです。
+ユーザーは企業の経理担当者または経営者です。
 
-        【コーポレート・コンテキスト】
-        会社名: {context.get('company_name')}
-        現在のステータス:
-        - 承認待ちの請求書: {context.get('pending_invoices_count')}件
-        - 未一致の銀行明細: {context.get('unmatched_transactions_count')}件
-        - 直近のキャッシュフローアラート: {context.get('alerts')}
-        """
-        
+【回答スタイル】
+- 未承認書類を列挙する場合は番号付きリストで表示すること
+  例：1. 領収書 ¥3,200（田中さん・4/10）
+      2. 受領請求書 ¥55,000（株式会社A・4/8）
+- 金額は必ず ¥xxx,xxx 形式で表示すること
+- 書類のリストは「日付・金額・提出者」を必ず含めること
+- 短く簡潔に、要点を絞って回答すること
+- 選択肢は最大4つ＋「その他」の形式で提示すること
+
+以下の制約を厳守してください：
+1. 提供された「コーポレート・コンテキスト」に基づいた情報のみを事実として扱ってください。
+2. 他の企業のデータや無関係な情報を捏造しないでください。
+3. 質問がコーポレート・コンテキストの範囲外で、法令・税務の専門知識が必要な場合は、
+   回答せずに必ず「[[LAW_AGENT_REQUIRED]]」とだけ返してください。
+   それ以外の文言は一切含めないでください。
+4. 解釈が分かれる複雑な税務判断や、個別の事業状況に依存する判断が必要な場合は、
+   回答せずに必ず「[[TAX_ADVISOR_REQUIRED]]」とだけ返してください。
+   それ以外の文言は一切含めないでください。
+   例：「この取引が課税対象かどうかは個別判断が必要です」のような場合。
+
+【コーポレート・コンテキスト】
+会社名: {context.get('company_name')}
+今月の締め日まで: {context.get('days_until_month_end')}日
+
+【未承認の書類】(直近最大5件を表示。実際の件数は画面でご確認ください)
+{_format_pending_documents(context.get('pending_documents', []))}
+
+【承認済み・未消込の領収書】({context.get('approved_unreconciled_receipts_count', 0)}件)
+
+【未消込の入金】({context.get('unmatched_transactions_count', 0)}件)
+{_format_recent_deposits(context.get('recent_deposits', []))}
+
+【直近のアラート】
+{context.get('alerts')}
+
+【実行可能なツール】
+ユーザーから以下の操作を依頼された場合は、必ず [[TOOL:...]] 形式で応答すること。
+テキストだけで「承認しました」「登録しました」と言ってはいけない。
+
+■ approve_document（承認・差し戻し）
+ユーザーが書類の承認や差し戻しを依頼した場合：
+[[TOOL:approve_document]]
+{{書類の概要}}を{{承認/差し戻し}}しますか？
+[[/TOOL]]
+[[TOOL_PAYLOAD:{{"document_type":"receipt","document_id":"...","action":"approved","comment":null}}]]
+
+■ submit_expense_claim（経費申請）
+ユーザーが経費申請の登録を依頼した場合：
+[[TOOL:submit_expense_claim]]
+以下の内容で経費申請を登録しますか？
+{{申請内容のサマリー}}
+[[/TOOL]]
+[[TOOL_PAYLOAD:{{"date":"...","amount":0,"payee":"...","category":"...","payment_method":"...","tax_rate":10,"fiscal_period":""}}]]
+
+■ send_invoice（請求書送付）
+[[TOOL:send_invoice]]
+請求書（{{client_name}}・¥{{amount}}）を送付しますか？
+[[/TOOL]]
+[[TOOL_PAYLOAD:{{"invoice_id":"..."}}]]
+
+■ execute_reconciliation（消込）
+[[TOOL:execute_reconciliation]]
+取引（¥{{amount}}）と{{n}}件の書類を消込しますか？
+[[/TOOL]]
+[[TOOL_PAYLOAD:{{"transaction_ids":["..."],"document_ids":["..."],"match_type":"receipt","fiscal_period":""}}]]
+
+■ notify_tax_advisor（税理士通知）
+[[TOOL:notify_tax_advisor]]
+以下を税理士に送信しますか？
+{{message}}
+[[/TOOL]]
+[[TOOL_PAYLOAD:{{"message":"...","priority":"normal"}}]]
+
+■ export_csv（CSV出力）
+[[TOOL:export_csv]]
+{{format_type}}形式のCSVを出力しますか？
+[[/TOOL]]
+[[TOOL_PAYLOAD:{{"format_type":"freee","doc_type":"all","fiscal_period":"..."}}]]
+
+■ export_zengin（全銀出力）
+[[TOOL:export_zengin]]
+全銀データを出力しますか？
+[[/TOOL]]
+[[TOOL_PAYLOAD:{{"fiscal_period":"..."}}]]
+
+【ツール使用の重要なルール】
+- document_id が不明な場合は、まずユーザーに確認するかコンテキストから特定してから [[TOOL:...]] を使うこと
+- 操作内容が不明確な場合はユーザーに確認してから [[TOOL:...]] を使うこと
+- [[TOOL:...]] 形式以外で「承認しました」「登録しました」と言ってはいけない
+- 1回の応答で使用するツールは1つまでにすること
+- [[TOOL:...]] を返した後は、実行が完了したと仮定して次のアクションを促すこと
+  例：「承認後、残りの未承認書類の対応に移りますか？」のような次のステップを提示すること
+- 操作完了後は残タスクのサマリーを簡潔に示すこと
+  例：「残り3件の未承認書類があります。続けますか？」"""
+
         try:
-            chat = model.start_chat(history=[])
-            response = chat.send_message(f"{system_instruction}\n\nユーザーの質問: {query}")
-            return str(response.text)
+            message = await client.messages.create(
+                model=settings.DEFAULT_AI_MODEL,
+                max_tokens=1024,
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": query}
+                ]
+            )
+            return message.content[0].text
+        except AnthropicOverloadedError as e:
+            logger.error(f"Claude API overloaded: {e}")
+            return "現在AIサーバーが混み合っています。少し時間をおいて再度お試しください。"
+        except anthropic.RateLimitError as e:
+            logger.error(f"Claude API rate limit: {e}")
+            return "リクエストが集中しています。しばらくお待ちください。"
+        except anthropic.APIError as e:
+            logger.error(f"Claude API error: {e}")
+            return "AIサービスで一時的な問題が発生しています。しばらくお待ちください。"
         except Exception as e:
-            logger.error(f"Error in Chat Advisor: {e}")
+            logger.error(f"Error in chat_advisor: {e}")
             return "申し訳ありません。現在アドバイザー機能が一時的に利用できません。"
     @staticmethod
     async def generate_invoice_html_template(file_path: str) -> Optional[Dict[str, Any]]:

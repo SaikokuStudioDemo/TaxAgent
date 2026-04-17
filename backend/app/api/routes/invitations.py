@@ -7,6 +7,7 @@ import uuid
 
 from firebase_admin import auth as firebase_auth
 from app.api.deps import get_current_user
+from app.api.helpers import verify_tax_firm
 from app.db.mongodb import get_database
 
 router = APIRouter()
@@ -40,9 +41,7 @@ async def create_invitation(
         raise HTTPException(status_code=400, detail="Invalid auth token")
 
     # 呼び出し元が tax_firm であることを確認
-    corporate = await db["corporates"].find_one({"firebase_uid": firebase_uid})
-    if not corporate or corporate.get("corporateType") != "tax_firm":
-        raise HTTPException(status_code=403, detail="招待トークンの発行は税理士法人のみ可能です")
+    corporate = await verify_tax_firm(firebase_uid, db)
 
     token = str(uuid.uuid4())
     expires_at = datetime.utcnow() + timedelta(days=7)

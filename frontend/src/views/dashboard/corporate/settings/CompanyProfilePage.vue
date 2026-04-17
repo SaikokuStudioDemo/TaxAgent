@@ -1,12 +1,31 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { Plus, Edit2, Trash2, Building2, CheckCircle, Link } from 'lucide-vue-next';
+import { Plus, Edit2, Trash2, Building2, CheckCircle, Link, AlertTriangle } from 'lucide-vue-next';
 import { useCompanyProfiles, type CompanyProfile } from '@/composables/useCompanyProfiles';
 import BankAccountSection from '@/components/shared/BankAccountSection.vue';
 import { useAuth } from '@/composables/useAuth';
+import { api } from '@/lib/api';
 
 const { profiles, isLoading: profilesLoading, fetchProfiles, createProfile, updateProfile, deleteProfile } = useCompanyProfiles();
-const { userProfile, getToken } = useAuth();
+const { userProfile, getToken, isAdmin, signOut } = useAuth();
+
+// ── 解約機能 ──────────────────────────────────────────────────────────────
+const showCancelDialog = ref(false);
+const isCancelling = ref(false);
+const cancelError = ref<string | null>(null);
+
+const handleCancel = async () => {
+  isCancelling.value = true;
+  cancelError.value = null;
+  try {
+    await api.post('/users/cancel', {});
+    // 解約成功 → 即座にログアウトしてトップページへ
+    await signOut();
+  } catch (e: any) {
+    cancelError.value = e.message ?? '解約処理に失敗しました。もう一度お試しください。';
+    isCancelling.value = false;
+  }
+};
 
 // 税理士法人との紐付けリクエスト
 const taxFirmEmail = ref('');
@@ -258,4 +277,85 @@ const removeProfile = async (id: string) => {
       </div>
     </div>
   </div>
+
+  <!-- ══════════════════════════════════════════════════════ -->
+  <!-- 危険ゾーン（admin のみ表示）                             -->
+  <!-- ══════════════════════════════════════════════════════ -->
+  <div v-if="isAdmin" class="max-w-4xl mx-auto px-6 pb-10">
+    <div class="border border-red-200 rounded-xl overflow-hidden">
+      <div class="bg-red-50 px-6 py-4 flex items-center gap-2 border-b border-red-200">
+        <AlertTriangle class="text-red-500 shrink-0" :size="18" />
+        <h2 class="text-base font-bold text-red-700">危険ゾーン</h2>
+      </div>
+      <div class="px-6 py-5 bg-white">
+        <div class="flex items-start justify-between gap-6">
+          <div>
+            <p class="text-sm font-semibold text-slate-800">サービスの解約</p>
+            <p class="text-xs text-slate-500 mt-1">
+              解約すると、サービスへのアクセスができなくなります。データは保持されます。
+            </p>
+          </div>
+          <button
+            @click="showCancelDialog = true"
+            class="shrink-0 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
+          >
+            サービスを解約する
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 解約確認ダイアログ ───────────────────────────────── -->
+  <Teleport to="body">
+    <div
+      v-if="showCancelDialog"
+      class="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+    >
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+            <AlertTriangle class="text-red-600" :size="20" />
+          </div>
+          <h3 class="text-lg font-bold text-slate-800">本当に解約しますか？</h3>
+        </div>
+
+        <ul class="text-sm text-slate-600 space-y-2 mb-5 ml-2">
+          <li class="flex items-start gap-2">
+            <span class="text-red-400 mt-0.5">・</span>
+            サービスへのアクセスができなくなります
+          </li>
+          <li class="flex items-start gap-2">
+            <span class="text-slate-400 mt-0.5">・</span>
+            データは保持されます
+          </li>
+          <li class="flex items-start gap-2">
+            <span class="text-slate-400 mt-0.5">・</span>
+            再契約はサポートにお問い合わせください
+          </li>
+        </ul>
+
+        <div v-if="cancelError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+          {{ cancelError }}
+        </div>
+
+        <div class="flex gap-3 justify-end">
+          <button
+            @click="showCancelDialog = false; cancelError = null"
+            :disabled="isCancelling"
+            class="px-4 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+          >
+            キャンセル
+          </button>
+          <button
+            @click="handleCancel"
+            :disabled="isCancelling"
+            class="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-40 transition-colors"
+          >
+            {{ isCancelling ? '処理中...' : '解約する' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>

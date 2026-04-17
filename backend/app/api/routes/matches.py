@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 from bson import ObjectId
+from pydantic import BaseModel
 
 from app.api.helpers import (
     serialize_doc as _serialize,
@@ -9,12 +10,42 @@ from app.api.helpers import (
     CorporateContext,
     parse_oid,
     get_doc_or_404,
+    build_unreconciled_query,
 )
 from app.services.matching_score_service import calculate_match_score
+from app.services.difference_analyzer import analyze_difference
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task#24：差額原因候補提示エンドポイント
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AnalyzeDifferenceRequest(BaseModel):
+    transaction_id: str
+    document_ids: List[str]
+    doc_type: str  # "receipt" | "invoice"
+
+
+@router.post("/analyze-difference", summary="差額原因候補を提示する")
+async def analyze_difference_endpoint(
+    payload: AnalyzeDifferenceRequest,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    """
+    取引と書類の差額を分析して原因候補を返す。
+    4パターン（振込手数料・まとめ振込・相殺・一部入金）を検出する。
+    DB への書き込みは行わない（提案のみ）。
+    """
+    return await analyze_difference(
+        corporate_id=ctx.corporate_id,
+        transaction_id=payload.transaction_id,
+        document_ids=payload.document_ids,
+        doc_type=payload.doc_type,
+    )
 
 
 async def _write_match_events(db, corporate_id: str, document_ids: list, action: str, user_id: str = "system", comment=None):
@@ -27,18 +58,22 @@ async def _write_match_events(db, corporate_id: str, document_ids: list, action:
             rec = await db["receipts"].find_one({"_id": ObjectId(did)})
             if not rec:
                 doc_type = "invoice"
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[matches] _write_match_events: doc_type 判定エラー did={did}: {e}")
             doc_type = "invoice"
-        await db["audit_logs"].insert_one({
-            "corporate_id": corporate_id,
-            "document_type": doc_type,
-            "document_id": did,
-            "step": 99,
-            "action": action,
-            "approver_id": user_id,
-            "comment": comment,
-            "timestamp": now,
-        })
+        try:
+            await db["audit_logs"].insert_one({
+                "corporate_id": corporate_id,
+                "document_type": doc_type,
+                "document_id": did,
+                "step": 99,
+                "action": action,
+                "approver_id": user_id,
+                "comment": comment,
+                "timestamp": now,
+            })
+        except Exception as e:
+            logger.error(f"[matches] _write_match_events: audit_log 書き込みエラー did={did}: {e}", exc_info=True)
 
 
 @router.post("", summary="マッチング（消込）を作成する")
@@ -88,8 +123,8 @@ async def create_match(
                         t_total = t.get("amount", 0)
                     if first_tx is None:
                         first_tx = t
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[matches] create_match transfer: transaction 取得エラー tid={tid}: {e}", exc_info=True)
 
         if not fiscal_period and first_tx:
             fiscal_period = first_tx.get("fiscal_period", datetime.utcnow().strftime("%Y-%m"))
@@ -119,8 +154,8 @@ async def create_match(
                 await ctx.db["transactions"].update_one(
                     {"_id": ObjectId(tid)}, {"$set": {"status": "transferred"}}
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[matches] create_match transfer: status 更新エラー tid={tid}: {e}", exc_info=True)
 
         created = await ctx.db["matches"].find_one({"_id": result.inserted_id})
         return _serialize(created)
@@ -136,8 +171,8 @@ async def create_match(
                     t_total += t.get("amount", 0)
                     if first_tx is None:
                         first_tx = t
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[matches] create_match reconciliation: transaction 取得エラー tid={tid}: {e}", exc_info=True)
 
         if not fiscal_period and first_tx:
             fiscal_period = first_tx.get("fiscal_period", datetime.utcnow().strftime("%Y-%m"))
@@ -166,8 +201,8 @@ async def create_match(
                 await ctx.db["transactions"].update_one(
                     {"_id": ObjectId(tid)}, {"$set": {"status": "matched"}}
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[matches] create_match reconciliation: transaction status 更新エラー tid={tid}: {e}", exc_info=True)
 
         for did in document_ids:
             try:
@@ -179,8 +214,8 @@ async def create_match(
                     )
                     if r.matched_count:
                         break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[matches] create_match reconciliation: document status 更新エラー did={did}: {e}", exc_info=True)
 
         # transaction-level イベントは書類の有無にかかわらず常に記録
         account_subject = payload.get("account_subject", "")
@@ -218,8 +253,8 @@ async def create_match(
                 t_total += t.get("amount", 0)
                 if first_tx is None:
                     first_tx = t
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[matches] create_match: transaction 取得エラー tid={tid}: {e}", exc_info=True)
     # fallback: bank_transactions (legacy)
     if t_total == 0:
         for tid in transaction_ids:
@@ -229,8 +264,8 @@ async def create_match(
                     t_total += t.get("amount", 0)
                     if first_tx is None:
                         first_tx = t
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[matches] create_match: bank_transaction 取得エラー tid={tid}: {e}", exc_info=True)
 
     d_total = 0
     first_doc = None
@@ -241,8 +276,8 @@ async def create_match(
                 d_total += d.get("amount" if match_type == "receipt" else "total_amount", 0)
                 if first_doc is None:
                     first_doc = d
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[matches] create_match: document 取得エラー did={did}: {e}", exc_info=True)
 
     difference = t_total - d_total
     abs_diff = abs(difference)
@@ -315,30 +350,30 @@ async def create_match(
             await ctx.db["transactions"].update_one(
                 {"_id": ObjectId(tid)}, {"$set": {"status": "matched"}}
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[matches] create_match: transaction status 更新エラー tid={tid}: {e}", exc_info=True)
         try:
             await ctx.db["bank_transactions"].update_one(
                 {"_id": ObjectId(tid)}, {"$set": {"status": "matched"}}
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[matches] create_match: bank_transaction status 更新エラー tid={tid}: {e}", exc_info=True)
 
     for did in document_ids:
         try:
             await ctx.db[collection].update_one(
                 {"_id": ObjectId(did)}, {"$set": {"reconciliation_status": "reconciled"}}
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[matches] create_match: document reconciliation 更新エラー did={did}: {e}", exc_info=True)
 
     for rid in receipt_ids:
         try:
             await ctx.db["receipts"].update_one(
                 {"_id": ObjectId(rid)}, {"$set": {"reconciliation_status": "reconciled"}}
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[matches] create_match: receipt reconciliation 更新エラー rid={rid}: {e}", exc_info=True)
 
     # ── 消込イベント記録 ───────────────────────────────────────
     all_doc_ids = list(document_ids) + list(payload.get("receipt_ids", []))
@@ -396,10 +431,10 @@ async def create_match(
                                 "created_at": datetime.utcnow(),
                                 "used_count": 0,
                             })
-                except Exception:
-                    pass
-        except Exception:
-            pass  # matching_patterns 登録失敗はマッチング結果に影響させない
+                except Exception as e:
+                    logger.error(f"[matches] create_match: matching_patterns 登録エラー did={did}: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"[matches] create_match: matching_patterns 処理エラー: {e}", exc_info=True)
 
     created = await ctx.db["matches"].find_one({"_id": result.inserted_id})
     return _serialize(created)
@@ -460,11 +495,7 @@ async def get_candidates(
 
     # 未消込 documents を取得
     doc_collection = "receipts" if match_type == "receipt" else "invoices"
-    doc_query: dict = {
-        "corporate_id": ctx.corporate_id,
-        "reconciliation_status": {"$in": ["unreconciled", None, ""]},
-        "is_deleted": {"$ne": True},
-    }
+    doc_query = build_unreconciled_query(ctx.corporate_id)
     if fiscal_period:
         doc_query["fiscal_period"] = fiscal_period
 
@@ -557,12 +588,9 @@ async def get_candidates_by_applicant(
     emp_map = {str(e["_id"]): e for e in employees}
 
     # 未消込の領収書（申請者IDあり）
-    receipt_query: dict = {
-        "corporate_id": ctx.corporate_id,
-        "reconciliation_status": {"$in": ["unreconciled", None, ""]},
-        "is_deleted": {"$ne": True},
-        "applicant_id": {"$exists": True, "$ne": None},
-    }
+    receipt_query = build_unreconciled_query(
+        ctx.corporate_id, {"applicant_id": {"$exists": True, "$ne": None}}
+    )
     if fiscal_period:
         receipt_query["fiscal_period"] = fiscal_period
 
@@ -763,13 +791,10 @@ async def ai_suggest_bank_names(
                 })
 
     # ── 1. issued請求書（client_idベース・入金系取引）──────────────
-    issued_query: dict = {
-        "corporate_id": ctx.corporate_id,
-        "reconciliation_status": {"$in": ["unreconciled", None, ""]},
-        "is_deleted": {"$ne": True},
-        "document_type": {"$ne": "received"},
-        "client_id": {"$exists": True, "$ne": None},
-    }
+    issued_query = build_unreconciled_query(
+        ctx.corporate_id,
+        {"document_type": {"$ne": "received"}, "client_id": {"$exists": True, "$ne": None}},
+    )
     if fiscal_period:
         issued_query["fiscal_period"] = fiscal_period
     issued_invoices = await ctx.db["invoices"].find(issued_query).to_list(length=500)
@@ -779,13 +804,10 @@ async def ai_suggest_bank_names(
     # 承認状態に関わらずマッチング対象とする
     # 正常フローでは承認前に銀行取引が存在しないため自然にマッチしない
     # 例外的に支払いが先行した場合は自動マッチングして実態を正しく反映する
-    received_query: dict = {
-        "corporate_id": ctx.corporate_id,
-        "reconciliation_status": {"$in": ["unreconciled", None, ""]},
-        "is_deleted": {"$ne": True},
-        "document_type": "received",
-        "vendor_id": {"$exists": True, "$ne": None},
-    }
+    received_query = build_unreconciled_query(
+        ctx.corporate_id,
+        {"document_type": "received", "vendor_id": {"$exists": True, "$ne": None}},
+    )
     if fiscal_period:
         received_query["fiscal_period"] = fiscal_period
     received_invoices = await ctx.db["invoices"].find(received_query).to_list(length=500)
@@ -832,8 +854,8 @@ async def list_matches(
                     if tx:
                         serialized["transaction_date"] = tx.get("transaction_date")
                         serialized["transaction_description"] = tx.get("description")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[matches] list_matches: auto_expense transaction 取得エラー: {e}", exc_info=True)
         result.append(serialized)
     return result
 
@@ -890,22 +912,22 @@ async def delete_match(
             await ctx.db["transactions"].update_one(
                 {"_id": ObjectId(tid)}, {"$set": {"status": "unmatched"}}
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[matches] delete_match: transaction status 戻しエラー tid={tid}: {e}", exc_info=True)
         try:
             await ctx.db["bank_transactions"].update_one(
                 {"_id": ObjectId(tid)}, {"$set": {"status": "unmatched"}}
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[matches] delete_match: bank_transaction status 戻しエラー tid={tid}: {e}", exc_info=True)
     for did in match.get("document_ids", []):
         try:
             await ctx.db[collection].update_one(
                 {"_id": ObjectId(did)},
                 {"$set": {"reconciliation_status": "unreconciled", "approval_status": "approved"}}
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[matches] delete_match: document status 戻しエラー did={did}: {e}", exc_info=True)
 
     for rid in match.get("receipt_ids", []):
         try:
@@ -913,8 +935,8 @@ async def delete_match(
                 {"_id": ObjectId(rid)},
                 {"$set": {"reconciliation_status": "unreconciled"}}
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[matches] delete_match: receipt status 戻しエラー rid={rid}: {e}", exc_info=True)
 
     await ctx.db["matches"].update_one(
         {"_id": match["_id"]},

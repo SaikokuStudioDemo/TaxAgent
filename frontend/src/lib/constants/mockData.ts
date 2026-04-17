@@ -1,3 +1,7 @@
+/**
+ * @deprecated Task#32 以降は system_settings コレクション（GET /api/v1/system-settings/plans）から取得する。
+ * usePlans composable を使うこと。既存の参照箇所への影響を最小化するため削除はしない。
+ */
 export const PLANS = [
     {
         id: 'plan_basic',
@@ -19,6 +23,10 @@ export const PLANS = [
     }
 ];
 
+/**
+ * @deprecated Task#32 以降は system_settings コレクション（GET /api/v1/system-settings/options）から取得する。
+ * usePlans composable を使うこと。
+ */
 export const OPTIONS = [
     {
         id: 'opt-data-storage',

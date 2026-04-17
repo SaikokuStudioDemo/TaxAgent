@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router';
-import { Home, Users, Settings, LogOut, ArrowRightLeft, BookText } from 'lucide-vue-next';
+import { Home, Users, Settings, LogOut, ArrowRightLeft, BookText, BellRing } from 'lucide-vue-next';
 import { useAuth } from '@/composables/useAuth';
 
 const route = useRoute();
@@ -41,9 +41,17 @@ const isActive = (path: string) => {
 
       <div class="mt-8 pt-6 border-t border-gray-100">
         <h3 class="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">管理メニュー</h3>
-        <RouterLink 
-          to="/dashboard/tax-firm/users" 
+        <RouterLink
+          to="/dashboard/tax-firm/alerts"
           class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors"
+          :class="isActive('/dashboard/tax-firm/alerts') ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-700 hover:bg-gray-50 hover:text-indigo-600'"
+        >
+          <BellRing :size="20" :class="isActive('/dashboard/tax-firm/alerts') ? 'text-indigo-600' : 'text-gray-400'" />
+          アラート一覧
+        </RouterLink>
+        <RouterLink
+          to="/dashboard/tax-firm/users"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors mt-1"
           :class="isActive('/dashboard/tax-firm/users') ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-700 hover:bg-gray-50 hover:text-indigo-600'"
         >
           <Settings :size="20" :class="isActive('/dashboard/tax-firm/users') ? 'text-indigo-600' : 'text-gray-400'" />

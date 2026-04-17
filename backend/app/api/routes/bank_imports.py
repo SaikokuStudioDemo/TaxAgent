@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
 from bson import ObjectId
+import logging
 
 from app.api.helpers import (
     serialize_doc as _serialize,
@@ -9,6 +10,7 @@ from app.api.helpers import (
     parse_oid,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -52,36 +54,44 @@ async def delete_import_file(
     tx_ids = [str(tx["_id"]) for tx in txs]
 
     if tx_ids:
-        # 紐付く matches を論理削除し、書類を unreconciled に戻す
-        matches = await ctx.db["matches"].find({
-            "transaction_ids": {"$in": tx_ids},
-            "is_active": {"$ne": False},
-        }).to_list(length=10000)
+        try:
+            # 紐付く matches を論理削除し、書類を unreconciled に戻す
+            matches = await ctx.db["matches"].find({
+                "transaction_ids": {"$in": tx_ids},
+                "is_active": {"$ne": False},
+            }).to_list(length=10000)
 
-        for match in matches:
-            for did in match.get("document_ids", []):
-                for col in ["receipts", "invoices"]:
-                    await ctx.db[col].update_one(
-                        {"_id": ObjectId(did)},
-                        {"$set": {"reconciliation_status": "unreconciled"}}
-                    )
-            await ctx.db["matches"].update_one(
-                {"_id": match["_id"]},
-                {"$set": {"is_active": False, "inactivated_at": datetime.utcnow()}}
+            for match in matches:
+                for did in match.get("document_ids", []):
+                    for col in ["receipts", "invoices"]:
+                        await ctx.db[col].update_one(
+                            {"_id": ObjectId(did)},
+                            {"$set": {"reconciliation_status": "unreconciled"}}
+                        )
+                await ctx.db["matches"].update_one(
+                    {"_id": match["_id"]},
+                    {"$set": {"is_active": False, "inactivated_at": datetime.utcnow()}}
+                )
+
+            # 紐付く cash_transactions を削除
+            await ctx.db["cash_transactions"].delete_many(
+                {"linked_bank_transaction_id": {"$in": tx_ids}}
             )
 
-        # 紐付く cash_transactions を削除
-        await ctx.db["cash_transactions"].delete_many(
-            {"linked_bank_transaction_id": {"$in": tx_ids}}
-        )
+            # transactions を削除
+            await ctx.db["transactions"].delete_many(
+                {"import_file_id": file_id}
+            )
+        except Exception as e:
+            logger.error(f"[bank_imports] delete_import_file: 関連データ削除エラー file_id={file_id}: {e}")
+            raise HTTPException(status_code=500, detail="関連データの削除中にエラーが発生しました")
 
-        # transactions を削除
-        await ctx.db["transactions"].delete_many(
-            {"import_file_id": file_id}
-        )
-
-    # ファイルレコードを削除
-    await ctx.db["bank_import_files"].delete_one({"_id": oid})
+    try:
+        # ファイルレコードを削除
+        await ctx.db["bank_import_files"].delete_one({"_id": oid})
+    except Exception as e:
+        logger.error(f"[bank_imports] delete_import_file: ファイルレコード削除エラー file_id={file_id}: {e}")
+        raise HTTPException(status_code=500, detail="ファイルレコードの削除中にエラーが発生しました")
 
     return {
         "status": "deleted",

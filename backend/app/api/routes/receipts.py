@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 from datetime import datetime
+from pydantic import BaseModel
 
 from app.api.helpers import (
     serialize_doc as _serialize,
@@ -13,13 +14,18 @@ from app.api.helpers import (
     enrich_with_approval_history,
     build_name_map,
 )
+from app.services.duplicate_detector import check_duplicate_receipt
 from app.models.transaction import ReceiptCreate
 import logging
 from app.services.rule_evaluation_service import evaluate_approval_rules
+from app.api.routes.templates import router as templates_router
 from app.services.journal_rule_service import apply_journal_rules
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# ④ 領収書テンプレート：/receipts/templates に templates ルーターをマウント
+router.include_router(templates_router, prefix="/templates", tags=["receipt-templates"])
 
 
 # ─────────────── Batch Submit (existing feature, kept for backwards compat) ───────────────
@@ -229,3 +235,33 @@ async def delete_receipt(
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Receipt not found")
     return {"status": "deleted", "receipt_id": receipt_id}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task#25：二重計上チェックエンドポイント
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CheckDuplicateReceiptRequest(BaseModel):
+    date: str
+    amount: int
+    payee: str
+    exclude_id: Optional[str] = None
+
+
+@router.post("/check-duplicate", summary="領収書の二重計上チェックを行う")
+async def check_duplicate_receipt_endpoint(
+    payload: CheckDuplicateReceiptRequest,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    """
+    登録前の事前確認用エンドポイント。
+    同日・同金額・同取引先の領収書が既に存在するか確認する。
+    DB への書き込みは行わない（読み取りのみ）。
+    """
+    return await check_duplicate_receipt(
+        corporate_id=ctx.corporate_id,
+        date=payload.date,
+        amount=payload.amount,
+        payee=payload.payee,
+        exclude_id=payload.exclude_id,
+    )

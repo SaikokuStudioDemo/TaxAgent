@@ -19,9 +19,16 @@ __pycache__/
 *firebase*.json
 firebase-admin-key.json
 *.pem
+*apikey*.txt
+*api_key*.txt
+*secret*.txt
+Dev_StripeAPIKEY.txt
 
 # Logs
 *.log
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
 
 # Project specific
 backend_architecture.md

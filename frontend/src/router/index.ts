@@ -32,7 +32,10 @@ const router = createRouter({
                 { path: 'contract-edit/:id', name: 'dashboard-tax-firm-contract-edit-id', component: () => import('@/views/dashboard/tax-firm/ContractEditPage.vue') },
                 { path: 'settings/matching-rules', name: 'dashboard-tax-firm-settings-matching-rules', component: () => import('@/views/dashboard/corporate/settings/MatchingRulesPage.vue') },
                 { path: 'settings/journal-rules', name: 'dashboard-tax-firm-settings-journal-rules', component: () => import('@/views/dashboard/corporate/settings/JournalRulesPage.vue') },
-                { path: 'users', name: 'dashboard-tax-firm-users', component: () => import('@/views/dashboard/shared/UserManagementPage.vue') }
+                { path: 'users', name: 'dashboard-tax-firm-users', component: () => import('@/views/dashboard/shared/UserManagementPage.vue') },
+                { path: 'alerts', name: 'dashboard-tax-firm-alerts', component: () => import('@/views/dashboard/tax-firm/AlertsPage.vue') },
+                { path: 'customers/:id/alert-settings', name: 'dashboard-tax-firm-alert-settings', component: () => import('@/views/dashboard/tax-firm/AlertSettingsPage.vue') },
+                { path: 'customers/:id/billing', name: 'dashboard-tax-firm-billing-settings', component: () => import('@/views/dashboard/tax-firm/BillingSettingsPage.vue') },
             ]
         },
         {
@@ -102,7 +105,13 @@ const router = createRouter({
                 { path: 'cash/ledger', name: 'CashLedger', component: () => import('@/views/dashboard/corporate/cash/CashLedgerPage.vue') },
                 { path: 'cash/matching', name: 'CashMatching', component: () => import('@/views/dashboard/corporate/cash/CashMatchingPage.vue') },
                 { path: 'users', name: 'dashboard-corporate-users', component: () => import('@/views/dashboard/shared/UserManagementPage.vue') },
-                { path: 'settings/permissions', name: 'dashboard-corporate-settings-permissions', component: () => import('@/views/dashboard/corporate/settings/PermissionSettingsPage.vue') }
+                { path: 'settings/permissions', name: 'dashboard-corporate-settings-permissions', component: () => import('@/views/dashboard/corporate/settings/PermissionSettingsPage.vue') },
+                { path: 'templates/invoices', name: 'dashboard-corporate-templates-invoices', component: () => import('@/views/dashboard/corporate/templates/InvoiceTemplatesPage.vue') },
+                { path: 'templates/receipts', name: 'dashboard-corporate-templates-receipts', component: () => import('@/views/dashboard/corporate/templates/ReceiptTemplatesPage.vue') },
+                { path: 'outputs/csv', name: 'dashboard-corporate-outputs-csv', component: () => import('@/views/dashboard/corporate/outputs/CsvOutputPage.vue') },
+                { path: 'outputs/zengin', name: 'dashboard-corporate-outputs-zengin', component: () => import('@/views/dashboard/corporate/outputs/ZenginOutputPage.vue') },
+                { path: 'outputs/reports', name: 'dashboard-corporate-outputs-reports', component: () => import('@/views/dashboard/corporate/outputs/ReportsPage.vue') },
+                { path: 'outputs/tax-report', name: 'dashboard-corporate-outputs-tax-report', component: () => import('@/views/dashboard/corporate/outputs/TaxReportPage.vue') }
             ]
         },
         {

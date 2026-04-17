@@ -11,8 +11,15 @@ class Settings(BaseSettings):
     FIREBASE_CREDENTIALS_PATH: str = "./firebase-admin-key.json"
     FIREBASE_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+    DEFAULT_AI_MODEL: str = "claude-sonnet-4-6"
 
     LAW_AGENT_URL: str = "http://localhost:8001"
+
+    # Stripe
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
 
     ENVIRONMENT: str = "development"
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"

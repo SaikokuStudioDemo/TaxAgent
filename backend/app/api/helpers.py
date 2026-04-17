@@ -191,6 +191,44 @@ async def build_name_map(db, user_ids: Set[str]) -> dict:
     return name_map
 
 
+async def verify_tax_firm(firebase_uid: str, db) -> dict:
+    """
+    呼び出し元が税理士法人かどうかを確認して corporate ドキュメントを返す。
+    税理士法人でない場合は HTTPException(403) を raise する。
+    """
+    corporate = await db["corporates"].find_one({"firebase_uid": firebase_uid})
+    if not corporate or corporate.get("corporateType") != "tax_firm":
+        raise HTTPException(
+            status_code=403,
+            detail="この操作は税理士法人のみ実行できます。",
+        )
+    return corporate
+
+
+def build_pending_approval_query(corporate_id: str, extra: dict = None) -> dict:
+    """approval_status='pending_approval' + is_deleted フィルタの共通クエリを返す。"""
+    query: dict = {
+        "corporate_id": corporate_id,
+        "approval_status": "pending_approval",
+        "is_deleted": {"$ne": True},
+    }
+    if extra:
+        query.update(extra)
+    return query
+
+
+def build_unreconciled_query(corporate_id: str, extra: dict = None) -> dict:
+    """reconciliation_status（未消込）+ is_deleted フィルタの共通クエリを返す。"""
+    query: dict = {
+        "corporate_id": corporate_id,
+        "reconciliation_status": {"$in": ["unreconciled", None, ""]},
+        "is_deleted": {"$ne": True},
+    }
+    if extra:
+        query.update(extra)
+    return query
+
+
 async def get_doc_or_404(
     db,
     collection: str,

@@ -127,7 +127,8 @@ async def _get_pending_for_me(db, corporate_id: str, firebase_uid: str, document
             continue
         try:
             rule = await db["approval_rules"].find_one({"_id": ObjectId(rule_id)})
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[approvals] _get_pending_for_me: rule_id={rule_id} スキップ: {e}")
             continue
         if not rule:
             continue
@@ -156,140 +157,146 @@ async def record_approval_action(
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     from app.services.notification_service import notify_next_approver, notify_submitter
+    try:
+        if payload.action == "rejected" and not payload.comment:
+            raise HTTPException(status_code=400, detail="差戻しの場合はコメントが必要です。")
 
-    if payload.action == "rejected" and not payload.comment:
-        raise HTTPException(status_code=400, detail="差戻しの場合はコメントが必要です。")
+        # Persist the event
+        event_doc = {
+            **payload.model_dump(),
+            "corporate_id": ctx.corporate_id,
+            "approver_id": ctx.user_id,
+            "timestamp": datetime.utcnow(),
+        }
+        await ctx.db["audit_logs"].insert_one(event_doc)
 
-    # Persist the event
-    event_doc = {
-        **payload.model_dump(),
-        "corporate_id": ctx.corporate_id,
-        "approver_id": ctx.user_id,
-        "timestamp": datetime.utcnow(),
-    }
-    await ctx.db["audit_logs"].insert_one(event_doc)
+        # Update the parent document's approval_status
+        collection = "receipts" if payload.document_type == "receipt" else "invoices"
+        doc_oid = parse_oid(payload.document_id, "document")
 
-    # Update the parent document's approval_status
-    collection = "receipts" if payload.document_type == "receipt" else "invoices"
-    doc_oid = parse_oid(payload.document_id, "document")
+        doc = await ctx.db[collection].find_one({"_id": doc_oid})
+        rule_id = doc.get("approval_rule_id") if doc else None
+        current_step = doc.get("current_step", 1) if doc else 1
+        next_step = current_step + 1
+        submitter_id = doc.get("submitted_by", doc.get("created_by", "")) if doc else ""
+        doc_summary = f"¥{doc.get('amount', doc.get('total_amount', 0)):,}" if doc else ""
 
-    doc = await ctx.db[collection].find_one({"_id": doc_oid})
-    rule_id = doc.get("approval_rule_id") if doc else None
-    current_step = doc.get("current_step", 1) if doc else 1
-    next_step = current_step + 1
-    submitter_id = doc.get("submitted_by", doc.get("created_by", "")) if doc else ""
-    doc_summary = f"¥{doc.get('amount', doc.get('total_amount', 0)):,}" if doc else ""
+        if payload.action == "approved":
+            all_approved = False
 
-    if payload.action == "approved":
-        all_approved = False
-
-        # Persist manually added extra steps if provided
-        if payload.added_steps:
-            added_steps_dicts = [s.model_dump() for s in payload.added_steps]
-            await ctx.db[collection].update_one(
-                {"_id": doc_oid},
-                {"$set": {"extra_approval_steps": added_steps_dicts}}
-            )
-            # Update the local doc object so the step count logic below works
-            if doc:
-                doc["extra_approval_steps"] = added_steps_dicts
-
-        # Calculate standard steps using priority: custom_approvers > approval_rule
-        total_steps = 1  # Minimum implicit step
-        custom_approvers = doc.get("custom_approvers") if doc else None
-
-        if custom_approvers:
-            # Priority 1: custom approvers set directly on the document
-            total_steps = max(total_steps, len(custom_approvers))
-        elif rule_id:
-            # Priority 2: approval_rules (includes project-specific rules)
-            try:
-                rule = await ctx.db["approval_rules"].find_one({"_id": ObjectId(rule_id)})
-                if rule:
-                    required_steps = [s["step"] for s in rule.get("steps", []) if s.get("required")]
-                    if required_steps:
-                        total_steps = max(total_steps, max(required_steps))
-            except Exception as e:
-                logger.error(f"Error fetching/parsing rule {rule_id}: {e}")
-
-        # Add extra steps to the total count
-        extra_steps = doc.get("extra_approval_steps", []) if doc else []
-        total_steps += len(extra_steps)
-
-        # Optimistic locking query to ensure current_step hasn't changed
-        db_query = {"_id": doc_oid}
-        if doc and "current_step" in doc:
-            db_query["current_step"] = current_step
-        else:
-            db_query["current_step"] = {"$exists": False}
-
-        # Logic check: Are there more steps?
-        if next_step <= total_steps:
-            # Not finished yet -> increment current_step and notify next
-            update_result = await ctx.db[collection].update_one(
-                db_query,
-                {"$set": {"current_step": next_step}},
-            )
-            if update_result.matched_count == 0:
-                raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
-
-            # Notify the next approver
-            if rule_id:
-                await notify_next_approver(
-                    corporate_id=ctx.corporate_id,
-                    document_type=payload.document_type,
-                    document_id=payload.document_id,
-                    current_step=next_step,
-                    approval_rule_id=rule_id,
-                    document_summary=doc_summary,
+            # Persist manually added extra steps if provided
+            if payload.added_steps:
+                added_steps_dicts = [s.model_dump() for s in payload.added_steps]
+                await ctx.db[collection].update_one(
+                    {"_id": doc_oid},
+                    {"$set": {"extra_approval_steps": added_steps_dicts}}
                 )
-        else:
-            # All steps completed -> mark as approved
-            all_approved = True
+                # Update the local doc object so the step count logic below works
+                if doc:
+                    doc["extra_approval_steps"] = added_steps_dicts
+
+            # Calculate standard steps using priority: custom_approvers > approval_rule
+            total_steps = 1  # Minimum implicit step
+            custom_approvers = doc.get("custom_approvers") if doc else None
+
+            if custom_approvers:
+                # Priority 1: custom approvers set directly on the document
+                total_steps = max(total_steps, len(custom_approvers))
+            elif rule_id:
+                # Priority 2: approval_rules (includes project-specific rules)
+                try:
+                    rule = await ctx.db["approval_rules"].find_one({"_id": ObjectId(rule_id)})
+                    if rule:
+                        required_steps = [s["step"] for s in rule.get("steps", []) if s.get("required")]
+                        if required_steps:
+                            total_steps = max(total_steps, max(required_steps))
+                except Exception as e:
+                    logger.error(f"[approvals] record_approval_action: rule 取得エラー rule_id={rule_id}: {e}")
+
+            # Add extra steps to the total count
+            extra_steps = doc.get("extra_approval_steps", []) if doc else []
+            total_steps += len(extra_steps)
+
+            # Optimistic locking query to ensure current_step hasn't changed
+            db_query = {"_id": doc_oid}
+            if doc and "current_step" in doc:
+                db_query["current_step"] = current_step
+            else:
+                db_query["current_step"] = {"$exists": False}
+
+            # Logic check: Are there more steps?
+            if next_step <= total_steps:
+                # Not finished yet -> increment current_step and notify next
+                update_result = await ctx.db[collection].update_one(
+                    db_query,
+                    {"$set": {"current_step": next_step}},
+                )
+                if update_result.matched_count == 0:
+                    raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
+
+                # Notify the next approver
+                if rule_id:
+                    await notify_next_approver(
+                        corporate_id=ctx.corporate_id,
+                        document_type=payload.document_type,
+                        document_id=payload.document_id,
+                        current_step=next_step,
+                        approval_rule_id=rule_id,
+                        document_summary=doc_summary,
+                    )
+            else:
+                # All steps completed -> mark as approved
+                all_approved = True
+                update_result = await ctx.db[collection].update_one(
+                    db_query,
+                    {"$set": {"approval_status": "approved"}},
+                )
+                if update_result.matched_count == 0:
+                    raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
+
+                # Notify the submitter that it's fully approved
+                if submitter_id:
+                    await notify_submitter(
+                        corporate_id=ctx.corporate_id,
+                        document_type=payload.document_type,
+                        document_id=payload.document_id,
+                        submitter_id=submitter_id,
+                        action="approved",
+                        document_summary=doc_summary,
+                    )
+
+        elif payload.action in ("rejected", "returned"):
+            db_query = {"_id": doc_oid}
+            if doc and "current_step" in doc:
+                db_query["current_step"] = current_step
+            else:
+                db_query["current_step"] = {"$exists": False}
+
             update_result = await ctx.db[collection].update_one(
                 db_query,
-                {"$set": {"approval_status": "approved"}},
+                {"$set": {"approval_status": "rejected"}},
             )
             if update_result.matched_count == 0:
                 raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
 
-            # Notify the submitter that it's fully approved
+            # Notify the submitter that it was rejected
             if submitter_id:
                 await notify_submitter(
                     corporate_id=ctx.corporate_id,
                     document_type=payload.document_type,
                     document_id=payload.document_id,
                     submitter_id=submitter_id,
-                    action="approved",
+                    action="rejected",
                     document_summary=doc_summary,
                 )
 
-    elif payload.action in ("rejected", "returned"):
-        db_query = {"_id": doc_oid}
-        if doc and "current_step" in doc:
-            db_query["current_step"] = current_step
-        else:
-            db_query["current_step"] = {"$exists": False}
+        return {"status": "recorded", "action": payload.action}
 
-        update_result = await ctx.db[collection].update_one(
-            db_query,
-            {"$set": {"approval_status": "rejected"}},
-        )
-        if update_result.matched_count == 0:
-            raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
-
-        # Notify the submitter that it was rejected
-        if submitter_id:
-            await notify_submitter(
-                corporate_id=ctx.corporate_id,
-                document_type=payload.document_type,
-                document_id=payload.document_id,
-                submitter_id=submitter_id,
-                action="rejected",
-                document_summary=doc_summary,
-            )
-
-    return {"status": "recorded", "action": payload.action}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[approvals] record_approval_action: 予期しないエラー document_id={payload.document_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="承認処理中にエラーが発生しました")
 
 
 @router.get("/events", summary="承認・消込イベント履歴を取得する（後方互換）")

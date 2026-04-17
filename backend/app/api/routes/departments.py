@@ -15,12 +15,6 @@ from app.api.helpers import (
 router = APIRouter()
 
 
-def _serialize_department(doc: dict) -> dict:
-    """Serialize a department document, mapping _id -> id."""
-    result = dict(doc)
-    result["id"] = str(result.pop("_id"))
-    return result
-
 
 @router.get("", summary="部門一覧を取得する")
 async def list_departments(
@@ -28,7 +22,7 @@ async def list_departments(
 ):
     cursor = ctx.db["departments"].find({"corporate_id": ctx.corporate_id}).sort("created_at", 1)
     docs = await cursor.to_list(length=500)
-    return [_serialize_department(doc) for doc in docs]
+    return [serialize_doc(doc) for doc in docs]
 
 
 @router.post("", summary="部門を作成する", status_code=201)
@@ -48,7 +42,7 @@ async def create_department(
     }
     result = await ctx.db["departments"].insert_one(doc)
     created = await ctx.db["departments"].find_one({"_id": result.inserted_id})
-    return _serialize_department(created)
+    return serialize_doc(created)
 
 
 @router.patch("/{dept_id}", summary="部門名を更新する")
@@ -70,7 +64,7 @@ async def update_department(
         raise HTTPException(status_code=404, detail="Department not found")
 
     updated = await ctx.db["departments"].find_one({"_id": oid})
-    return _serialize_department(updated)
+    return serialize_doc(updated)
 
 
 @router.delete("/{dept_id}", summary="部門を削除する", status_code=204)
@@ -108,7 +102,7 @@ async def add_group(
         raise HTTPException(status_code=404, detail="Department not found")
 
     updated = await ctx.db["departments"].find_one({"_id": oid})
-    return _serialize_department(updated)
+    return serialize_doc(updated)
 
 
 @router.patch("/{dept_id}/groups/{group_id}", summary="グループ名を更新する")
@@ -131,7 +125,7 @@ async def update_group(
         raise HTTPException(status_code=404, detail="Department or group not found")
 
     updated = await ctx.db["departments"].find_one({"_id": oid})
-    return _serialize_department(updated)
+    return serialize_doc(updated)
 
 
 @router.delete("/{dept_id}/groups/{group_id}", summary="グループを削除する", status_code=204)

@@ -2,7 +2,6 @@
 import { ref, onMounted } from 'vue';
 import { RouterLink } from 'vue-router';
 import { useAuth } from '@/composables/useAuth';
-import { useAdvisor } from '@/composables/useAdvisor';
 import { api } from '@/lib/api';
 import {
   LayoutDashboard,
@@ -17,7 +16,6 @@ import {
   Building2,
   ChevronLeft,
   ChevronRight,
-  MessageSquareText,
   ArrowRightLeft,
   BookText,
   Wallet,
@@ -29,17 +27,17 @@ import {
   ShieldCheck,
   Database,
   KeyRound,
-  Send as SendIcon,
-  Paperclip as PaperclipIcon
+  Download,
+  BarChart3,
+  LayoutTemplate,
+  Calculator,
 } from 'lucide-vue-next';
+import AIChatPanel from '@/components/chat/AIChatPanel.vue';
 
 const isLeftSidebarOpen = ref(true);
-const isRightSidebarOpen = ref(true);
+const isChatOverlay = ref(true);   // ログイン直後はオーバーレイ表示
 
 const { signOut, displayName, displayRole, isAdmin, isAccountingOrAbove } = useAuth();
-const { messages, isLoading, sendMessage, initChat } = useAdvisor();
-
-const userInput = ref('');
 
 // ── 承認待ちバッジ ────────────────────────────────────────────
 const hasPendingReceipts = ref(false);
@@ -56,14 +54,7 @@ const fetchPendingCounts = async () => {
     } catch { /* サイレントに失敗 */ }
 };
 
-const handleChatSend = () => {
-    if (!userInput.value.trim()) return;
-    sendMessage(userInput.value);
-    userInput.value = '';
-};
-
 onMounted(() => {
-    initChat();
     fetchPendingCounts();
 });
 </script>
@@ -210,6 +201,44 @@ onMounted(() => {
             </div>
           </div>
 
+          <!-- アウトプット（isAccountingOrAbove のみ表示） -->
+          <div v-if="isAccountingOrAbove">
+            <div v-if="isLeftSidebarOpen" class="flex items-center gap-1.5 px-3 mb-3">
+              <Download :size="12" class="text-slate-400" />
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">アウトプット</p>
+            </div>
+            <div class="space-y-1" :class="{'mt-4': !isLeftSidebarOpen}">
+              <RouterLink to="/dashboard/corporate/outputs/csv" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="CSV出力">
+                <Download :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">CSV出力</span>
+              </RouterLink>
+              <RouterLink to="/dashboard/corporate/outputs/zengin" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="全銀データ">
+                <Building2 :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">全銀データ</span>
+              </RouterLink>
+              <RouterLink to="/dashboard/corporate/outputs/reports" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="レポート・予算対比">
+                <BarChart3 :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">レポート・予算対比</span>
+              </RouterLink>
+              <RouterLink to="/dashboard/corporate/outputs/tax-report" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="税務申告サポート">
+                <Calculator :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">税務申告サポート</span>
+              </RouterLink>
+            </div>
+          </div>
+
+          <!-- テンプレート（isAccountingOrAbove のみ表示） -->
+          <div v-if="isAccountingOrAbove">
+            <div v-if="isLeftSidebarOpen" class="flex items-center gap-1.5 px-3 mb-3">
+              <LayoutTemplate :size="12" class="text-slate-400" />
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">テンプレート</p>
+            </div>
+            <div class="space-y-1" :class="{'mt-4': !isLeftSidebarOpen}">
+              <RouterLink to="/dashboard/corporate/templates/invoices" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="請求書テンプレート">
+                <FileText :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">請求書テンプレート</span>
+              </RouterLink>
+              <RouterLink to="/dashboard/corporate/templates/receipts" class="flex items-center gap-3 px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors" active-class="bg-indigo-50 text-indigo-700" :class="{'justify-center': !isLeftSidebarOpen}" title="領収書テンプレート">
+                <Receipt :size="18" class="shrink-0" /> <span v-if="isLeftSidebarOpen" class="whitespace-nowrap">領収書テンプレート</span>
+              </RouterLink>
+            </div>
+          </div>
+
           <!-- ルール設定 -->
           <div>
             <div v-if="isLeftSidebarOpen" class="flex items-center gap-1.5 px-3 mb-3">
@@ -281,69 +310,15 @@ onMounted(() => {
       </div>
     </main>
 
-    <!-- Right Panel (AI/Chat Assistant) -->
-    <aside :class="['bg-white border-l border-gray-200 flex flex-col flex-shrink-0 relative z-30 shadow-sm transition-all duration-300', isRightSidebarOpen ? 'w-[360px]' : 'w-0']">
-      <!-- Floating Toggle Right -->
-      <button 
-        @click="isRightSidebarOpen = !isRightSidebarOpen"
-        class="absolute top-8 bg-white border border-gray-200 text-gray-500 hover:text-emerald-600 rounded-full shadow-md z-50 flex items-center justify-center transition-all hover:scale-105"
-        :class="!isRightSidebarOpen ? '-left-[64px] w-12 h-12 shadow-lg text-emerald-600 border-none bg-white' : '-left-3 p-1.5 w-8 h-8'"
-        :title="isRightSidebarOpen ? 'アシスタントを閉じる' : 'アシスタントを開く'"
-      >
-        <ChevronRight v-if="isRightSidebarOpen" :size="16" />
-        <MessageSquareText v-else :size="20" />
-      </button>
-
-      <div class="flex flex-col h-full w-[360px]" :class="!isRightSidebarOpen ? 'overflow-hidden opacity-0' : 'opacity-100 transition-opacity duration-300 delay-100'">
-        <div class="p-4 border-b border-gray-100 flex items-center justify-between bg-white h-20 shrink-0">
-          <h3 class="font-bold text-gray-800 text-lg flex items-center gap-2">
-            <div class="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></div>
-            アシスタント
-          </h3>
-        </div>
-
-      <div class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50" ref="chatScrollContainer">
-        <div v-for="(msg, i) in messages" :key="i" :class="['flex', msg.role === 'user' ? 'justify-end' : 'justify-start']">
-          <div :class="[
-            'px-4 py-2.5 rounded-2xl max-w-[85%] text-sm shadow-sm leading-relaxed',
-            msg.role === 'user' 
-              ? 'bg-blue-600 text-white rounded-tr-sm' 
-              : 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm'
-          ]">
-            {{ msg.text }}
-          </div>
-        </div>
-        <div v-if="isLoading" class="flex justify-start">
-           <div class="bg-indigo-50 border border-indigo-100 text-indigo-700 px-4 py-3 rounded-2xl rounded-tl-sm text-sm shadow-sm animate-pulse flex items-center gap-2">
-              <span class="w-2 h-2 bg-indigo-500 rounded-full animate-bounce"></span>
-              思考中...
-           </div>
-        </div>
-      </div>
-
-      <!-- Chat Input Field -->
-      <div class="p-4 bg-white border-t border-gray-100">
-        <form @submit.prevent="handleChatSend" class="flex items-center bg-gray-100 rounded-full pl-4 pr-1.5 py-1.5 mb-2 focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all shadow-inner">
-          <input
-            v-model="userInput"
-            type="text"
-            placeholder="アドバイザーに相談..."
-            class="flex-1 bg-transparent border-none focus:ring-0 text-sm min-w-0 py-2 text-gray-700 placeholder-gray-400 outline-none"
-          />
-          <div class="flex items-center gap-1 text-gray-400 shrink-0">
-            <button type="button" class="hover:text-blue-600 transition-colors p-1.5 rounded-full hover:bg-gray-200"><PaperclipIcon :size="16" /></button>
-            <button type="submit" :disabled="!userInput.trim() || isLoading" class="bg-blue-600 text-white p-2 rounded-full hover:bg-blue-700 shadow-md ml-1 hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:translate-y-0">
-              <SendIcon :size="16" class="ml-0.5" />
-            </button>
-          </div>
-        </form>
-        <div class="text-center py-2">
-          <button class="text-xs text-blue-600 hover:text-blue-800 font-medium hover:underline">1週間の会話要約を取得する</button>
-        </div>
-      </div>
-      </div>
-    </aside>
   </div>
+
+  <!-- AI チャットパネル（オーバーレイ / フローティング切替） -->
+  <AIChatPanel
+    :is-overlay="isChatOverlay"
+    :sidebar-collapsed="!isLeftSidebarOpen"
+    @close="isChatOverlay = false"
+    @open-overlay="isChatOverlay = true"
+  />
 </template>
 
 <style scoped>

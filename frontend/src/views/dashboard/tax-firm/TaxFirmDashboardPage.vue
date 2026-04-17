@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useAuth } from '@/composables/useAuth';
+import { usePlans } from '@/composables/usePlans';
 import { formatCurrency, calculateTaxInclusive } from '@/lib/utils/formatters';
 import { Users, Banknote, ShieldCheck, Loader2 } from 'lucide-vue-next';
-import { PLANS } from '@/lib/constants/mockData';
 
 const { currentUser, getToken, userProfile, displayName } = useAuth();
+// usePlans: mockData.ts の PLANS から system_settings API に移行（Task#32）
+const { plans } = usePlans();
+
 const clients = ref<any[]>([]);
 const isLoading = ref(true);
 
@@ -29,10 +32,10 @@ onMounted(async () => {
 });
 
 const totalUsageFee = () => clients.value.reduce((sum, client) => sum + (client.totalUsageFee || 0), 0);
-const planName = () => {
-    const plan = PLANS.find((p: any) => p.id === userProfile.value?.data?.planId);
+const planName = computed(() => {
+    const plan = plans.value.find((p: any) => p.id === userProfile.value?.data?.planId);
     return plan?.name || 'プラン情報なし';
-};
+});
 </script>
 
 <template>
@@ -74,7 +77,7 @@ const planName = () => {
                 </div>
                 <h2 class="text-sm font-bold text-gray-500 mb-1">現在の契約プラン</h2>
                 <div class="text-2xl font-bold text-gray-900 mb-1">
-                    {{ planName() }}
+                    {{ planName }}
                 </div>
                 <p v-if="userProfile?.data?.monthlyFee !== undefined" class="text-lg font-bold text-indigo-600 mb-2">
                     {{ formatCurrency(calculateTaxInclusive(userProfile?.data?.monthlyFee)) }} <span class="text-sm font-medium text-gray-500">/ 月</span>

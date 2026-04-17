@@ -8,6 +8,8 @@ class TemplateBase(BaseModel):
     html: str
     thumbnail: str = "bg-blue-50 border-blue-200"
     is_active: bool = True
+    template_type: str = "invoice"   # ② "invoice" | "receipt"
+    is_default: bool = False          # ② True のテンプレートは削除不可
 
 class TemplateCreate(TemplateBase):
     pass

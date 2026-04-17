@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useAuth } from '@/composables/useAuth';
+import { useRouter } from 'vue-router';
 import { formatCurrency, calculateTaxInclusive } from '@/lib/utils/formatters';
-import { Plus, Edit2, Loader2 } from 'lucide-vue-next';
+import { Plus, Edit2, Loader2, CreditCard } from 'lucide-vue-next';
+
+const router = useRouter();
 
 const { currentUser, getToken } = useAuth();
 const customers = ref<any[]>([]);
@@ -56,6 +59,7 @@ onMounted(async () => {
             <tr class="bg-gray-50 text-sm font-semibold text-gray-600 border-b border-gray-200">
               <th class="p-4 whitespace-nowrap">顧客名</th>
               <th class="p-4 whitespace-nowrap">ユーザー利用料</th>
+              <th class="p-4 whitespace-nowrap">課金設定</th>
               <th class="p-4 whitespace-nowrap">ステータス</th>
               <th class="p-4 whitespace-nowrap">MA</th>
               <th class="p-4 whitespace-nowrap">担当者</th>
@@ -65,7 +69,7 @@ onMounted(async () => {
           <tbody class="divide-y divide-gray-100">
             <template v-if="isLoading">
               <tr>
-                <td colspan="6" class="p-12 text-center text-gray-400">
+                <td colspan="7" class="p-12 text-center text-gray-400">
                   <div class="flex flex-col items-center justify-center gap-3">
                     <Loader2 :size="32" class="animate-spin text-indigo-400" />
                     <p>顧客データを読込中...</p>
@@ -75,7 +79,7 @@ onMounted(async () => {
             </template>
             <template v-else-if="customers.length === 0">
               <tr>
-                <td colspan="6" class="p-8 text-center text-gray-500">
+                <td colspan="7" class="p-8 text-center text-gray-500">
                   まだ登録されている顧客がいません。「顧客を追加」ボタンから法人を登録してください。
                 </td>
               </tr>
@@ -89,6 +93,26 @@ onMounted(async () => {
                 <td class="p-4 text-gray-600 font-medium">
                   {{ formatCurrency(calculateTaxInclusive(customer.totalUsageFee || 0)) }}
                   <span class="text-[10px] text-gray-400 block mt-0.5">(税抜 {{ formatCurrency(customer.totalUsageFee || 0) }})</span>
+                </td>
+                <!-- 課金設定列 -->
+                <td class="p-4">
+                  <div class="flex items-center gap-2">
+                    <span
+                      v-if="customer.billingIsActive"
+                      class="text-sm font-semibold text-indigo-700"
+                    >
+                      ¥{{ (customer.monthlyBillingTotal || 0).toLocaleString() }}/月
+                    </span>
+                    <span v-else class="text-xs text-gray-400">未設定</span>
+                    <button
+                      @click="router.push({ name: 'dashboard-tax-firm-billing-settings', params: { id: customer.firebase_uid } })"
+                      class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
+                      title="課金設定"
+                    >
+                      <CreditCard :size="11" />
+                      設定
+                    </button>
+                  </div>
                 </td>
                 <td class="p-4">
                   <span

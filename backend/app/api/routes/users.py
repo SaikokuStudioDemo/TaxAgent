@@ -1,10 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.models.user import CorporateUserCreate, CorporateUserInDB
 from app.api.deps import get_current_user
+from app.api.helpers import resolve_corporate_id
 from app.db.mongodb import get_database
-from typing import List
+from typing import List, Optional
 from datetime import datetime
+from bson import ObjectId
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -59,6 +63,28 @@ async def register_corporate_user(
         "created_at": datetime.utcnow()
     })
     print(f">>> CREATED DEFAULT COMPANY_PROFILE: CORPORATE_ID={corporate_id}")
+
+    # ─── Stripe Customer 作成（失敗してもロールバックしない） ──────────
+    # ③④ Pydantic モデルのフィールドに直接アクセス
+    # email は CorporateUserCreate に存在しないため空文字
+    from app.services.stripe_service import create_stripe_customer
+    billing_type = (
+        "tax_firm_covered" if payload.advising_tax_firm_id else "self_pay"
+    )
+    stripe_customer_id = await create_stripe_customer(
+        firebase_uid=firebase_uid,
+        email="",
+        name=payload.companyName or "",
+    )
+    if stripe_customer_id:
+        await db["corporates"].update_one(
+            {"firebase_uid": firebase_uid},
+            {"$set": {
+                "stripe_customer_id": stripe_customer_id,
+                "billing_type": billing_type,
+            }},
+        )
+        print(f">>> STRIPE CUSTOMER CREATED: {stripe_customer_id}")
 
     return {"message": "Corporate profile successfully linked to Firebase Auth.", "data": db_record.model_dump()}
 
@@ -131,7 +157,10 @@ async def _sync_employees_internal(parent_uid: str, payload: list[dict]):
                 import json
                 try:
                     permissions = json.loads(permissions)
-                except:
+                except Exception as e:
+                    logger.warning(
+                        f"[users] permissions JSON パース失敗、デフォルト値を使用: {e}"
+                    )
                     permissions = {}
 
             await db["employees"].update_one(
@@ -479,15 +508,24 @@ async def get_clients(
             fee_map[p_uid] += emp.get("usageFee", 0)
             user_count_map[p_uid] += 1
 
+    # ③ billing_settings を一括取得（Firestore 取得後・enriched_clients ループ前）
+    billing_uids = [c["firebase_uid"] for c in clients]
+    billing_cursor = db["billing_settings"].find({
+        "tax_firm_id": effective_uid,
+        "target_corporate_id": {"$in": billing_uids},
+    })
+    billing_docs = await billing_cursor.to_list(length=1000)
+    billing_map = {b["target_corporate_id"]: b for b in billing_docs}
+
     for c in clients:
         c["_id"] = str(c["_id"])
         uid = c["firebase_uid"]
         c["companyName"] = name_map.get(uid, "Unknown Company")
-        
+
         # Add real aggregated stats
         c["totalUsageFee"] = fee_map.get(uid, 0)
         c["employeeCount"] = user_count_map.get(uid, 0)
-        
+
         # Add some mock stats for the UI until real tables exist
         c["approvalRate"] = 100
         c["appCount"] = 0
@@ -496,6 +534,18 @@ async def get_clients(
         c["maStatus"] = c.get("maIntent", "none")
         c["assignee"] = "未設定"
         c["monthlyFee"] = c.get("monthlyFee", 0)
+
+        # billing_settings から月額合計を計算（totalUsageFee と別フィールドで返す）
+        billing = billing_map.get(uid)
+        if billing and billing.get("is_active"):
+            corp_price = billing.get("corporate_unit_price", 0)
+            user_price = billing.get("user_unit_price", 0)
+            emp_count = c.get("employeeCount", 0)
+            c["monthlyBillingTotal"] = corp_price + user_price * emp_count
+            c["billingIsActive"] = True
+        else:
+            c["monthlyBillingTotal"] = 0
+            c["billingIsActive"] = False
 
         enriched_clients.append(c)
 
@@ -712,3 +762,93 @@ async def sync_client_employees(
         error_trace = traceback.format_exc()
         print(f"DEBUG SYNC EXCEPTION: {error_trace}")
         raise HTTPException(status_code=500, detail=str(error_trace))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task#30追加：解約エンドポイント
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/cancel", summary="サービスを解約する")
+async def cancel_service(
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    サービスを解約する。
+    法人オーナー・admin 従業員の両方が実行可能。
+    resolve_corporate_id で両者を統一的に処理する。
+
+    - Stripe Subscription をキャンセル
+    - corporates.is_active = False
+    - corporates.cancelled_at を記録
+    - データは論理削除しない（is_deleted はセットしない）
+    - 税理士法人が解約した場合は配下法人も is_active=False にする
+    """
+    firebase_uid = current_user.get("uid")
+    db = get_database()
+
+    # ② resolve_corporate_id でオーナー・admin 従業員を統一処理
+    corporate_id, _ = await resolve_corporate_id(firebase_uid)
+
+    # ロールチェック：admin のみ解約可能
+    # 法人オーナー（corporates に firebase_uid が存在）は常に admin 扱い
+    # 従業員（employees に存在）は role=admin のみ許可
+    caller_corp = await db["corporates"].find_one({"firebase_uid": firebase_uid})
+    if not caller_corp:
+        caller_emp = await db["employees"].find_one({"firebase_uid": firebase_uid})
+        if not caller_emp or caller_emp.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="解約は管理者のみ実行できます")
+
+    corporate = await db["corporates"].find_one({"_id": ObjectId(corporate_id)})
+    if not corporate:
+        raise HTTPException(status_code=404, detail="法人情報が見つかりません")
+
+    if not corporate.get("is_active", False):
+        raise HTTPException(status_code=400, detail="既に解約済みです")
+
+    # Stripe Subscription のキャンセル（subscription_id がある場合のみ）
+    # ⑤ 例外が発生しても解約処理を止めない（ログのみ）
+    stripe_sub_id = corporate.get("stripe_subscription_id")
+    if stripe_sub_id:
+        from app.services.stripe_service import cancel_subscription
+        import logging as _logging
+        try:
+            await cancel_subscription(stripe_sub_id)
+        except Exception as e:
+            _logging.getLogger(__name__).error(
+                f"[Cancel] Stripe キャンセル失敗（処理は続行） sub={stripe_sub_id}: {e}"
+            )
+
+    now = datetime.utcnow()
+
+    # 自法人を is_active=False に更新
+    await db["corporates"].update_one(
+        {"_id": ObjectId(corporate_id)},
+        {
+            "$set": {
+                "is_active": False,
+                "stripe_subscription_id": None,
+                "cancelled_at": now,
+                "updated_at": now,
+            }
+        },
+    )
+
+    # 税理士法人の場合は配下法人も is_active=False にする
+    # advising_tax_firm_id は firebase_uid（corporates の _id ではない）で保存されている
+    corp_firebase_uid = corporate.get("firebase_uid", "")
+    if corporate.get("corporateType") == "tax_firm" and corp_firebase_uid:
+        await db["corporates"].update_many(
+            {"advising_tax_firm_id": corp_firebase_uid},
+            {
+                "$set": {
+                    "is_active": False,
+                    "cancelled_at": now,
+                    "updated_at": now,
+                }
+            },
+        )
+
+    return {
+        "status": "cancelled",
+        "cancelled_at": now.isoformat(),
+    }
