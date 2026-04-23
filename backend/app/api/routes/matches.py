@@ -11,6 +11,8 @@ from app.api.helpers import (
     parse_oid,
     get_doc_or_404,
     build_unreconciled_query,
+    extract_fiscal_period,
+    ApprovalStatus,
 )
 from app.services.matching_score_service import calculate_match_score
 from app.services.difference_analyzer import analyze_difference
@@ -55,7 +57,7 @@ async def _write_match_events(db, corporate_id: str, document_ids: list, action:
         # receipts / invoices どちらか判断
         doc_type = "receipt"
         try:
-            rec = await db["receipts"].find_one({"_id": ObjectId(did)})
+            rec = await db["receipts"].find_one({"_id": ObjectId(did), "corporate_id": corporate_id})
             if not rec:
                 doc_type = "invoice"
         except Exception as e:
@@ -98,12 +100,14 @@ async def create_match(
       fiscal_period: str (YYYY-MM)
       auto_suggested: bool (候補から実行したか)
     """
-    AUTO_MATCH_THRESHOLD = 1000
+    from app.services.alert_service import get_platform_alert_settings
+    platform_settings = await get_platform_alert_settings()
+    AUTO_MATCH_THRESHOLD = platform_settings.get("auto_match_tolerance", 1000)
 
     transaction_ids = payload.get("transaction_ids", [])
     document_ids = payload.get("document_ids", [])
     match_type = payload.get("match_type", "receipt")
-    fiscal_period = payload.get("fiscal_period", datetime.utcnow().strftime("%Y-%m"))
+    fiscal_period = payload.get("fiscal_period") or extract_fiscal_period()
 
     if match_type not in ("receipt", "invoice", "transfer", "reconciliation"):
         raise HTTPException(status_code=400, detail=f"無効な match_type: {match_type}")
@@ -117,7 +121,7 @@ async def create_match(
         first_tx = None
         for tid in transaction_ids:
             try:
-                t = await ctx.db["transactions"].find_one({"_id": ObjectId(tid)})
+                t = await ctx.db["transactions"].find_one({"_id": ObjectId(tid), "corporate_id": ctx.corporate_id})
                 if t:
                     if t_total == 0:
                         t_total = t.get("amount", 0)
@@ -127,7 +131,7 @@ async def create_match(
                 logger.error(f"[matches] create_match transfer: transaction 取得エラー tid={tid}: {e}", exc_info=True)
 
         if not fiscal_period and first_tx:
-            fiscal_period = first_tx.get("fiscal_period", datetime.utcnow().strftime("%Y-%m"))
+            fiscal_period = first_tx.get("fiscal_period") or extract_fiscal_period()
 
         match_doc = {
             "corporate_id": ctx.corporate_id,
@@ -166,7 +170,7 @@ async def create_match(
         first_tx = None
         for tid in transaction_ids:
             try:
-                t = await ctx.db["transactions"].find_one({"_id": ObjectId(tid)})
+                t = await ctx.db["transactions"].find_one({"_id": ObjectId(tid), "corporate_id": ctx.corporate_id})
                 if t:
                     t_total += t.get("amount", 0)
                     if first_tx is None:
@@ -175,7 +179,7 @@ async def create_match(
                 logger.error(f"[matches] create_match reconciliation: transaction 取得エラー tid={tid}: {e}", exc_info=True)
 
         if not fiscal_period and first_tx:
-            fiscal_period = first_tx.get("fiscal_period", datetime.utcnow().strftime("%Y-%m"))
+            fiscal_period = first_tx.get("fiscal_period") or extract_fiscal_period()
 
         match_doc = {
             "corporate_id": ctx.corporate_id,
@@ -248,7 +252,7 @@ async def create_match(
     first_tx = None
     for tid in transaction_ids:
         try:
-            t = await ctx.db["transactions"].find_one({"_id": ObjectId(tid)})
+            t = await ctx.db["transactions"].find_one({"_id": ObjectId(tid), "corporate_id": ctx.corporate_id})
             if t:
                 t_total += t.get("amount", 0)
                 if first_tx is None:
@@ -259,7 +263,7 @@ async def create_match(
     if t_total == 0:
         for tid in transaction_ids:
             try:
-                t = await ctx.db["bank_transactions"].find_one({"_id": ObjectId(tid)})
+                t = await ctx.db["bank_transactions"].find_one({"_id": ObjectId(tid), "corporate_id": ctx.corporate_id})
                 if t:
                     t_total += t.get("amount", 0)
                     if first_tx is None:
@@ -271,7 +275,7 @@ async def create_match(
     first_doc = None
     for did in document_ids:
         try:
-            d = await ctx.db[collection].find_one({"_id": ObjectId(did)})
+            d = await ctx.db[collection].find_one({"_id": ObjectId(did), "corporate_id": ctx.corporate_id})
             if d:
                 d_total += d.get("amount" if match_type == "receipt" else "total_amount", 0)
                 if first_doc is None:
@@ -395,7 +399,7 @@ async def create_match(
 
             for did in document_ids:
                 try:
-                    inv = await ctx.db["invoices"].find_one({"_id": ObjectId(did)})
+                    inv = await ctx.db["invoices"].find_one({"_id": ObjectId(did), "corporate_id": ctx.corporate_id})
                     if not inv:
                         continue
                     # vendor_id（received）または client_id（issued）を取得
@@ -850,7 +854,7 @@ async def list_matches(
             tx_ids = doc.get("transaction_ids", [])
             if tx_ids:
                 try:
-                    tx = await ctx.db["transactions"].find_one({"_id": ObjectId(tx_ids[0])})
+                    tx = await ctx.db["transactions"].find_one({"_id": ObjectId(tx_ids[0]), "corporate_id": ctx.corporate_id})
                     if tx:
                         serialized["transaction_date"] = tx.get("transaction_date")
                         serialized["transaction_description"] = tx.get("description")
@@ -924,7 +928,7 @@ async def delete_match(
         try:
             await ctx.db[collection].update_one(
                 {"_id": ObjectId(did)},
-                {"$set": {"reconciliation_status": "unreconciled", "approval_status": "approved"}}
+                {"$set": {"reconciliation_status": "unreconciled", "approval_status": ApprovalStatus.APPROVED}}
             )
         except Exception as e:
             logger.error(f"[matches] delete_match: document status 戻しエラー did={did}: {e}", exc_info=True)

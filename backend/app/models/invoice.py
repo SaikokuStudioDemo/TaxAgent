@@ -13,6 +13,7 @@ class InvoiceLineItem(BaseModel):
 class InvoiceCreate(BaseModel):
     document_type: Literal["issued", "received"]
     invoice_number: str
+    tax_rate: Optional[int] = None
     client_id: Optional[str] = None
     client_name: str
     vendor_name: Optional[str] = None  # 請求元会社名（received請求書で使用）
@@ -28,6 +29,8 @@ class InvoiceCreate(BaseModel):
     is_temporary_approval_needed: bool = False
     is_auto_send_enabled: bool = False
     attachments: List[str] = []
+    storage_path: Optional[str] = None
+    storage_url: Optional[str] = None
     approval_status: Optional[str] = None
     project_id: Optional[str] = None
     custom_approvers: Optional[List[ProjectMember]] = None

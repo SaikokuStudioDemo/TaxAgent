@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { useSystemSettings } from '@/composables/useSystemSettings';
 import { ChevronLeft, Plus, CheckCircle, Save, Send, FileText, Loader2, Building2, AlertCircle as AlertCircleIcon, Trash2, FileImage, X, AlertCircle, GripHorizontal, Pencil, Mail, ShieldCheck, FolderKanban } from 'lucide-vue-next';
 import { useRouter, useRoute } from 'vue-router';
 import ClientFormModal from '@/components/invoices/ClientFormModal.vue';
@@ -73,6 +74,8 @@ const availableClients = ref<{id: string, name: string, contactPerson: string, e
 const templateToDelete = ref<InvoiceTemplate | null>(null);
 
 // --- COMPOSABLES ---
+const { taxRates, fetchTaxRates } = useSystemSettings();
+const defaultTaxRateDecimal = computed(() => taxRates.value.standard / 100);
 const { profiles: senderProfiles, fetchProfiles, formatProfileForTextarea } = useCompanyProfiles();
 const { accounts: bankAccounts, fetchBankAccounts } = useBankAccounts();
 const { projects, fetchProjects } = useProjects();
@@ -95,7 +98,7 @@ watch(activeSenderProfile, async (profileId) => {
 
 // --- COMPUTED ---
 const subtotal = computed(() => items.value.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0));
-const taxAmount = computed(() => items.value.reduce((sum, item) => sum + (item.quantity * item.unitPrice * item.taxRate), 0));
+const taxAmount = computed(() => items.value.reduce((sum, item) => sum + Math.floor(item.quantity * item.unitPrice * item.taxRate), 0));
 const totalAmount = computed(() => subtotal.value + taxAmount.value);
 
 const recipientEmail = ref('');
@@ -232,7 +235,7 @@ const saveTemplateName = async (templ: InvoiceTemplate) => {
 };
 
 const addItem = () => {
-    items.value.push({ id: Date.now(), description: '', quantity: 1, unitPrice: 0, taxRate: 0.10 });
+    items.value.push({ id: Date.now(), description: '', quantity: 1, unitPrice: 0, taxRate: defaultTaxRateDecimal.value });
 };
 
 const removeItem = (id: number) => {
@@ -359,9 +362,9 @@ const loadInvoiceData = async (id: string) => {
                 items.value = invoice.line_items.map((li: any, idx: number) => ({
                     id: idx + 1,
                     description: li.description,
-                    quantity: 1, 
+                    quantity: 1,
                     unitPrice: li.amount,
-                    taxRate: li.tax_rate
+                    taxRate: (li.tax_rate ?? invoice.tax_rate ?? 10) / 100,
                 }));
             }
             
@@ -379,7 +382,7 @@ const loadInvoiceData = async (id: string) => {
 onMounted(async () => {
     fetchTemplates();
     fetchProjects();
-    await fetchProfiles();
+    await Promise.all([fetchProfiles(), fetchTaxRates()]);
     // Set default sender profile
     const defaultProfile = senderProfiles.value.find((p: any) => p.is_default) || senderProfiles.value[0];
     if (defaultProfile) activeSenderProfile.value = defaultProfile.id;
@@ -393,6 +396,8 @@ onMounted(async () => {
 
     if (editingInvoiceId.value) {
         loadInvoiceData(editingInvoiceId.value);
+    } else {
+        items.value = items.value.map(item => ({ ...item, taxRate: defaultTaxRateDecimal.value }));
     }
 });
 
@@ -510,6 +515,7 @@ const buildPayload = () => {
         recipient_email: recipientEmail.value,
         issue_date: issueDate.value,
         due_date: dueDate.value,
+        tax_rate: Math.round((items.value[0]?.taxRate ?? 0.10) * 100),
         subtotal: subtotal.value,
         tax_amount: taxAmount.value,
         total_amount: totalAmount.value,

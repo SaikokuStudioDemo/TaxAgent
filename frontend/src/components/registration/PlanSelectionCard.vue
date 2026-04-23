@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { CheckCircle2, Circle } from 'lucide-vue-next';
-import { PLANS, OPTIONS } from '@/lib/constants/mockData';
 import { formatCurrency, calculateTaxInclusive } from '@/lib/utils/formatters';
 
 defineProps<{
   selectedPlanId: string;
   selectedOptions: string[];
+  plans: any[];
+  options: any[];
 }>();
 
 const emit = defineEmits<{
@@ -38,7 +39,7 @@ const handleToggleOption = (id: string) => {
         <h3 class="text-base font-semibold text-gray-800 mb-4">基本プランを選択</h3>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div
-            v-for="plan in PLANS"
+            v-for="plan in plans"
             :key="plan.id"
             @click="handleSelectPlan(plan.id)"
             class="relative p-6 rounded-xl border-2 cursor-pointer transition-all duration-200"
@@ -56,7 +57,7 @@ const handleToggleOption = (id: string) => {
                 <div class="mt-2">
                   <div class="flex items-baseline gap-1">
                     <span class="text-2xl font-black text-gray-900">
-                      {{ formatCurrency(calculateTaxInclusive(plan.price)) }}
+                      {{ formatCurrency(calculateTaxInclusive(plan.price, 10)) }}
                     </span>
                     <span class="text-sm text-gray-500">/月</span>
                   </div>
@@ -81,7 +82,7 @@ const handleToggleOption = (id: string) => {
         <h3 class="text-base font-semibold text-gray-800 mb-4">追加オプション（任意）</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label
-            v-for="option in OPTIONS"
+            v-for="option in options"
             :key="option.id"
             class="flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all"
             :class="[
@@ -101,7 +102,7 @@ const handleToggleOption = (id: string) => {
               <span class="font-medium text-gray-900">{{ option.name }}</span>
             </div>
             <div class="text-gray-900 font-semibold text-right">
-              +{{ formatCurrency(calculateTaxInclusive(option.price)) }}<span class="text-xs text-gray-500 font-normal">/月<br>(税抜 {{ formatCurrency(option.price) }})</span>
+              +{{ formatCurrency(calculateTaxInclusive(option.price, 10)) }}<span class="text-xs text-gray-500 font-normal">/月<br>(税抜 {{ formatCurrency(option.price) }})</span>
             </div>
           </label>
         </div>

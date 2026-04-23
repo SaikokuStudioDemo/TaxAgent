@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { Building2 } from 'lucide-vue-next';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
+import { isApproved, isEditable, APPROVAL_STATUS } from '@/lib/constants/approvalStatus';
 import { useInvoices, type Invoice } from '@/composables/useInvoices';
 import { useAuth } from '@/composables/useAuth';
 import DocumentDetailModal from '@/components/shared/DocumentDetailModal.vue';
@@ -34,11 +35,11 @@ const subtitle = computed(() => {
 const imageUrl = computed(() =>
   (props.invoice?.attachments ?? [])[0] ?? props.invoice?.image_url ?? ''
 );
-const isDraft = computed(() => props.invoice?.approval_status === 'draft');
-const isPending = computed(() => props.invoice?.approval_status === 'pending_approval');
+const isDraft = computed(() => props.invoice?.approval_status === APPROVAL_STATUS.DRAFT);
+const isPending = computed(() => props.invoice?.approval_status === APPROVAL_STATUS.PENDING);
 const isPendingSend = computed(() =>
   props.document_type === 'issued'
-  && ['approved', 'auto_approved'].includes(props.invoice?.approval_status ?? '')
+  && isApproved(props.invoice?.approval_status ?? '')
   && props.invoice?.delivery_status !== 'sent'
 );
 const approveLabel = computed(() =>
@@ -60,8 +61,8 @@ const isOwner = computed(() => !!props.invoice && props.invoice.created_by === u
 const editable = computed(() => {
   if (!props.invoice) return false;
   const status = props.invoice.approval_status;
-  if (isOwner.value && ['pending_approval', 'rejected', 'draft'].includes(status)) return true;
-  if (isAccountingRole.value && !['approved', 'auto_approved'].includes(status)) return true;
+  if (isOwner.value && isEditable(status)) return true;
+  if (isAccountingRole.value && !isApproved(status)) return true;
   return false;
 });
 
@@ -82,8 +83,8 @@ const onSave = async (data: Record<string, any>, submit = false): Promise<boolea
     if (data[field] !== undefined) payload[field] = data[field];
   }
   // 「申請する」ボタン or 差戻し後の再保存 → pending_approval に遷移
-  if (submit || props.invoice.approval_status === 'rejected') {
-    payload.approval_status = 'pending_approval';
+  if (submit || props.invoice.approval_status === APPROVAL_STATUS.REJECTED) {
+    payload.approval_status = APPROVAL_STATUS.PENDING;
   }
   const result = await updateInvoice(props.invoice.id, payload);
   if (result) {
@@ -176,7 +177,7 @@ const onSend = async (method: 'email' | 'hand'): Promise<boolean> => {
         <h3 class="text-sm font-bold text-gray-900 border-b border-gray-100 pb-2 mb-4 flex items-center gap-2">
           <span class="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>
           請求書を編集
-          <span v-if="invoice?.approval_status === 'rejected'" class="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">保存時に再申請されます</span>
+          <span v-if="invoice?.approval_status === APPROVAL_STATUS.REJECTED" class="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">保存時に再申請されます</span>
         </h3>
         <div class="space-y-4">
           <!-- 合計金額 -->

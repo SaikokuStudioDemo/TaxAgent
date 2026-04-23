@@ -325,7 +325,7 @@ async def test_tax_8_reverse_calculation_precision():
 
     cases = [
         (10800, 800),   # 端数なし
-        (10000, 740),   # floor(10000*8/108) = 740（切り捨て）
+        (10000, 741),   # round(10000*8/108) = round(740.74...) = 741（四捨五入）
     ]
     for amount, expected_tax in cases:
         mock_db = build_mock_db({

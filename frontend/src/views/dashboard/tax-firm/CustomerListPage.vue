@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue';
 import { useAuth } from '@/composables/useAuth';
 import { useRouter } from 'vue-router';
 import { formatCurrency, calculateTaxInclusive } from '@/lib/utils/formatters';
-import { Plus, Edit2, Loader2, CreditCard } from 'lucide-vue-next';
+import { Plus, Edit2, Loader2, CreditCard, ClipboardList } from 'lucide-vue-next';
 
 const router = useRouter();
 
@@ -91,7 +91,7 @@ onMounted(async () => {
                   <div class="text-xs text-gray-400 font-normal mt-0.5 font-mono">{{ customer.firebase_uid }}</div>
                 </td>
                 <td class="p-4 text-gray-600 font-medium">
-                  {{ formatCurrency(calculateTaxInclusive(customer.totalUsageFee || 0)) }}
+                  {{ formatCurrency(calculateTaxInclusive(customer.totalUsageFee || 0, 10)) }}
                   <span class="text-[10px] text-gray-400 block mt-0.5">(税抜 {{ formatCurrency(customer.totalUsageFee || 0) }})</span>
                 </td>
                 <!-- 課金設定列 -->
@@ -139,13 +139,23 @@ onMounted(async () => {
                   </div>
                 </td>
                 <td class="p-4 text-center">
-                  <RouterLink
-                    :to="`/dashboard/tax-firm/contract-edit/${customer._id}`"
-                    class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
-                    title="編集"
-                  >
-                    <Edit2 :size="16" />
-                  </RouterLink>
+                  <div class="flex items-center justify-center gap-2">
+                    <RouterLink
+                      :to="`/dashboard/tax-firm/customers/${customer.firebase_uid}/review`"
+                      class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors text-xs font-medium"
+                      title="レビュー"
+                    >
+                      <ClipboardList :size="14" />
+                      レビュー
+                    </RouterLink>
+                    <RouterLink
+                      :to="`/dashboard/tax-firm/contract-edit/${customer._id}`"
+                      class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                      title="編集"
+                    >
+                      <Edit2 :size="16" />
+                    </RouterLink>
+                  </div>
                 </td>
               </tr>
             </template>

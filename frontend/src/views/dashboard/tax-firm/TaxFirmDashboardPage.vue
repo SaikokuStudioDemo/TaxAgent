@@ -65,7 +65,7 @@ const planName = computed(() => {
                 </div>
                 <h2 class="text-sm font-bold text-gray-500 mb-1">ユーザー利用料 合計 (月額)</h2>
                 <div class="text-3xl font-bold text-gray-900">
-                    {{ formatCurrency(calculateTaxInclusive(totalUsageFee())) }} <span class="text-base font-medium text-gray-500">/ 月</span>
+                    {{ formatCurrency(calculateTaxInclusive(totalUsageFee(), 10)) }} <span class="text-base font-medium text-gray-500">/ 月</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">(税抜 {{ formatCurrency(totalUsageFee()) }})</div>
             </div>
@@ -80,7 +80,7 @@ const planName = computed(() => {
                     {{ planName }}
                 </div>
                 <p v-if="userProfile?.data?.monthlyFee !== undefined" class="text-lg font-bold text-indigo-600 mb-2">
-                    {{ formatCurrency(calculateTaxInclusive(userProfile?.data?.monthlyFee)) }} <span class="text-sm font-medium text-gray-500">/ 月</span>
+                    {{ formatCurrency(calculateTaxInclusive(userProfile?.data?.monthlyFee, 10)) }} <span class="text-sm font-medium text-gray-500">/ 月</span>
                     <span class="block text-xs text-gray-400 font-normal mt-0.5">(税抜 {{ formatCurrency(userProfile?.data?.monthlyFee) }})</span>
                 </p>
                 <p class="text-xs text-gray-400">{{ displayName }}</p>

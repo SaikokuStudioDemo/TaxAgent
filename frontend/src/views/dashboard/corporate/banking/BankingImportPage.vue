@@ -11,7 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-vue-next';
-import { formatNumber as formatAmount } from '@/lib/utils/formatters';
+import { formatNumber as formatAmount, formatDateISO } from '@/lib/utils/formatters';
 import { useTransactions } from '@/composables/useTransactions';
 import { useAuth } from '@/composables/useAuth';
 
@@ -78,7 +78,7 @@ const parseCsv = (text: string): StagedTransaction[] => {
   return lines
     .map((line, i) => {
       const cols = line.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
-      const date = cols[0] || new Date().toISOString().slice(0, 10);
+      const date = cols[0] || formatDateISO(new Date());
       const description = cols[1] || `明細${i + 1}`;
       const col2 = parseInt(cols[2]?.replace(/[¥,\s]/g, '') || '0', 10) || 0;
       const col3 = parseInt(cols[3]?.replace(/[¥,\s]/g, '') || '0', 10) || 0;

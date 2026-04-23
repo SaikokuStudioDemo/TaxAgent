@@ -10,7 +10,9 @@ try:
     # Check if the file exists before trying to load it
     if os.path.exists(settings.FIREBASE_CREDENTIALS_PATH):
         cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
-        firebase_admin.initialize_app(cred)
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': settings.FIREBASE_STORAGE_BUCKET
+        })
         print("Firebase Admin initialized successfully.")
     else:
         print(f"WARNING: Firebase credentials file not found at {settings.FIREBASE_CREDENTIALS_PATH}")
@@ -48,3 +50,11 @@ async def get_current_user(cred: HTTPAuthorizationCredentials = Depends(security
             detail=f"Invalid authentication credentials: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+async def verify_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    """ADMIN_UIDS に含まれない UID は 403 を返す。"""
+    uid = current_user.get("uid", "")
+    if uid not in settings.ADMIN_UIDS:
+        raise HTTPException(status_code=403, detail="Admin権限がありません。")
+    return current_user

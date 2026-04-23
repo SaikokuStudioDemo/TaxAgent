@@ -10,6 +10,7 @@ import { ref, computed } from 'vue';
 import { useReceipts, type Receipt } from '@/composables/useReceipts';
 import { useTransactions, type Transaction, type Match } from '@/composables/useTransactions';
 import { sortSelectedFirst, sortByProximity } from '@/utils/matching';
+import { getFiscalPeriod } from '@/lib/utils/formatters';
 
 // ── 型定義 ───────────────────────────────────────────────
 
@@ -211,7 +212,7 @@ export function useExpenseMatching() {
         match_type: 'receipt',
         transaction_ids: [selectedTransaction.value.id],
         document_ids: selectedGroup.value.receipts.map(r => r.id),
-        fiscal_period: selectedTransaction.value.fiscal_period ?? new Date().toISOString().slice(0, 7),
+        fiscal_period: selectedTransaction.value.fiscal_period ?? getFiscalPeriod(),
         matched_by: 'manual',
       });
       selectedGroupUserId.value = null;

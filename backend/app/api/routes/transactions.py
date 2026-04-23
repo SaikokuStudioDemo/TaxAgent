@@ -7,6 +7,7 @@ from app.api.helpers import (
     get_corporate_context,
     CorporateContext,
     parse_oid,
+    extract_fiscal_period,
 )
 import logging
 from collections import defaultdict
@@ -128,7 +129,7 @@ async def import_transactions(
     skipped_count = 0
     for t in transactions:
         date_str = t.get("transaction_date", t.get("date", ""))
-        fiscal_period = date_str[:7] if date_str else datetime.utcnow().strftime("%Y-%m")
+        fiscal_period = extract_fiscal_period(date_str)
         dup_key = (date_str, t.get("description", ""), t.get("amount", 0), source_type)
         if dup_key in existing_keys:
             skipped_count += 1
@@ -368,7 +369,7 @@ async def import_pdf(
     skipped_count = 0
     for t in extracted:
         date_str = t.get("transaction_date", "")
-        fiscal_period = date_str[:7] if date_str else datetime.utcnow().strftime("%Y-%m")
+        fiscal_period = extract_fiscal_period(date_str)
         withdrawal = t.get("withdrawal_amount", 0) or 0
         deposit = t.get("deposit_amount", 0) or 0
         amount = t.get("amount") or max(withdrawal, deposit)

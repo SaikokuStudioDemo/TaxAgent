@@ -33,14 +33,7 @@ export function usePlans() {
         options.value = await optionsRes.json();
       }
     } catch (e) {
-      // フォールバック：mockData を使う
-      try {
-        const { PLANS, OPTIONS } = await import('@/lib/constants/mockData');
-        plans.value = PLANS;
-        options.value = OPTIONS;
-      } catch {
-        error.value = 'プラン情報の取得に失敗しました';
-      }
+      error.value = 'プラン情報の取得に失敗しました';
     } finally {
       isLoading.value = false;
     }

@@ -9,12 +9,22 @@ const router = useRouter();
 
 const corporateId = route.params.id as string;
 
+interface EmailEnabled {
+  rejected_stale_alert: boolean;
+  no_attachment_alert: boolean;
+  unreconciled_alert: boolean;
+  approval_delay_alert: boolean;
+  tax_advisor_escalation_alert: boolean;
+}
+
 interface AlertsConfig {
   corporate_id: string;
   rejected_stale_days: number;
   no_attachment_days: number;
   unreconciled_days: number;
   approval_delay_days: number;
+  tax_advisor_escalation_days: number;
+  email_enabled: EmailEnabled;
 }
 
 const config = ref<AlertsConfig>({
@@ -23,6 +33,14 @@ const config = ref<AlertsConfig>({
   no_attachment_days: 3,
   unreconciled_days: 7,
   approval_delay_days: 3,
+  tax_advisor_escalation_days: 3,
+  email_enabled: {
+    rejected_stale_alert: false,
+    no_attachment_alert: false,
+    unreconciled_alert: false,
+    approval_delay_alert: false,
+    tax_advisor_escalation_alert: false,
+  },
 });
 
 const isLoading = ref(false);
@@ -30,26 +48,24 @@ const isSaving = ref(false);
 const error = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
 
-const FIELD_LABELS: Record<string, string> = {
-  rejected_stale_days: '差し戻し放置アラート（日）',
-  no_attachment_days: '証憑未提出アラート（日）',
-  unreconciled_days: '消込滞留アラート（日）',
-  approval_delay_days: '承認遅延アラート（日）',
-};
-
-const FIELD_DESCRIPTIONS: Record<string, string> = {
-  rejected_stale_days: '差し戻し後 N 日以上更新がない書類にアラートを発生させます',
-  no_attachment_days: '証憑ファイルなしで N 日以上放置された領収書にアラートを発生させます',
-  unreconciled_days: '承認済みで N 日以上消込されていない書類にアラートを発生させます',
-  approval_delay_days: '承認待ちで N 日以上止まっている書類にアラートを発生させます',
-};
+const configFields = [
+  { key: 'rejected_stale_days',         emailKey: 'rejected_stale_alert',         label: '差し戻し放置',        desc: '差し戻し後 N 日以上更新がない書類にアラートを発生させます' },
+  { key: 'no_attachment_days',          emailKey: 'no_attachment_alert',          label: '証憑未提出',          desc: '証憑ファイルなしで N 日以上放置された領収書にアラートを発生させます' },
+  { key: 'unreconciled_days',           emailKey: 'unreconciled_alert',           label: '消込滞留',            desc: '承認済みで N 日以上消込されていない書類にアラートを発生させます' },
+  { key: 'approval_delay_days',         emailKey: 'approval_delay_alert',         label: '承認フロー遅延',       desc: '承認待ちで N 日以上止まっている書類にアラートを発生させます' },
+  { key: 'tax_advisor_escalation_days', emailKey: 'tax_advisor_escalation_alert', label: '税理士エスカレーション', desc: '税理士へのエスカレーションが N 日以上保留の場合にアラートを発生させます' },
+] as const;
 
 const fetchConfig = async () => {
   isLoading.value = true;
   error.value = null;
   try {
     const res = await api.get<AlertsConfig>(`/alerts-config/${corporateId}`);
-    config.value = res;
+    config.value = {
+      ...config.value,
+      ...res,
+      email_enabled: { ...config.value.email_enabled, ...(res.email_enabled ?? {}) },
+    };
   } catch (e: any) {
     error.value = e.message ?? '設定の取得に失敗しました';
   } finally {
@@ -63,10 +79,12 @@ const handleSave = async () => {
   successMessage.value = null;
   try {
     await api.put(`/alerts-config/${corporateId}`, {
-      rejected_stale_days: config.value.rejected_stale_days,
-      no_attachment_days: config.value.no_attachment_days,
-      unreconciled_days: config.value.unreconciled_days,
-      approval_delay_days: config.value.approval_delay_days,
+      rejected_stale_days:         config.value.rejected_stale_days,
+      no_attachment_days:          config.value.no_attachment_days,
+      unreconciled_days:           config.value.unreconciled_days,
+      approval_delay_days:         config.value.approval_delay_days,
+      tax_advisor_escalation_days: config.value.tax_advisor_escalation_days,
+      email_enabled:               config.value.email_enabled,
     });
     successMessage.value = '設定を保存しました';
     setTimeout(() => { successMessage.value = null; }, 3000);
@@ -76,13 +94,6 @@ const handleSave = async () => {
     isSaving.value = false;
   }
 };
-
-const configFields = [
-  'rejected_stale_days',
-  'no_attachment_days',
-  'unreconciled_days',
-  'approval_delay_days',
-] as const;
 
 onMounted(fetchConfig);
 </script>
@@ -120,7 +131,7 @@ onMounted(fetchConfig);
 
     <!-- ローディング -->
     <div v-if="isLoading" class="space-y-4">
-      <div v-for="i in 4" :key="i" class="h-20 bg-slate-100 rounded-xl animate-pulse" />
+      <div v-for="i in 5" :key="i" class="h-20 bg-slate-100 rounded-xl animate-pulse" />
     </div>
 
     <!-- フォーム -->
@@ -131,24 +142,50 @@ onMounted(fetchConfig);
         </p>
       </div>
 
+      <!-- ヘッダー行 -->
+      <div class="grid grid-cols-[1fr_auto_auto] gap-4 px-6 py-2 bg-slate-50 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+        <span>アラート種別</span>
+        <span class="w-28 text-center">閾値（日）</span>
+        <span class="w-24 text-center">メール通知</span>
+      </div>
+
       <div class="divide-y divide-slate-100">
         <div
           v-for="field in configFields"
-          :key="field"
-          class="px-6 py-5 flex items-center justify-between gap-6"
+          :key="field.key"
+          class="grid grid-cols-[1fr_auto_auto] gap-4 px-6 py-4 items-center"
         >
-          <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-slate-800">{{ FIELD_LABELS[field] }}</p>
-            <p class="text-xs text-slate-500 mt-0.5">{{ FIELD_DESCRIPTIONS[field] }}</p>
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-slate-800">{{ field.label }}</p>
+            <p class="text-xs text-slate-500 mt-0.5">{{ field.desc }}</p>
           </div>
-          <div class="flex items-center gap-2 shrink-0">
+          <div class="w-28 flex items-center justify-center gap-1.5 shrink-0">
             <input
-              v-model.number="config[field]"
+              v-model.number="(config as any)[field.key]"
               type="number"
               :min="1"
-              class="w-20 text-center border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+              class="w-16 text-center border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
             />
             <span class="text-sm text-slate-500">日</span>
+          </div>
+          <!-- メール通知トグル -->
+          <div class="w-24 flex justify-center shrink-0">
+            <button
+              type="button"
+              @click="config.email_enabled[field.emailKey] = !config.email_enabled[field.emailKey]"
+              :class="[
+                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1',
+                config.email_enabled[field.emailKey] ? 'bg-indigo-600' : 'bg-slate-300'
+              ]"
+              :title="config.email_enabled[field.emailKey] ? 'メール通知 ON' : 'メール通知 OFF'"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  config.email_enabled[field.emailKey] ? 'translate-x-6' : 'translate-x-1'
+                ]"
+              />
+            </button>
           </div>
         </div>
       </div>

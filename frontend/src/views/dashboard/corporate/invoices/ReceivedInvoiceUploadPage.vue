@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { UploadCloud, ScanLine, AlertCircle, FileText, Loader2, Trash2, CheckCircle2 } from 'lucide-vue-next';
-import { formatCurrency, formatInputAmount, parseInputAmount } from '@/lib/utils/formatters';
+import { formatCurrency, formatInputAmount, parseInputAmount, getFiscalPeriod, formatDateISO } from '@/lib/utils/formatters';
+import { calcTaxFromInclusive } from '@/lib/utils/taxUtils';
 import { useInvoices } from '@/composables/useInvoices';
 import { useAuth } from '@/composables/useAuth';
 import { useProjects } from '@/composables/useProjects';
@@ -20,13 +21,14 @@ interface StagedInvoice {
   status: 'new' | 'edited' | 'error';
   errorMessage?: string; // Optional error reason
   fileUrl?: string;
+  storagePath?: string;
   fileName?: string;
 }
 
 const { createInvoice } = useInvoices();
 const { userProfile } = useAuth();
 const { projects, fetchProjects } = useProjects();
-const { fileInput, isUploading: isExtracting, uploadSingleFile, openFilePicker: triggerFileInput, clearFileInput } = useFileUpload({
+const { fileInput, isUploading: isExtracting, uploadSingleFileWithPath, openFilePicker: triggerFileInput, clearFileInput } = useFileUpload({
   storagePath: 'invoices/',
   corporateId: computed(() => userProfile.value?.corporate_id),
 });
@@ -50,18 +52,17 @@ const handleFileSelect = async (event: Event) => {
   const newInvoices: StagedInvoice[] = [];
 
   for (const file of files) {
-    const url = await uploadSingleFile(file);
-    if (!url) {
+    const uploaded = await uploadSingleFileWithPath(file);
+    if (!uploaded) {
       console.error('Upload failed for', file.name);
       alert('ファイルのアップロードに失敗しました。');
       break;
     }
-    // TODO: OCR/AI extraction will populate these fields
     const issueDateObj = new Date();
-    const issueDate = issueDateObj.toISOString().split('T')[0];
+    const issueDate = formatDateISO(issueDateObj);
     const dueDateObj = new Date(issueDateObj);
     dueDateObj.setMonth(dueDateObj.getMonth() + 1);
-    const dueDate = dueDateObj.toISOString().split('T')[0];
+    const dueDate = formatDateISO(dueDateObj);
 
     newInvoices.push({
       id: crypto.randomUUID(),
@@ -72,7 +73,8 @@ const handleFileSelect = async (event: Event) => {
       taxRate: 10,
       issuer: file.name.split('.')[0],
       status: 'new',
-      fileUrl: url,
+      fileUrl: uploaded.url,
+      storagePath: uploaded.storagePath,
       fileName: file.name,
     });
   }
@@ -118,7 +120,7 @@ const submitSelected = async () => {
   let saved = 0;
   
   try {
-    const fiscal_period = new Date().toISOString().slice(0, 7);
+    const fiscal_period = getFiscalPeriod();
     for (const inv of selectedToSubmit) {
       const submittedBy = userProfile.value?.type === 'employee'
         ? userProfile.value?.data?._id
@@ -130,8 +132,8 @@ const submitSelected = async () => {
         recipient_email: '',
         issue_date: inv.issueDate,
         due_date: inv.dueDate,
-        subtotal: Math.round(inv.amount / 1.1),
-        tax_amount: Math.round(inv.amount - (inv.amount / 1.1)),
+        subtotal: inv.amount - calcTaxFromInclusive(inv.amount, inv.taxRate ?? 10),
+        tax_amount: calcTaxFromInclusive(inv.amount, inv.taxRate ?? 10),
         total_amount: inv.amount,
         fiscal_period,
         line_items: [{
@@ -141,6 +143,8 @@ const submitSelected = async () => {
           tax_rate: inv.taxRate
         }],
         attachments: inv.fileUrl ? [inv.fileUrl] : [],
+        storage_path: inv.storagePath,
+        storage_url: inv.fileUrl,
         ...(submittedBy ? { submitted_by: submittedBy } : {}),
       });
       if (result) saved++;

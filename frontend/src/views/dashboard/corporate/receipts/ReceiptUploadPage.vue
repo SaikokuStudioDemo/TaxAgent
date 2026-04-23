@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { useSystemSettings } from '@/composables/useSystemSettings';
 import { UploadCloud, ScanLine, Trash2, CheckCircle2, Save, Loader2, AlertCircle, FileText } from 'lucide-vue-next';
-import { formatCurrency, formatInputAmount, parseInputAmount } from '@/lib/utils/formatters';
+import { formatCurrency, formatInputAmount, parseInputAmount, getFiscalPeriod, formatDateISO } from '@/lib/utils/formatters';
 import { useReceipts } from '@/composables/useReceipts';
 import { useProjects } from '@/composables/useProjects';
 import { useAuth } from '@/composables/useAuth';
@@ -22,14 +23,16 @@ interface StagedReceipt {
   category: string;
   status: 'new' | 'edited' | 'error';
   errorMessage?: string;
-  fileUrl?: string; // Original document URL
+  fileUrl?: string;
+  storagePath?: string;
   fileName?: string;
 }
 
 const { createReceipt } = useReceipts();
 const { projects, fetchProjects } = useProjects();
+const { taxRates, fetchTaxRates } = useSystemSettings();
 const { userProfile } = useAuth();
-const { fileInput, isUploading: isExtracting, uploadSingleFile, openFilePicker: triggerFileInput, clearFileInput } = useFileUpload({
+const { fileInput, isUploading: isExtracting, uploadSingleFileWithPath, openFilePicker: triggerFileInput, clearFileInput } = useFileUpload({
   storagePath: 'receipts/',
   corporateId: computed(() => userProfile.value?.corporate_id),
 });
@@ -44,7 +47,10 @@ const successCount = ref(0);
 
 const categories = ['消耗品費', '交際費', '旅費交通費', '通信費', '会議費'];
 
-onMounted(() => fetchProjects());
+onMounted(() => {
+  fetchProjects();
+  fetchTaxRates();
+});
 
 // Handle actual file selection and upload
 const handleFileSelect = async (event: Event) => {
@@ -55,25 +61,25 @@ const handleFileSelect = async (event: Event) => {
   const newReceipts: StagedReceipt[] = [];
 
   for (const file of files) {
-    const url = await uploadSingleFile(file);
-    if (!url) {
+    const uploaded = await uploadSingleFileWithPath(file);
+    if (!uploaded) {
       console.error('Upload failed for', file.name);
       alert('ファイルのアップロードに失敗しました。');
       break;
     }
-    // TODO: OCR/AI extraction will populate these fields
     newReceipts.push({
       id: crypto.randomUUID(),
       selected: true,
-      date: new Date().toISOString().split('T')[0],
+      date: formatDateISO(new Date()),
       amount: 0,
-      taxRate: 10,
+      taxRate: taxRates.value.standard,
       paymentMethod: '立替',
       receiptType: 'expense',
       payee: file.name.split('.')[0],
       category: '消耗品費',
       status: 'new',
-      fileUrl: url,
+      fileUrl: uploaded.url,
+      storagePath: uploaded.storagePath,
       fileName: file.name,
     });
   }
@@ -116,7 +122,7 @@ const submitSelected = async () => {
   let saved = 0;
 
   try {
-    const currentMonth = new Date().toISOString().slice(0, 7);
+    const currentMonth = getFiscalPeriod();
     for (const r of selectedToSubmit) {
       const submittedBy = userProfile.value?.type === 'employee'
         ? userProfile.value?.data?._id
@@ -131,6 +137,8 @@ const submitSelected = async () => {
         category: r.category,
         fiscal_period: currentMonth,
         attachments: r.fileUrl ? [r.fileUrl] : [],
+        storage_path: r.storagePath,
+        storage_url: r.fileUrl,
         ...(submittedBy ? { submitted_by: submittedBy } : {}),
         ...(r.projectId ? { project_id: r.projectId } : {}),
       });

@@ -8,6 +8,7 @@ import {
 import { useReceipts, type Receipt } from '@/composables/useReceipts';
 import { useAuth } from '@/composables/useAuth';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
+import { isEditable, APPROVAL_STATUS } from '@/lib/constants/approvalStatus';
 
 const router = useRouter();
 const { receipts, isLoading, error, fetchReceipts, deleteReceipt } = useReceipts();
@@ -136,25 +137,22 @@ const handleEdit = (receipt: Receipt) => {
 };
 
 // ─── ステータス表示 ──────────────────────────────────────────────
-const isEditable = (status: string) =>
-  ['pending_approval', 'draft', 'rejected'].includes(status);
-
 const statusBadge = (status: string): { label: string; class: string } => {
   switch (status) {
-    case 'approved':
-    case 'auto_approved': return { label: '承認済み', class: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
-    case 'rejected':      return { label: '差戻し',   class: 'bg-rose-100 text-rose-800 border-rose-200' };
-    case 'pending_approval': return { label: '承認待ち', class: 'bg-blue-100 text-blue-800 border-blue-200' };
-    case 'draft':         return { label: '下書き',   class: 'bg-gray-100 text-gray-600 border-gray-200' };
-    default:              return { label: status,    class: 'bg-gray-100 text-gray-600 border-gray-200' };
+    case APPROVAL_STATUS.APPROVED:
+    case APPROVAL_STATUS.AUTO_APPROVED: return { label: '承認済み', class: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+    case APPROVAL_STATUS.REJECTED:      return { label: '差戻し',   class: 'bg-rose-100 text-rose-800 border-rose-200' };
+    case APPROVAL_STATUS.PENDING:       return { label: '承認待ち', class: 'bg-blue-100 text-blue-800 border-blue-200' };
+    case APPROVAL_STATUS.DRAFT:         return { label: '下書き',   class: 'bg-gray-100 text-gray-600 border-gray-200' };
+    default:                            return { label: status,    class: 'bg-gray-100 text-gray-600 border-gray-200' };
   }
 };
 const statusIcon = (status: string) => {
   switch (status) {
-    case 'approved':
-    case 'auto_approved': return CheckCircle2;
-    case 'rejected':      return XCircle;
-    default:              return Clock;
+    case APPROVAL_STATUS.APPROVED:
+    case APPROVAL_STATUS.AUTO_APPROVED: return CheckCircle2;
+    case APPROVAL_STATUS.REJECTED:      return XCircle;
+    default:                            return Clock;
   }
 };
 </script>

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from app.api.deps import get_current_user
 from app.api.helpers import resolve_corporate_id
+from app.core.config import DEFAULT_TAX_RATE
 from app.db.mongodb import get_database
 from app.services.chat_service import ChatService, get_ai_credit_limit
 from app.services.agent_tools import (
@@ -375,7 +376,7 @@ class DraftInvoiceRequest(BaseModel):
     amount: int
     description: str
     due_date: Optional[str] = None   # "YYYY-MM-DD"。None なら today+30日
-    tax_rate: int = 10
+    tax_rate: int = DEFAULT_TAX_RATE
 
 
 # ── 仕訳提案 ──────────────────────────────────────────────────────────────────
@@ -479,7 +480,7 @@ class SubmitExpenseClaimRequest(BaseModel):
     payee: str
     category: str
     payment_method: str
-    tax_rate: int = 10
+    tax_rate: int = DEFAULT_TAX_RATE
     file_url: Optional[str] = None
     fiscal_period: str = ""
     confirmed: bool = False

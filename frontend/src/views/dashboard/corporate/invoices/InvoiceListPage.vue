@@ -12,13 +12,14 @@ import {
     Plus,
     CheckCircle,
     Clock,
-    AlertCircle
+    AlertCircle,
+    Pencil
 } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import { useInvoices, type Invoice } from '@/composables/useInvoices';
 import { api } from '@/lib/api';
 import InvoiceDetailModal from '@/components/invoices/InvoiceDetailModal.vue';
-import { formatNumber as formatCurrency } from '@/lib/utils/formatters';
+import { formatNumber as formatCurrency, getFiscalPeriod } from '@/lib/utils/formatters';
 
 const router = useRouter();
 
@@ -101,7 +102,9 @@ const handleDeleteSingle = (id: string) => {
     });
 };
 
-// handleEditSingle removed as it's not currently used in the list view actions
+const handleEditSingle = (invoice: Invoice) => {
+    router.push(`/dashboard/corporate/invoices/create?id=${invoice.id}`);
+};
 
 const selectedPreviewInvoice = ref<Invoice | null>(null);
 const isPreviewModalOpen = ref(false);
@@ -216,7 +219,7 @@ const toggleExpansion = (id: string) => {
     }
 };
 
-const currentMonth = new Date().toISOString().slice(0, 7);
+const currentMonth = getFiscalPeriod();
 const issuedSummary = computed(() => {
     const list = invoices.value.filter(i => i.document_type === 'issued');
     const thisMonth = list.filter(i => i.issue_date?.startsWith(currentMonth));
@@ -485,16 +488,24 @@ const navigateToCreate = () => router.push('/dashboard/corporate/invoices/create
                 </td>
                 <td class="px-4 py-4 whitespace-nowrap text-center sticky right-0 bg-white/90 group-hover:bg-blue-50/90 transition-colors backdrop-blur shadow-[-4px_0_10px_-4px_rgba(0,0,0,0.1)]">
                     <div class="flex items-center justify-center gap-1.5">
-                        <button 
+                        <button
                           @click.stop="openPreview(invoice)"
-                          class="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors inline-flex items-center justify-center" 
+                          class="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors inline-flex items-center justify-center"
                           title="詳細"
                         >
                              <FileText class="w-4 h-4" />
                         </button>
-                        <button 
+                        <button
+                          v-if="['draft', 'pending_approval'].includes(invoice.approval_status)"
+                          @click.stop="handleEditSingle(invoice)"
+                          class="p-1.5 text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors inline-flex items-center justify-center"
+                          title="編集"
+                        >
+                            <Pencil class="w-4 h-4" />
+                        </button>
+                        <button
                           @click.stop="handleDeleteSingle(invoice.id)"
-                          class="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors inline-flex items-center justify-center" 
+                          class="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors inline-flex items-center justify-center"
                           title="削除"
                         >
                             <Trash2 class="w-4 h-4" />

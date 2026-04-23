@@ -13,6 +13,8 @@ from app.api.helpers import (
     build_scope_filter,
     enrich_with_approval_history,
     build_name_map,
+    extract_fiscal_period,
+    ApprovalStatus,
 )
 from app.services.duplicate_detector import check_duplicate_receipt
 from app.models.transaction import ReceiptCreate
@@ -20,36 +22,31 @@ import logging
 from app.services.rule_evaluation_service import evaluate_approval_rules
 from app.api.routes.templates import router as templates_router
 from app.services.journal_rule_service import apply_journal_rules
+from app.services.firebase_storage import generate_signed_url
+from app.services.alert_service import get_default_tax_rate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# ④ 領収書テンプレート：/receipts/templates に templates ルーターをマウント
 router.include_router(templates_router, prefix="/templates", tags=["receipt-templates"])
 
 
-# ─────────────── Batch Submit (existing feature, kept for backwards compat) ───────────────
-
-class BatchSubmitPayload:
-    pass
+# ─────────────── Batch Submit ───────────────
 
 @router.post("/batch", summary="領収書を一括提出する（AI抽出用）")
 async def submit_receipts_batch(
     payload: dict,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    """
-    Batch submit receipts (e.g., from AI extraction).
-    Kept for backwards compatibility with the frontend AI upload flow.
-    """
     receipts_data = payload.get("receipts", [])
     if not receipts_data:
         raise HTTPException(status_code=400, detail="No receipts provided.")
 
+    default_tax_rate = await get_default_tax_rate(ctx.db)
     docs_to_insert = []
     for r in receipts_data:
         amount = r.get("amount", 0)
-        fiscal_period = r.get("date", datetime.utcnow().strftime("%Y-%m"))[:7]
+        fiscal_period = extract_fiscal_period(r.get("date"))
         rule_id, steps = await evaluate_approval_rules(ctx.corporate_id, "receipt", r)
         role_name_map = {
             "direct_manager": "直属上長",
@@ -73,15 +70,17 @@ async def submit_receipts_batch(
             "document_type": "receipt",
             "date": r.get("date", ""),
             "amount": amount,
-            "tax_rate": r.get("taxRate", r.get("tax_rate", 10)),
+            "tax_rate": r.get("taxRate", r.get("tax_rate", default_tax_rate)),
             "payee": r.get("payee", ""),
             "category": r.get("category", ""),
             "payment_method": r.get("payment_method", "立替"),
             "line_items": r.get("line_items", []),
             "attachments": r.get("attachments", []),
+            "storage_path": r.get("storage_path"),
+            "storage_url": r.get("storage_url"),
             "fiscal_period": fiscal_period,
             "ai_extracted": True,
-            "approval_status": "pending_approval",
+            "approval_status": ApprovalStatus.PENDING,
             "reconciliation_status": "unreconciled",
             "approval_rule_id": rule_id,
             "approval_history": initial_history,
@@ -122,7 +121,7 @@ async def create_receipt(
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     rule_id, _ = await evaluate_approval_rules(ctx.corporate_id, "receipt", payload.model_dump())
-    fiscal_period = payload.date[:7] if payload.date else datetime.utcnow().strftime("%Y-%m")
+    fiscal_period = extract_fiscal_period(payload.date)
 
     payload_dict = payload.model_dump()
     submitted_by = payload_dict.pop("submitted_by", None) or ctx.user_id
@@ -160,9 +159,16 @@ async def list_receipts(
     submitted_by: Optional[str] = None,
     reconciliation_status: Optional[str] = None,
     receipt_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    amount_min: Optional[int] = None,
+    amount_max: Optional[int] = None,
+    payee: Optional[str] = None,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     query = build_list_query(ctx.corporate_id, approval_status=approval_status, fiscal_period=fiscal_period)
+    query["is_deleted"] = {"$ne": True}
+
     scope = build_scope_filter(ctx)
     if scope:
         query.update(scope)
@@ -172,6 +178,18 @@ async def list_receipts(
         query["reconciliation_status"] = reconciliation_status
     if receipt_type:
         query["receipt_type"] = receipt_type
+
+    # 電子帳簿保存法対応の検索フィルター
+    if date_from:
+        query.setdefault("date", {})["$gte"] = date_from
+    if date_to:
+        query.setdefault("date", {})["$lte"] = date_to
+    if amount_min is not None:
+        query.setdefault("amount", {})["$gte"] = amount_min
+    if amount_max is not None:
+        query.setdefault("amount", {})["$lte"] = amount_max
+    if payee:
+        query["payee"] = {"$regex": payee, "$options": "i"}
 
     cursor = ctx.db["receipts"].find(query).sort("created_at", -1)
     docs = await cursor.to_list(length=500)
@@ -185,14 +203,43 @@ async def list_receipts(
     return result
 
 
+@router.get("/{receipt_id}/file-url", summary="添付ファイルの署名付きURLを取得する")
+async def get_file_url(
+    receipt_id: str,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    """
+    storage_path から署名付きURL（有効60分）を生成して返す。
+    電子帳簿保存法に基づき承認済みファイルも閲覧可能。
+    """
+    receipt = await ctx.db["receipts"].find_one({
+        "_id": parse_oid(receipt_id, "receipt"),
+        "corporate_id": ctx.corporate_id,
+        "is_deleted": {"$ne": True},
+    })
+    if not receipt:
+        raise HTTPException(status_code=404, detail="領収書が見つかりません")
+
+    storage_path = receipt.get("storage_path")
+    if not storage_path:
+        raise HTTPException(status_code=404, detail="添付ファイルがありません")
+
+    url = await generate_signed_url(storage_path)
+    if not url:
+        raise HTTPException(status_code=404, detail="ファイルが見つかりません")
+
+    return {"url": url, "expires_in": 3600}
+
 
 @router.get("/{receipt_id}", summary="領収書詳細を取得する")
 async def get_receipt(
     receipt_id: str,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    doc = await get_doc_or_404(ctx.db, "receipts", receipt_id, ctx.corporate_id, "receipt")
-
+    doc = await get_doc_or_404(
+        ctx.db, "receipts", receipt_id, ctx.corporate_id, "receipt",
+        extra_filter={"is_deleted": {"$ne": True}},
+    )
     result = _serialize(doc)
     return await enrich_with_approval_history(ctx.db, result, receipt_id, "receipt")
 
@@ -205,7 +252,6 @@ async def update_receipt(
 ):
     oid = parse_oid(receipt_id, "receipt")
 
-    # Re-evaluate approval rule if amount changed
     if "amount" in payload:
         new_rule_id, _ = await evaluate_approval_rules(ctx.corporate_id, "receipt", payload)
         payload["approval_rule_id"] = new_rule_id
@@ -224,21 +270,38 @@ async def update_receipt(
     return _serialize(updated)
 
 
-@router.delete("/{receipt_id}", summary="領収書を削除する")
+@router.delete("/{receipt_id}", summary="領収書を論理削除する")
 async def delete_receipt(
     receipt_id: str,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     oid = parse_oid(receipt_id, "receipt")
 
-    result = await ctx.db["receipts"].delete_one({"_id": oid, "corporate_id": ctx.corporate_id})
-    if result.deleted_count == 0:
+    receipt = await ctx.db["receipts"].find_one(
+        {"_id": oid, "corporate_id": ctx.corporate_id}
+    )
+    if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
+
+    if receipt.get("approval_status") == ApprovalStatus.APPROVED:
+        raise HTTPException(
+            status_code=400,
+            detail="承認済みの領収書は削除できません。（電子帳簿保存法）",
+        )
+
+    await ctx.db["receipts"].update_one(
+        {"_id": oid, "corporate_id": ctx.corporate_id},
+        {"$set": {
+            "is_deleted": True,
+            "deleted_at": datetime.utcnow(),
+            "deleted_by": ctx.user_id,
+        }},
+    )
     return {"status": "deleted", "receipt_id": receipt_id}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Task#25：二重計上チェックエンドポイント
+# 二重計上チェック
 # ─────────────────────────────────────────────────────────────────────────────
 
 class CheckDuplicateReceiptRequest(BaseModel):
@@ -253,11 +316,6 @@ async def check_duplicate_receipt_endpoint(
     payload: CheckDuplicateReceiptRequest,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    """
-    登録前の事前確認用エンドポイント。
-    同日・同金額・同取引先の領収書が既に存在するか確認する。
-    DB への書き込みは行わない（読み取りのみ）。
-    """
     return await check_duplicate_receipt(
         corporate_id=ctx.corporate_id,
         date=payload.date,

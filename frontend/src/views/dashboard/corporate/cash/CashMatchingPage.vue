@@ -4,6 +4,7 @@ import { Link2, X, Save, CheckCircle2, Search, Wallet, FileSearch, CheckCircle }
 import { useCash, type CashTransaction } from '@/composables/useCash'
 import { api } from '@/lib/api'
 import { MATCHING_STYLES } from '@/constants/matchingStyles'
+import { getFiscalPeriod } from '@/lib/utils/formatters'
 
 const { transactions: cashTxs, cashMatches, fetchTransactions, fetchCashMatches, createCashMatch, deleteCashMatch } = useCash()
 
@@ -148,7 +149,7 @@ const saveManualMatch = async () => {
     manual_category: manualCategory.value,
     manual_description: manualDescription.value,
     manual_amount: manualAmount.value,
-    fiscal_period: new Date().toISOString().slice(0, 7),
+    fiscal_period: getFiscalPeriod(),
   })
   isSavingManual.value = false
   if (ok) {
@@ -174,7 +175,7 @@ const handleMatch = async () => {
     cash_transaction_id: selectedCashTxId.value,
     document_ids: docIds,
     transaction_ids: txIds,
-    fiscal_period: new Date().toISOString().slice(0, 7),
+    fiscal_period: getFiscalPeriod(),
   })
   isMatching.value = false
   if (ok) {

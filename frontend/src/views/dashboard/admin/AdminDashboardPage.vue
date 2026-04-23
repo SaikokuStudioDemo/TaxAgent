@@ -49,7 +49,7 @@ const franchiseDistribution = ref([
         <div>
           <h2 class="text-sm font-bold text-slate-500 mb-1">今月のMRR (概算)</h2>
           <div class="text-3xl font-bold text-slate-900 flex items-end gap-2">
-            {{ formatCurrency(calculateTaxInclusive(mrr)) }}
+            {{ formatCurrency(calculateTaxInclusive(mrr, 10)) }}
             <span class="text-sm font-medium text-emerald-600 flex items-center mb-1"><TrendingUp :size="14" class="mr-0.5"/> +12%</span>
           </div>
           <div class="text-xs text-slate-400 mt-1">(税抜 {{ formatCurrency(mrr) }})</div>
@@ -99,7 +99,7 @@ const franchiseDistribution = ref([
                 <div class="text-xs text-slate-500 mt-1">獲得: {{ agent.clients }}社</div>
               </div>
               <div class="text-right">
-                <div class="font-bold text-indigo-700 text-lg">{{ formatCurrency(calculateTaxInclusive(agent.amount)) }}</div>
+                <div class="font-bold text-indigo-700 text-lg">{{ formatCurrency(calculateTaxInclusive(agent.amount, 10)) }}</div>
                 <div class="text-[10px] text-slate-400">想定支払額 (税抜 {{ formatCurrency(agent.amount) }})</div>
               </div>
             </div>
@@ -123,7 +123,7 @@ const franchiseDistribution = ref([
                 <div class="text-xs text-slate-500 mt-1">管理顧客: {{ fc.clients }}社</div>
               </div>
               <div class="text-right">
-                <div class="font-bold text-emerald-700 text-lg">{{ formatCurrency(calculateTaxInclusive(fc.amount)) }}</div>
+                <div class="font-bold text-emerald-700 text-lg">{{ formatCurrency(calculateTaxInclusive(fc.amount, 10)) }}</div>
                 <div class="text-[10px] text-slate-400">想定キックバック額 (税抜 {{ formatCurrency(fc.amount) }})</div>
               </div>
             </div>

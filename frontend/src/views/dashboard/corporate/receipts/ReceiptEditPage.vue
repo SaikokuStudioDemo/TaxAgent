@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Save, Loader2, AlertCircle, ChevronLeft, LockKeyhole, Image } from 'lucide-vue-next';
+import { useSystemSettings } from '@/composables/useSystemSettings';
+import { Save, Loader2, AlertCircle, ChevronLeft, LockKeyhole, Image, ExternalLink } from 'lucide-vue-next';
 import { useReceipts } from '@/composables/useReceipts';
 import { useProjects } from '@/composables/useProjects';
 import { formatInputAmount, parseInputAmount } from '@/lib/utils/formatters';
+import { api } from '@/lib/api';
 
 const route = useRoute();
 const router = useRouter();
 const { getReceipt, updateReceipt } = useReceipts();
 const { projects, fetchProjects } = useProjects();
+const { taxRates, fetchTaxRates } = useSystemSettings();
 
 const id = route.params.id as string;
 
@@ -20,12 +23,13 @@ const loadError = ref<string | null>(null);
 const saveError = ref<string | null>(null);
 const isApproved = ref(false);
 const attachmentUrl = ref<string | null>(null);
+const hasStoragePath = ref(false);
 
 const form = ref({
   date: '',
   payee: '',
   amount: 0,
-  tax_rate: 10,
+  tax_rate: taxRates.value.standard,
   payment_method: '立替' as '立替' | '法人カード' | '銀行振込' | '現金',
   receipt_type: 'expense' as 'expense' | 'payment_proof',
   category: '',
@@ -37,7 +41,7 @@ const categories = ['消耗品費', '交際費', '旅費交通費', '通信費',
 
 // ─── データ取得 ────────────────────────────────────────────────
 onMounted(async () => {
-  await fetchProjects();
+  await Promise.all([fetchProjects(), fetchTaxRates()]);
   const receipt = await getReceipt(id);
   if (!receipt) {
     loadError.value = '領収書データの取得に失敗しました';
@@ -46,11 +50,12 @@ onMounted(async () => {
   }
   isApproved.value = ['approved', 'auto_approved'].includes(receipt.approval_status);
   attachmentUrl.value = receipt.attachments?.[0] ?? null;
+  hasStoragePath.value = !!receipt.storage_path;
   form.value = {
     date: receipt.date ?? '',
     payee: receipt.payee ?? '',
     amount: receipt.amount ?? 0,
-    tax_rate: receipt.tax_rate ?? 10,
+    tax_rate: receipt.tax_rate ?? taxRates.value.standard,
     payment_method: (receipt.payment_method as any) ?? '立替',
     receipt_type: (receipt.receipt_type ?? 'expense') as 'expense' | 'payment_proof',
     category: receipt.category ?? '',
@@ -95,6 +100,15 @@ const handleSave = async () => {
     router.push('/dashboard/corporate/receipts/list');
   } else {
     saveError.value = '保存に失敗しました。再度お試しください。';
+  }
+};
+
+const openFile = async () => {
+  try {
+    const res = await api.get<{ url: string }>(`/receipts/${id}/file-url`);
+    window.open(res.url, '_blank');
+  } catch {
+    alert('ファイルの取得に失敗しました。');
   }
 };
 </script>
@@ -142,13 +156,24 @@ const handleSave = async () => {
     <!-- Edit Form -->
     <div v-else class="space-y-6">
       <!-- Attachment Preview -->
-      <div v-if="attachmentUrl" class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-        <div class="px-5 py-3 border-b border-gray-100 bg-gray-50/50 flex items-center gap-2">
-          <Image :size="15" class="text-gray-400" />
-          <span class="text-sm font-semibold text-gray-600">添付ファイル</span>
+      <div v-if="attachmentUrl || hasStoragePath" class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="px-5 py-3 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <Image :size="15" class="text-gray-400" />
+            <span class="text-sm font-semibold text-gray-600">添付ファイル</span>
+          </div>
+          <button
+            v-if="hasStoragePath"
+            @click="openFile"
+            class="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+          >
+            <ExternalLink :size="13" />
+            ファイルを表示する
+          </button>
         </div>
         <div class="p-4 flex items-center justify-center bg-gray-50 min-h-[180px]">
-          <img :src="attachmentUrl" alt="領収書画像" class="max-h-64 max-w-full object-contain rounded-lg shadow-sm border border-gray-200" />
+          <img v-if="attachmentUrl" :src="attachmentUrl" alt="領収書画像" class="max-h-64 max-w-full object-contain rounded-lg shadow-sm border border-gray-200" />
+          <span v-else class="text-sm text-gray-400">ファイルを表示するボタンから確認できます</span>
         </div>
       </div>
 

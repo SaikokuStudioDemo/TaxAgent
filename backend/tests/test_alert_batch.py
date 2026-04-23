@@ -375,18 +375,17 @@ async def test_custom_threshold_respected():
 
 @pytest.mark.asyncio
 async def test_email_placeholder_logs_not_sends(caplog):
-    """send_email_notification がログ出力のみで実際の送信を行わないこと。"""
+    """SENDGRID_API_KEY 未設定時に send_email_notification がスキップして False を返すこと。"""
     from app.services.notification_service import send_email_notification
 
-    with caplog.at_level(logging.INFO, logger="app.services.notification_service"):
+    with caplog.at_level(logging.WARNING, logger="app.services.email_service"):
         result = await send_email_notification(
             recipient_email="test@example.com",
             subject="テスト件名",
             body="テスト本文",
         )
 
-    assert result is True
-    assert "[EMAIL PLACEHOLDER]" in caplog.text
+    assert result is False  # SENDGRID_API_KEY 未設定のためスキップ
     assert "test@example.com" in caplog.text
 
 

@@ -14,11 +14,15 @@ from app.api.helpers import (
     build_scope_filter,
     enrich_with_approval_history,
     build_name_map,
+    extract_fiscal_period,
+    ApprovalStatus,
 )
 from app.models.invoice import InvoiceCreate, InvoiceInDB
 import logging
 from app.services.rule_evaluation_service import evaluate_approval_rules
 from app.services.journal_rule_service import apply_journal_rules
+from app.services.firebase_storage import generate_signed_url
+from app.services.alert_service import get_default_tax_rate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,7 +38,7 @@ async def create_invoice(
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     # Determine fiscal period from issue_date (YYYY-MM-DD → YYYY-MM)
-    fiscal_period = payload.issue_date[:7] if payload.issue_date else datetime.utcnow().strftime("%Y-%m")
+    fiscal_period = extract_fiscal_period(payload.issue_date)
 
     # ── received請求書の特別処理 ──────────────────────────────────
     if payload.document_type == "received":
@@ -61,7 +65,7 @@ async def create_invoice(
     # Match approval rules
     rule_id, rule_steps = await evaluate_approval_rules(ctx.corporate_id, f"{payload.document_type}_invoice", payload.model_dump())
 
-    requested_status = payload.approval_status or "draft"
+    requested_status = payload.approval_status or ApprovalStatus.DRAFT
     # 承認ルールなしで即送付 → 自動承認扱い
     is_auto_approved = requested_status == "sent" and rule_id is None
 
@@ -89,7 +93,7 @@ async def create_invoice(
         "corporate_id": ctx.corporate_id,
         "created_by": ctx.user_id,
         "submitted_by": submitted_by,
-        "approval_status": "auto_approved" if is_auto_approved else requested_status,
+        "approval_status": ApprovalStatus.AUTO_APPROVED if is_auto_approved else requested_status,
         "reconciliation_status": "unreconciled",
         "current_step": 1,
         "approval_rule_id": rule_id,
@@ -104,6 +108,13 @@ async def create_invoice(
 
     docs = await apply_journal_rules(ctx.db, ctx.corporate_id, [doc], doc_type="invoice")
     doc = docs[0]
+
+    if doc.get("tax_rate") is None:
+        line_items = doc.get("line_items", [])
+        if line_items and isinstance(line_items[0], dict) and line_items[0].get("tax_rate") is not None:
+            doc["tax_rate"] = line_items[0]["tax_rate"]
+        else:
+            doc["tax_rate"] = await get_default_tax_rate(ctx.db)
 
     result = await ctx.db["invoices"].insert_one(doc)
     await ctx.db["audit_logs"].insert_one({
@@ -127,6 +138,11 @@ async def list_invoices(
     fiscal_period: Optional[str] = None,
     reconciliation_status: Optional[str] = None,
     submitted_by: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    amount_min: Optional[int] = None,
+    amount_max: Optional[int] = None,
+    payee: Optional[str] = None,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
     query = build_list_query(
@@ -136,6 +152,21 @@ async def list_invoices(
         fiscal_period=fiscal_period,
     )
     query["is_deleted"] = {"$ne": True}
+
+    # 電子帳簿保存法対応の検索フィルター
+    if date_from:
+        query.setdefault("issue_date", {})["$gte"] = date_from
+    if date_to:
+        query.setdefault("issue_date", {})["$lte"] = date_to
+    if amount_min is not None:
+        query.setdefault("total_amount", {})["$gte"] = amount_min
+    if amount_max is not None:
+        query.setdefault("total_amount", {})["$lte"] = amount_max
+    if payee:
+        query["$or"] = [
+            {"client_name": {"$regex": payee, "$options": "i"}},
+            {"vendor_name": {"$regex": payee, "$options": "i"}},
+        ]
     scope = build_scope_filter(ctx)
     if scope:
         query.update(scope)
@@ -160,12 +191,43 @@ async def list_invoices(
     return result
 
 
+@router.get("/{invoice_id}/file-url", summary="添付ファイルの署名付きURLを取得する")
+async def get_invoice_file_url(
+    invoice_id: str,
+    ctx: CorporateContext = Depends(get_corporate_context),
+):
+    """
+    storage_path から署名付きURL（有効60分）を生成して返す。
+    電子帳簿保存法に基づき承認済みファイルも閲覧可能。
+    """
+    invoice = await ctx.db["invoices"].find_one({
+        "_id": parse_oid(invoice_id, "invoice"),
+        "corporate_id": ctx.corporate_id,
+        "is_deleted": {"$ne": True},
+    })
+    if not invoice:
+        raise HTTPException(status_code=404, detail="請求書が見つかりません")
+
+    storage_path = invoice.get("storage_path")
+    if not storage_path:
+        raise HTTPException(status_code=404, detail="添付ファイルがありません")
+
+    url = await generate_signed_url(storage_path)
+    if not url:
+        raise HTTPException(status_code=404, detail="ファイルが見つかりません")
+
+    return {"url": url, "expires_in": 3600}
+
+
 @router.get("/{invoice_id}", summary="請求書詳細を取得する")
 async def get_invoice(
     invoice_id: str,
     ctx: CorporateContext = Depends(get_corporate_context),
 ):
-    doc = await get_doc_or_404(ctx.db, "invoices", invoice_id, ctx.corporate_id, "invoice")
+    doc = await get_doc_or_404(
+        ctx.db, "invoices", invoice_id, ctx.corporate_id, "invoice",
+        extra_filter={"is_deleted": {"$ne": True}},
+    )
 
     result = _serialize(doc)
     return await enrich_with_approval_history(
@@ -189,7 +251,7 @@ async def update_invoice(
     existing = await ctx.db["invoices"].find_one({"_id": oid, "corporate_id": ctx.corporate_id}, {"approval_rule_id": 1, "approval_status": 1})
 
     # pending_approval に遷移する場合はルールのステップを保存
-    if update_data.get("approval_status") == "pending_approval" and existing:
+    if update_data.get("approval_status") == ApprovalStatus.PENDING and existing:
         rule_id = existing.get("approval_rule_id")
         if rule_id:
             from app.services.rule_evaluation_service import get_rule_steps

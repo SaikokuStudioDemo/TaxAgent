@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { Plus } from 'lucide-vue-next';
 import { formatNumber as formatAmount } from '@/lib/utils/formatters';
+import { isApproved, isEditable, APPROVAL_STATUS } from '@/lib/constants/approvalStatus';
 import { useReceipts, type Receipt } from '@/composables/useReceipts';
 import { useAuth } from '@/composables/useAuth';
 import DocumentDetailModal from '@/components/shared/DocumentDetailModal.vue';
@@ -42,8 +43,8 @@ const isPending = computed(() =>
 const editable = computed(() => {
   if (!props.receipt) return false;
   const status = props.receipt.approval_status;
-  if (isOwner.value && ['pending_approval', 'rejected', 'draft'].includes(status)) return true;
-  if (isAccountingRole.value && !['approved', 'auto_approved'].includes(status)) return true;
+  if (isOwner.value && isEditable(status)) return true;
+  if (isAccountingRole.value && !isApproved(status)) return true;
   return false;
 });
 
@@ -65,8 +66,8 @@ const onSave = async (data: Record<string, any>): Promise<boolean> => {
     if (data[field] !== undefined) payload[field] = data[field];
   }
   // 差戻し後の再提出: ステータスを pending_approval に戻す
-  if (props.receipt.approval_status === 'rejected') {
-    payload.approval_status = 'pending_approval';
+  if (props.receipt.approval_status === APPROVAL_STATUS.REJECTED) {
+    payload.approval_status = APPROVAL_STATUS.PENDING;
   }
   const result = await updateReceipt(props.receipt.id, payload);
   if (result) {
@@ -144,7 +145,7 @@ const onSave = async (data: Record<string, any>): Promise<boolean> => {
         <h3 class="text-sm font-bold text-gray-900 border-b border-gray-100 pb-2 mb-4 flex items-center gap-2">
           <span class="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>
           領収書を編集
-          <span v-if="receipt?.approval_status === 'rejected'" class="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">保存時に再申請されます</span>
+          <span v-if="receipt?.approval_status === APPROVAL_STATUS.REJECTED" class="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">保存時に再申請されます</span>
         </h3>
         <div class="space-y-4">
           <!-- 合計金額 -->

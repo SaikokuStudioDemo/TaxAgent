@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.db.mongodb import connect_to_mongo, close_mongo_connection, get_database
 from app.services.alert_service import run_all_alerts
-from app.api.routes import users, receipts, invoices, approvals, clients, company_profiles, transactions, matches, admin, advisor, departments, bank_accounts, projects, journal_rules, cash, bank_imports, matching_patterns, invitations, permission_settings, ocr, alerts_config, billing_settings, system_settings, stripe_webhook, exports, budgets
+from app.api.routes import users, receipts, invoices, approvals, clients, company_profiles, transactions, matches, admin, advisor, departments, bank_accounts, projects, journal_rules, cash, bank_imports, matching_patterns, invitations, permission_settings, ocr, alerts_config, billing_settings, system_settings, stripe_webhook, exports, budgets, notifications, tax_firm_reviews
 
 logger = logging.getLogger(__name__)
 
@@ -31,26 +31,36 @@ async def _seed_system_settings(db) -> None:
                 {
                     "id": "plan_basic",
                     "name": "ベーシックプラン",
-                    "price": 15000,
-                    "max_users": 5,
-                    "max_clients": 10,
-                    "features": ["基本機能", "月間500件までのデータ処理", "メールサポート"],
+                    "price": 30000,
+                    "max_client_corporates": 3,
+                    "max_users_per_corporate": 5,
+                    "features": ["基本機能一式", "AIチャット", "月間データ処理"],
+                    "is_active": True,
                 },
                 {
                     "id": "plan_standard",
                     "name": "スタンダードプラン",
-                    "price": 30000,
-                    "max_users": 20,
-                    "max_clients": 50,
-                    "features": ["全機能アクセス", "無制限のデータ処理", "チャット・電話サポート", "優先処理"],
+                    "price": 50000,
+                    "max_client_corporates": 10,
+                    "max_users_per_corporate": 15,
+                    "features": [
+                        "基本機能一式", "AIチャット", "全銀データ出力",
+                        "高度なアラート・自動通知", "予算管理・対比レポート", "テンプレート機能",
+                    ],
+                    "is_active": True,
                 },
                 {
                     "id": "plan_premium",
                     "name": "プレミアムプラン",
-                    "price": 50000,
-                    "max_users": None,
-                    "max_clients": None,
-                    "features": ["AIによる自動仕訳", "専任サポート担当", "カスタムレポート作成", "SLA保証"],
+                    "price": 100000,
+                    "max_client_corporates": -1,
+                    "max_users_per_corporate": -1,
+                    "features": [
+                        "基本機能一式", "AIチャット", "全銀データ出力",
+                        "高度なアラート・自動通知", "予算管理・対比レポート", "テンプレート機能",
+                        "Law Agent（税務QA）", "税理士エスカレーション", "会計ソフト別CSV", "優先サポート",
+                    ],
+                    "is_active": True,
                 },
             ],
             "updated_by": "system",
@@ -172,6 +182,8 @@ app.include_router(system_settings.router, prefix=f"{settings.API_V1_STR}/system
 app.include_router(stripe_webhook.router, prefix="/webhook", tags=["webhook"])
 app.include_router(exports.router, prefix=f"{settings.API_V1_STR}/exports", tags=["exports"])
 app.include_router(budgets.router, prefix=f"{settings.API_V1_STR}/budgets", tags=["budgets"])
+app.include_router(notifications.router, prefix=f"{settings.API_V1_STR}/notifications", tags=["notifications"])
+app.include_router(tax_firm_reviews.router, prefix=f"{settings.API_V1_STR}/tax-firm/reviews", tags=["tax-firm-reviews"])
 
 
 @app.get("/")

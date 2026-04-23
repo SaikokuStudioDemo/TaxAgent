@@ -1,70 +1,131 @@
 """
 Journal Rule Service
 Applies journal_rules to receipts/invoices and overwrites the category (account_subject).
+Priority: corporate rules > tax firm rules > Admin journal map
 """
-from typing import Any
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from bson import ObjectId
+
+
+async def _load_journal_map(db: Any) -> Dict[str, Any]:
+    """system_settings から勘定科目マスターを取得する。未設定時は journal_map.json にフォールバック。"""
+    setting = await db["system_settings"].find_one({"key": "journal_map"})
+    if setting and setting.get("value"):
+        return setting["value"]
+    json_path = Path(__file__).parent.parent / "data" / "journal_map.json"
+    with open(json_path) as f:
+        return json.load(f)
 
 
 async def apply_journal_rules(
     db: Any,
     corporate_id: str,
-    documents: list[dict],
+    documents: List[Dict[str, Any]],
     doc_type: str = "receipt",
-) -> list[dict]:
+) -> List[Dict[str, Any]]:
     """
-    journal_rules コレクションを参照し、各ドキュメントの category を上書きする。
+    仕訳ルールを適用する。優先順位：配下法人ルール > 税理士法人ルール > Admin標準マスター
 
     doc_type:
-    - "receipt" : payee フィールドを取引先として扱い、category（ドキュメント直下）を上書き
+    - "receipt" : payee フィールドを取引先として扱い、category を上書き
     - "invoice" : client_name フィールドを取引先として扱い、line_items[].category を全て上書き
-
-    マッチングロジック:
-    - target_field が "品目・摘要" or "摘要"
-        → 取引先名 または line_items[].description に対して keyword の部分一致
-    - target_field が "取引先名"
-        → 取引先名 に対して keyword の部分一致
-    - target_field が "勘定科目"
-        → category に対して keyword の完全一致（receipt のみ有効）
-    - is_active=True のルールのみ適用
-    - 複数一致した場合は最初に一致したルール（created_at 昇順）を優先
     """
     if not documents:
         return documents
 
-    cursor = db["journal_rules"].find({
-        "corporate_id": corporate_id,
-        "is_active": True,
-    }).sort("created_at", 1)
-    rules = await cursor.to_list(length=500)
+    # 1. 配下法人ルールを取得
+    corporate_rules: List[Dict[str, Any]] = await db["journal_rules"].find(
+        {"corporate_id": corporate_id, "is_active": True}
+    ).sort("created_at", 1).to_list(length=500)
 
-    if not rules:
-        return documents
+    # 2. 税理士法人ルールを取得（フォールバック用）
+    tax_firm_rules: List[Dict[str, Any]] = []
+    try:
+        corporate = await db["corporates"].find_one({"_id": ObjectId(corporate_id)})
+        if corporate and corporate.get("advising_tax_firm_id"):
+            tax_firm = await db["corporates"].find_one(
+                {"firebase_uid": corporate["advising_tax_firm_id"]}
+            )
+            if tax_firm:
+                tax_firm_rules = await db["journal_rules"].find(
+                    {"corporate_id": str(tax_firm["_id"]), "is_active": True}
+                ).sort("created_at", 1).to_list(length=500)
+    except Exception:
+        pass
 
-    result = []
+    # 3. Admin標準マスターを取得（最終フォールバック）
+    journal_map = await _load_journal_map(db)
+
+    results: List[Dict[str, Any]] = []
     for doc in documents:
-        matched_rule = None
-        for rule in rules:
-            if _matches(rule, doc, doc_type):
-                matched_rule = rule
-                break
+        matched = _apply_rules(corporate_rules, doc, doc_type)
+        if matched is None:
+            matched = _apply_rules(tax_firm_rules, doc, doc_type)
+        if matched is None:
+            matched = _apply_journal_map(journal_map, doc, doc_type)
+        results.append(matched if matched is not None else doc)
 
-        if matched_rule:
-            doc = dict(doc)
+    return results
+
+
+def _apply_rules(
+    rules: List[Dict[str, Any]],
+    doc: Dict[str, Any],
+    doc_type: str,
+) -> Optional[Dict[str, Any]]:
+    """ルール一覧に対してドキュメントをマッチングし、一致すれば category を上書きしたコピーを返す。"""
+    for rule in rules:
+        if _matches(rule, doc, doc_type):
+            result = dict(doc)
             if doc_type == "receipt":
-                doc["category"] = matched_rule["account_subject"]
+                result["category"] = rule["account_subject"]
             else:
-                doc["line_items"] = [
-                    {**item, "category": matched_rule["account_subject"]}
+                result["line_items"] = [
+                    {**item, "category": rule["account_subject"]}
                     for item in doc.get("line_items", [])
                 ]
-            doc["applied_journal_rule_id"] = str(matched_rule["_id"])
+            result["applied_journal_rule_id"] = str(rule["_id"])
+            return result
+    return None
 
-        result.append(doc)
 
+def _apply_journal_map(
+    journal_map: Dict[str, Any],
+    doc: Dict[str, Any],
+    doc_type: str,
+) -> Optional[Dict[str, Any]]:
+    """Admin標準マスターのキーワードに対してマッチングし、一致すれば category を上書きしたコピーを返す。"""
+    base_text = (doc.get("payee") if doc_type == "receipt" else doc.get("client_name")) or ""
+    descriptions = [(item.get("description") or "") for item in doc.get("line_items", [])]
+
+    for subject_name, entry in journal_map.items():
+        for kw in entry.get("keywords", []):
+            kw_lower = kw.lower()
+            if kw_lower in base_text.lower():
+                return _make_journal_map_result(doc, doc_type, subject_name)
+            for desc in descriptions:
+                if kw_lower in desc.lower():
+                    return _make_journal_map_result(doc, doc_type, subject_name)
+    return None
+
+
+def _make_journal_map_result(doc: Dict[str, Any], doc_type: str, subject_name: str) -> Dict[str, Any]:
+    result = dict(doc)
+    if doc_type == "receipt":
+        result["category"] = subject_name
+    else:
+        result["line_items"] = [
+            {**item, "category": subject_name}
+            for item in doc.get("line_items", [])
+        ]
+    result["applied_journal_map_subject"] = subject_name
     return result
 
 
-def _matches(rule: dict, doc: dict, doc_type: str = "receipt") -> bool:
+def _matches(rule: Dict[str, Any], doc: Dict[str, Any], doc_type: str = "receipt") -> bool:
     keyword = rule.get("keyword", "")
     target_field = rule.get("target_field", "")
 
@@ -74,7 +135,6 @@ def _matches(rule: dict, doc: dict, doc_type: str = "receipt") -> bool:
     keyword_lower = keyword.lower()
     base_text = (doc.get("payee") if doc_type == "receipt" else doc.get("client_name")) or ""
 
-    # 品目・摘要 or 摘要 → 取引先名 + line_items description (部分一致)
     if target_field in ("品目・摘要", "摘要"):
         if keyword_lower in base_text.lower():
             return True
@@ -83,14 +143,10 @@ def _matches(rule: dict, doc: dict, doc_type: str = "receipt") -> bool:
                 return True
         return False
 
-    # 取引先名 → 取引先名 (部分一致)
     if target_field == "取引先名":
         return keyword_lower in base_text.lower()
 
-    # 勘定科目 → category (完全一致、receipt のみ)
     if target_field == "勘定科目":
-        category = (doc.get("category") or "")
-        return keyword == category
+        return keyword == (doc.get("category") or "")
 
-    # フォールバック: 取引先名に部分一致
     return keyword_lower in base_text.lower()

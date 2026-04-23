@@ -173,60 +173,11 @@ async def seed():
             "created_at": today,
         },
     ])
-    tax_base_rule_id   = str(tax_rules_res.inserted_ids[0])
-    tax_strict_rule_id = str(tax_rules_res.inserted_ids[1])
 
     # 請求書（税理士法人）- ダミーデータなし
 
-    # 領収書（税理士法人）
-    await db["receipts"].insert_many([
-        {
-            "corporate_id": tax_id,
-            "document_type": "receipt",
-            "date": today.strftime("%Y-%m-%d"),
-            "amount": 5500,
-            "tax_rate": 10,
-            "payee": "タクシー会社",
-            "category": "旅費交通費",
-            "payment_method": "立替",
-            "line_items": [{"description": "移動費", "category": "旅費交通費", "amount": 5000, "tax_rate": 10}],
-            "attachments": [],
-            "fiscal_period": today.strftime("%Y-%m"),
-            "ai_extracted": True,
-            "submitted_by": tax_id,
-            "approval_status": "pending_approval",
-            "reconciliation_status": "unreconciled",
-            "current_step": 1,
-            "approval_rule_id": tax_base_rule_id,
-            "approval_history": [{"step": 1, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"}],
-            "created_at": today,
-        },
-        {
-            "corporate_id": tax_id,
-            "document_type": "receipt",
-            "date": today.strftime("%Y-%m-%d"),
-            "amount": 120000,
-            "tax_rate": 10,
-            "payee": "PCショップ",
-            "category": "消耗品費",
-            "payment_method": "法人カード",
-            "line_items": [{"description": "ノートPC", "category": "消耗品費", "amount": 120000, "tax_rate": 10}],
-            "attachments": [],
-            "fiscal_period": today.strftime("%Y-%m"),
-            "ai_extracted": False,
-            "submitted_by": tax_id,
-            "approval_status": "pending_approval",
-            "reconciliation_status": "unreconciled",
-            "current_step": 1,
-            "approval_rule_id": tax_strict_rule_id,
-            "approval_history": [
-                {"step": 1, "roleId": "accounting", "roleName": "経理担当", "status": "pending"},
-                {"step": 2, "roleId": "dept_manager", "roleName": "部門長", "status": "pending"},
-            ],
-            "created_at": today,
-        },
-    ])
-    print("✅ 税理士法人 承認ルール2件 / 請求書2件 / 領収書2件 作成（消込・仕訳ルールは法人A/Bのみ）")
+    # 税理士法人は領収書を登録しないためシードデータなし
+    print("✅ 税理士法人 承認ルール2件 / 請求書2件 作成（消込・仕訳ルールは法人A/Bのみ）")
 
     # ═══════════════════════════════════════════
     # 一般法人A（seed_corp_a_uid: test-token でアクセスする法人）

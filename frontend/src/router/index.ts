@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { watch } from 'vue'
 import { auth } from '@/lib/firebase/config'
-import { userProfile } from '@/composables/useAuth'
+import { userProfile, isLoading } from '@/composables/useAuth'
+import { api } from '@/lib/api'
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -33,8 +35,10 @@ const router = createRouter({
                 { path: 'settings/matching-rules', name: 'dashboard-tax-firm-settings-matching-rules', component: () => import('@/views/dashboard/corporate/settings/MatchingRulesPage.vue') },
                 { path: 'settings/journal-rules', name: 'dashboard-tax-firm-settings-journal-rules', component: () => import('@/views/dashboard/corporate/settings/JournalRulesPage.vue') },
                 { path: 'users', name: 'dashboard-tax-firm-users', component: () => import('@/views/dashboard/shared/UserManagementPage.vue') },
+                { path: 'invitations', name: 'dashboard-tax-firm-invitations', component: () => import('@/views/dashboard/tax-firm/InvitationsPage.vue') },
                 { path: 'alerts', name: 'dashboard-tax-firm-alerts', component: () => import('@/views/dashboard/tax-firm/AlertsPage.vue') },
                 { path: 'customers/:id/alert-settings', name: 'dashboard-tax-firm-alert-settings', component: () => import('@/views/dashboard/tax-firm/AlertSettingsPage.vue') },
+                { path: 'customers/:id/review', name: 'dashboard-tax-firm-customer-review', component: () => import('@/views/dashboard/tax-firm/CustomerReviewPage.vue') },
                 { path: 'customers/:id/billing', name: 'dashboard-tax-firm-billing-settings', component: () => import('@/views/dashboard/tax-firm/BillingSettingsPage.vue') },
             ]
         },
@@ -83,9 +87,9 @@ const router = createRouter({
                     component: () => import('@/views/dashboard/corporate/invoices/InvoiceListPage.vue'),
                     meta: { title: '請求書リスト' }
                 },
-                { 
-                    path: 'invoices/approvals', 
-                    name: 'dashboard-corporate-invoices-approvals', 
+                {
+                    path: 'invoices/approvals',
+                    name: 'dashboard-corporate-invoices-approvals',
                     component: () => import('@/views/dashboard/corporate/invoices/InvoiceApprovalPage.vue'),
                     meta: { title: '受領請求書承認' }
                 },
@@ -106,6 +110,7 @@ const router = createRouter({
                 { path: 'cash/matching', name: 'CashMatching', component: () => import('@/views/dashboard/corporate/cash/CashMatchingPage.vue') },
                 { path: 'users', name: 'dashboard-corporate-users', component: () => import('@/views/dashboard/shared/UserManagementPage.vue') },
                 { path: 'settings/permissions', name: 'dashboard-corporate-settings-permissions', component: () => import('@/views/dashboard/corporate/settings/PermissionSettingsPage.vue') },
+                { path: 'settings/alerts', name: 'dashboard-corporate-settings-alerts', component: () => import('@/views/dashboard/corporate/settings/CorporateAlertSettingsPage.vue') },
                 { path: 'templates/invoices', name: 'dashboard-corporate-templates-invoices', component: () => import('@/views/dashboard/corporate/templates/InvoiceTemplatesPage.vue') },
                 { path: 'templates/receipts', name: 'dashboard-corporate-templates-receipts', component: () => import('@/views/dashboard/corporate/templates/ReceiptTemplatesPage.vue') },
                 { path: 'outputs/csv', name: 'dashboard-corporate-outputs-csv', component: () => import('@/views/dashboard/corporate/outputs/CsvOutputPage.vue') },
@@ -114,37 +119,76 @@ const router = createRouter({
                 { path: 'outputs/tax-report', name: 'dashboard-corporate-outputs-tax-report', component: () => import('@/views/dashboard/corporate/outputs/TaxReportPage.vue') }
             ]
         },
+        // ─── Admin ──────────────────────────────────────────────────────────
         {
-            path: '/dashboard/admin',
+            path: '/admin/login',
+            name: 'admin-login',
+            component: () => import('@/views/admin/AdminLoginPage.vue'),
+        },
+        {
+            path: '/admin',
             component: () => import('@/views/dashboard/admin/DashboardLayout.vue'),
-            meta: { requiresAuth: true },
+            meta: { requiresAdminAuth: true },
             children: [
-                { path: '', name: 'dashboard-admin-home', component: () => import('@/views/dashboard/admin/AdminDashboardPage.vue') }
+                { path: '', name: 'admin-home', component: () => import('@/views/dashboard/admin/AdminDashboardPage.vue') },
+                { path: 'plans', name: 'admin-plans', component: () => import('@/views/admin/AdminPlansPage.vue') },
+                { path: 'settings', name: 'admin-settings', component: () => import('@/views/admin/AdminSettingsPage.vue') },
+                { path: 'journal-map', name: 'admin-journal-map', component: () => import('@/views/admin/AdminJournalMapPage.vue') },
             ]
-        }
+        },
     ]
 })
 
+// ─── 通常ユーザー認証ガード ────────────────────────────────────────────────
 router.beforeEach(async (to, _from, next) => {
-    const requiresAuth = to.matched.some(record => record.meta.requiresAuth);
-    const isGuestOnly = to.matched.some(record => record.meta.guestOnly);
-    const isDevLogin = !!localStorage.getItem('DEV_AUTH_TOKEN');
-    const isAuthenticated = !!auth.currentUser || isDevLogin;
+    if (to.path.startsWith('/admin')) {
+        next()
+        return
+    }
+
+    // プロファイルロード完了まで待機してから判定する
+    if (isLoading.value) {
+        await new Promise<void>(resolve => {
+            const stop = watch(isLoading, (val) => {
+                if (!val) { stop(); resolve() }
+            })
+        })
+    }
+
+    const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
+    const isGuestOnly = to.matched.some(record => record.meta.guestOnly)
+    const isDevLogin = !!localStorage.getItem('DEV_AUTH_TOKEN')
+    const isAuthenticated = !!auth.currentUser || isDevLogin || !!userProfile.value
 
     if (requiresAuth && !isAuthenticated) {
-        next('/');
+        next('/')
     } else if (isGuestOnly && isAuthenticated) {
-        const profile = userProfile.value;
-        if (profile?.type === 'admin') {
-            next('/dashboard/admin');
-        } else if (profile?.type === 'tax_firm' || profile?.parent_type === 'tax_firm') {
-            next('/dashboard/tax-firm');
+        const profile = userProfile.value
+        if (profile?.type === 'tax_firm' || profile?.parent_type === 'tax_firm') {
+            next('/dashboard/tax-firm')
         } else {
-            next('/dashboard/corporate');
+            next('/dashboard/corporate')
         }
     } else {
-        next();
+        next()
     }
-});
+})
+
+// ─── Admin 専用ガード ──────────────────────────────────────────────────────
+router.beforeEach(async (to, _from, next) => {
+    if (!to.path.startsWith('/admin')) return next()
+    if (to.path === '/admin/login') return next()
+
+    const isDevLogin = !!localStorage.getItem('DEV_AUTH_TOKEN')
+    const isAuthenticated = !!auth.currentUser || isDevLogin
+    if (!isAuthenticated) return next('/admin/login')
+
+    try {
+        await api.get('/admin/me')
+        next()
+    } catch {
+        next('/admin/login')
+    }
+})
 
 export default router

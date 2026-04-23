@@ -1,19 +1,20 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { formatCurrency, calculateTaxInclusive } from '@/lib/utils/formatters';
-import { PLANS, OPTIONS } from '@/lib/constants/mockData';
 import { calculateMonthlyFee } from '@/lib/utils/pricing';
 
 const props = defineProps<{
   selectedPlanId: string;
   selectedOptions: string[];
+  plans: any[];
+  options: any[];
 }>();
 
-const selectedPlan = computed(() => PLANS.find((p) => p.id === props.selectedPlanId));
-const selectedOptionsData = computed(() => OPTIONS.filter((o) => props.selectedOptions.includes(o.id)));
+const selectedPlan = computed(() => props.plans.find((p) => p.id === props.selectedPlanId));
+const selectedOptionsData = computed(() => props.options.filter((o) => props.selectedOptions.includes(o.id)));
 
-const planPrice = computed(() => selectedPlan.value?.price || 0);
-const totalPrice = computed(() => calculateMonthlyFee(props.selectedPlanId, props.selectedOptions));
+const planPrice = computed(() => selectedPlan.value?.price ?? 0);
+const totalPrice = computed(() => calculateMonthlyFee(props.plans, props.options, props.selectedPlanId, props.selectedOptions));
 </script>
 
 <template>
@@ -25,7 +26,7 @@ const totalPrice = computed(() => calculateMonthlyFee(props.selectedPlanId, prop
       <div class="flex justify-between items-center text-sm">
         <span class="text-indigo-200">{{ selectedPlan?.name || 'プラン未選択' }}</span>
         <div class="text-right">
-          <span class="font-semibold block">{{ formatCurrency(calculateTaxInclusive(planPrice)) }}</span>
+          <span class="font-semibold block">{{ formatCurrency(calculateTaxInclusive(planPrice, 10)) }}</span>
           <span class="text-xs text-indigo-300 font-normal">税抜 {{ formatCurrency(planPrice) }}</span>
         </div>
       </div>
@@ -34,7 +35,7 @@ const totalPrice = computed(() => calculateMonthlyFee(props.selectedPlanId, prop
       <div v-for="opt in selectedOptionsData" :key="opt.id" class="flex justify-between items-center text-sm">
         <span class="text-indigo-200 truncate pr-4">{{ opt.name }}</span>
         <div class="text-right">
-          <span class="font-semibold text-indigo-100 block">+{{ formatCurrency(calculateTaxInclusive(opt.price)) }}</span>
+          <span class="font-semibold text-indigo-100 block">+{{ formatCurrency(calculateTaxInclusive(opt.price, 10)) }}</span>
           <span class="text-xs text-indigo-300 font-normal">税抜 {{ formatCurrency(opt.price) }}</span>
         </div>
       </div>
@@ -46,7 +47,7 @@ const totalPrice = computed(() => calculateMonthlyFee(props.selectedPlanId, prop
       <div class="flex justify-between items-end">
         <span class="text-sm text-indigo-200 mb-1">月額合計金額</span>
         <div class="text-right">
-          <span class="text-3xl font-black text-white block">{{ formatCurrency(calculateTaxInclusive(totalPrice)) }}</span>
+          <span class="text-3xl font-black text-white block">{{ formatCurrency(calculateTaxInclusive(totalPrice, 10)) }}</span>
           <span class="text-sm text-indigo-300 font-normal mt-1 block">（税抜 {{ formatCurrency(totalPrice) }}）</span>
         </div>
       </div>

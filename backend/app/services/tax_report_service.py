@@ -15,10 +15,10 @@ DB への書き込みは行わない（読み取りのみ）。
   8% : 税額 = 税込 × 8  / 108
 """
 import logging
-import math
 from typing import Dict, List, Optional
 
 from app.db.mongodb import get_database
+from app.utils.tax_utils import calc_tax_from_inclusive
 
 logger = logging.getLogger(__name__)
 
@@ -136,10 +136,10 @@ def _accumulate_sales(sales: dict, amount: int, tax_rate: float) -> None:
 
     if abs(tax_rate - 0.10) < 0.001:
         sales["taxable_10"] += amount
-        sales["consumption_tax_10"] += math.floor(amount * 10 / 110)
+        sales["consumption_tax_10"] += calc_tax_from_inclusive(amount, 10)
     elif abs(tax_rate - 0.08) < 0.001:
         sales["taxable_8"] += amount
-        sales["consumption_tax_8"] += math.floor(amount * 8 / 108)
+        sales["consumption_tax_8"] += calc_tax_from_inclusive(amount, 8)
     else:
         sales["tax_exempt"] += amount
 
@@ -155,10 +155,10 @@ def _accumulate_purchases(purchases: dict, amount: int, tax_rate: float) -> None
 
     if abs(tax_rate - 0.10) < 0.001:
         purchases["taxable_10"] += amount
-        purchases["consumption_tax_10"] += math.floor(amount * 10 / 110)
+        purchases["consumption_tax_10"] += calc_tax_from_inclusive(amount, 10)
     elif abs(tax_rate - 0.08) < 0.001:
         purchases["taxable_8"] += amount
-        purchases["consumption_tax_8"] += math.floor(amount * 8 / 108)
+        purchases["consumption_tax_8"] += calc_tax_from_inclusive(amount, 8)
     else:
         purchases["tax_exempt"] += amount
 

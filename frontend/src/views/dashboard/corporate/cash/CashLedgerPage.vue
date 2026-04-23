@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { Plus, Wallet, Edit, Trash2, Save, X } from 'lucide-vue-next'
 import { useCash, type CashAccount, type CashTransaction } from '@/composables/useCash'
+import { getFiscalPeriod, formatDateISO } from '@/lib/utils/formatters'
 
 const { accounts, transactions, isLoading, fetchAccounts, createAccount, fetchTransactions, createTransaction, updateTransaction, deleteTransaction } = useCash()
 
@@ -123,12 +124,12 @@ type TxForm = {
 const txForm = ref<TxForm>({
   id: '',
   cash_account_id: '',
-  transaction_date: new Date().toISOString().slice(0, 10),
+  transaction_date: formatDateISO(new Date()),
   direction: 'expense',
   amount: 0,
   description: '',
   category: '消耗品費',
-  fiscal_period: new Date().toISOString().slice(0, 7),
+  fiscal_period: getFiscalPeriod(),
   note: '',
 })
 
@@ -171,12 +172,12 @@ const openNewTx = () => {
   txForm.value = {
     id: '',
     cash_account_id: defaultAccountId,
-    transaction_date: new Date().toISOString().slice(0, 10),
+    transaction_date: formatDateISO(new Date()),
     direction: 'expense',
     amount: 0,
     description: '',
     category: '消耗品費',
-    fiscal_period: new Date().toISOString().slice(0, 7),
+    fiscal_period: getFiscalPeriod(),
     note: '',
   }
   categoryQuery.value = '消耗品費'

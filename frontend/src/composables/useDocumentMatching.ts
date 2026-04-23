@@ -9,6 +9,7 @@ import { ref, computed, isRef, type Ref } from 'vue';
 import { useTransactions, type Transaction as ApiTransaction } from '@/composables/useTransactions';
 import type { ApiCandidatePair } from '@/composables/useTransactions';
 import { sortSelectedFirst, sortByProximity } from '@/utils/matching';
+import { getFiscalPeriod } from '@/lib/utils/formatters';
 
 // ── 共通型 ──────────────────────────────────────────────────────
 
@@ -346,7 +347,7 @@ export function useDocumentMatching<T extends MatchableDocument>(
       if (!confirmed) return;
     }
 
-    const period = new Date().toISOString().slice(0, 7);
+    const period = getFiscalPeriod();
     await createMatch({
       match_type: matchType,
       transaction_ids: [...selectedTransactionIds.value],
@@ -363,7 +364,7 @@ export function useDocumentMatching<T extends MatchableDocument>(
   };
 
   const handleBulkMatch = async () => {
-    const period = new Date().toISOString().slice(0, 7);
+    const period = getFiscalPeriod();
     for (const key of selectedCandidateIds.value) {
       const [docId, txId] = key.split(':');
       const pair = candidatePairs.value.find(

@@ -12,6 +12,7 @@ import PricingSummary from '@/components/registration/PricingSummary.vue';
 import { contractSchema, type ContractFormValues } from '@/lib/utils/validations';
 import type { UserData } from '@/components/registration/UserPermissionList.vue';
 import { calculateMonthlyFee } from '@/lib/utils/pricing';
+import { usePlans } from '@/composables/usePlans';
 
 const router = useRouter();
 const route = useRoute();
@@ -20,6 +21,7 @@ const route = useRoute();
 const invitationToken = ref<string | null>(null);
 const invitationTaxFirmId = ref<string | null>(null);
 
+const { plans, options } = usePlans();
 const selectedPlanId = ref<string>('plan_standard');
 const selectedOptions = ref<string[]>([]);
 const isSubmitting = ref(false);
@@ -135,7 +137,7 @@ const onSubmit = async () => {
       companyUrl: data.companyUrl || null,
       planId: selectedPlanId.value,
       selectedOptions: selectedOptions.value,
-      monthlyFee: calculateMonthlyFee(selectedPlanId.value, selectedOptions.value),
+      monthlyFee: calculateMonthlyFee(plans.value, options.value, selectedPlanId.value, selectedOptions.value),
       sales_agent_id: null,
       referrer_id: null,
       advising_tax_firm_id: invitationTaxFirmId.value || null,
@@ -251,6 +253,8 @@ const handleToggleOption = (id: string) => {
         <PlanSelectionCard
           :selectedPlanId="selectedPlanId"
           :selectedOptions="selectedOptions"
+          :plans="plans"
+          :options="options"
           @selectPlan="selectedPlanId = $event"
           @toggleOption="handleToggleOption"
         />
@@ -273,6 +277,8 @@ const handleToggleOption = (id: string) => {
         <PricingSummary
           :selectedPlanId="selectedPlanId"
           :selectedOptions="selectedOptions"
+          :plans="plans"
+          :options="options"
         />
 
         <!-- Desktop Submit Button -->

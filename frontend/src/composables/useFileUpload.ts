@@ -57,6 +57,17 @@ export function useFileUpload(options: UseFileUploadOptions) {
    * バリデーションエラーや例外時は null を返し、uploadError に理由をセットする。
    */
   const uploadSingleFile = async (file: File): Promise<string | null> => {
+    const result = await uploadSingleFileWithPath(file);
+    return result ? result.url : null;
+  };
+
+  /**
+   * 単一ファイルをアップロードし、{ url, storagePath } を返す。
+   * storage_path をバックエンドに保存する場合はこちらを使う。
+   */
+  const uploadSingleFileWithPath = async (
+    file: File,
+  ): Promise<{ url: string; storagePath: string } | null> => {
     const validationError = validateFile(file);
     if (validationError) {
       uploadError.value = validationError;
@@ -69,7 +80,8 @@ export function useFileUpload(options: UseFileUploadOptions) {
       const timestamp = Date.now();
       const corpId = corporateId.value ?? 'unknown';
       const path = `${storagePath}${corpId}/${timestamp}_${file.name}`;
-      return await uploadFile(file, path);
+      const url = await uploadFile(file, path);
+      return { url, storagePath: path };
     } catch (e: any) {
       uploadError.value = e.message ?? 'ファイルのアップロードに失敗しました';
       return null;
@@ -94,6 +106,7 @@ export function useFileUpload(options: UseFileUploadOptions) {
     uploadError,
     openFilePicker,
     uploadSingleFile,
+    uploadSingleFileWithPath,
     clearFileInput,
   };
 }

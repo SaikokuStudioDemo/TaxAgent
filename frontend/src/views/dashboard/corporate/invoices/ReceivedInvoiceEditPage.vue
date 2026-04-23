@@ -5,6 +5,7 @@ import { Save, Loader2, AlertCircle, ChevronLeft, LockKeyhole, Image } from 'luc
 import { useInvoices } from '@/composables/useInvoices';
 import { useProjects } from '@/composables/useProjects';
 import { formatInputAmount, parseInputAmount } from '@/lib/utils/formatters';
+import { calcTaxFromInclusive } from '@/lib/utils/taxUtils';
 
 const route = useRoute();
 const router = useRouter();
@@ -51,7 +52,7 @@ onMounted(async () => {
     due_date: invoice.due_date ?? '',
     client_name: invoice.vendor_name || invoice.client_name || '',
     total_amount: invoice.total_amount ?? 0,
-    tax_rate: invoice.line_items?.[0]?.tax_rate ?? 10,
+    tax_rate: invoice.tax_rate ?? invoice.line_items?.[0]?.tax_rate ?? 10,
     payment_method: invoice.payment_method ?? '銀行振込',
     category: invoice.line_items?.[0]?.category ?? '仕入',
     memo: (invoice as any).memo ?? '',
@@ -78,8 +79,8 @@ const handleAmountInput = (event: Event) => {
 const handleSave = async () => {
   saveError.value = null;
   isSaving.value = true;
-  const subtotal = Math.round(form.value.total_amount / (1 + form.value.tax_rate / 100));
-  const tax_amount = form.value.total_amount - subtotal;
+  const tax_amount = calcTaxFromInclusive(form.value.total_amount, form.value.tax_rate);
+  const subtotal = form.value.total_amount - tax_amount;
   const payload: Record<string, any> = {
     issue_date: form.value.issue_date,
     due_date: form.value.due_date,

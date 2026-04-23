@@ -22,11 +22,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Alert threshold: invoices above this amount are flagged as high-amount
-HIGH_AMOUNT_THRESHOLD = 100_000  # ¥100,000
-
-# デフォルト閾値（alerts_config 未設定時に使用）
-DEFAULT_THRESHOLDS: Dict[str, int] = {
+# プラットフォーム全体のアラート設定デフォルト値（system_settings 未設定時に使用）
+DEFAULT_ALERT_SETTINGS: Dict[str, int] = {
+    "high_amount_threshold": 100_000,   # 高額アラート閾値（円）
+    "auto_match_tolerance": 1_000,      # 消込自動処理の許容差額（円）
     "rejected_stale_days": 3,
     "no_attachment_days": 3,
     "unreconciled_days": 7,
@@ -34,22 +33,58 @@ DEFAULT_THRESHOLDS: Dict[str, int] = {
     "tax_advisor_escalation_days": 3,
 }
 
+# 後方互換のため alerts_config.py 向けに残す（*_days キーのみ）
+DEFAULT_THRESHOLDS: Dict[str, int] = {
+    k: v for k, v in DEFAULT_ALERT_SETTINGS.items() if k.endswith("_days")
+}
+
+DEFAULT_TAX_RATES: Dict[str, int] = {
+    "standard": 10,  # 標準税率
+    "reduced": 8,    # 軽減税率
+    "exempt": 0,     # 非課税
+}
+
+
+async def get_default_tax_rate(db) -> int:
+    """
+    system_settings から標準税率を取得する。
+    未設定の場合は DEFAULT_TAX_RATES["standard"] を返す。
+    """
+    setting = await db["system_settings"].find_one({"key": "tax_rates"})
+    if setting and isinstance(setting.get("value"), dict):
+        return setting["value"].get("standard", DEFAULT_TAX_RATES["standard"])
+    return DEFAULT_TAX_RATES["standard"]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 共通ヘルパー
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def get_alert_thresholds(corporate_id: str) -> Dict[str, int]:
+async def get_platform_alert_settings() -> Dict[str, int]:
     """
-    alerts_config コレクションから法人別の閾値を取得する。
-    未設定の場合は DEFAULT_THRESHOLDS を使う。
+    system_settings コレクションからプラットフォーム全体のアラート設定を取得する。
+    未設定の場合は DEFAULT_ALERT_SETTINGS を使う。
     """
     db = get_database()
+    sys_doc = await db["system_settings"].find_one({"key": "alert_settings"})
+    result = DEFAULT_ALERT_SETTINGS.copy()
+    if sys_doc and isinstance(sys_doc.get("value"), dict):
+        result.update({k: v for k, v in sys_doc["value"].items() if k in DEFAULT_ALERT_SETTINGS})
+    return result
+
+
+async def get_alert_thresholds(corporate_id: str) -> Dict[str, int]:
+    """
+    法人別のアラート閾値を取得する。
+    platform-level（system_settings）を基底値とし、alerts_config の法人別設定で上書き。
+    法人別に上書きできるのは *_days キーのみ。
+    """
+    result = await get_platform_alert_settings()
+    db = get_database()
     config = await db["alerts_config"].find_one({"corporate_id": corporate_id})
-    if not config:
-        return DEFAULT_THRESHOLDS.copy()
-    result = DEFAULT_THRESHOLDS.copy()
-    result.update({k: v for k, v in config.items() if k in DEFAULT_THRESHOLDS})
+    if config:
+        days_keys = {k for k in DEFAULT_ALERT_SETTINGS if k.endswith("_days")}
+        result.update({k: v for k, v in config.items() if k in days_keys})
     return result
 
 
@@ -153,11 +188,13 @@ async def check_due_date_alerts() -> dict:
     return {"overdue": sent_overdue, "due_soon": sent_due}
 
 
-async def check_high_amount_alerts(threshold: int = HIGH_AMOUNT_THRESHOLD) -> dict:
+async def check_high_amount_alerts() -> dict:
     """
     Flag newly submitted documents (receipts/invoices) that exceed the high-amount threshold
     and haven't been alerted yet.
     """
+    platform = await get_platform_alert_settings()
+    threshold = platform["high_amount_threshold"]
     db = get_database()
     flagged = 0
 

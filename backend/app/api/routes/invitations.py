@@ -7,7 +7,7 @@ import uuid
 
 from firebase_admin import auth as firebase_auth
 from app.api.deps import get_current_user
-from app.api.helpers import verify_tax_firm
+from app.api.helpers import verify_tax_firm, serialize_doc
 from app.db.mongodb import get_database
 
 router = APIRouter()
@@ -55,11 +55,41 @@ async def create_invitation(
         "created_at": datetime.utcnow()
     })
 
-    print(f">>> INVITATION CREATED: TAX_FIRM={firebase_uid}, TOKEN={token}")
+    if payload.invited_email:
+        try:
+            from app.services.email_service import send_invitation_email
+            tax_firm_name = corporate.get("companyName", "税理士法人")
+            await send_invitation_email(
+                to_email=payload.invited_email,
+                token=token,
+                tax_firm_name=tax_firm_name,
+            )
+        except Exception:
+            pass  # メール失敗でも招待作成は成功扱い
+
     return {
         "token": token,
         "expires_at": expires_at.isoformat()
     }
+
+
+@router.get("", summary="招待リンク一覧を取得する")
+async def list_invitations(
+    current_user: dict = Depends(get_current_user)
+):
+    """税理士法人自身が発行した招待リンクの一覧を返す"""
+    db = get_database()
+    firebase_uid = current_user.get("uid")
+
+    corporate = await db["corporates"].find_one({"firebase_uid": firebase_uid})
+    if not corporate or corporate.get("corporateType") != "tax_firm":
+        raise HTTPException(status_code=403, detail="税理士法人のみアクセスできます")
+
+    cursor = db["invitations"].find(
+        {"tax_firm_id": firebase_uid, "type": {"$ne": "linkage_request"}}
+    ).sort("created_at", -1)
+    docs = await cursor.to_list(length=100)
+    return [serialize_doc(doc) for doc in docs]
 
 
 @router.get("/verify", status_code=status.HTTP_200_OK)
@@ -205,7 +235,21 @@ async def approve_linkage(token: str):
         {"$set": {"status": "accepted"}}
     )
 
-    print(f">>> LINKAGE APPROVED: CORPORATE={corporate_uid} → TAX_FIRM={tax_firm_uid}")
+    # 法人へ承認メールを送信
+    try:
+        from app.services.email_service import send_linkage_approved_email
+        firebase_user = firebase_auth.get_user(corporate_uid)
+        corporate_email = firebase_user.email or ""
+        tax_firm_doc = await db["corporates"].find_one({"firebase_uid": tax_firm_uid})
+        tax_firm_name = tax_firm_doc.get("companyName", "税理士法人") if tax_firm_doc else "税理士法人"
+        if corporate_email:
+            await send_linkage_approved_email(
+                to_email=corporate_email,
+                tax_firm_name=tax_firm_name,
+            )
+    except Exception:
+        pass  # メール失敗でも承認処理は完了扱い
+
     return HTMLResponse(content=_html_result("紐付け完了", "法人との連携が完了しました。Tax-Agentにログインして顧客一覧をご確認ください。", success=True))
 
 

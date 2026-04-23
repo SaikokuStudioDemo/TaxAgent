@@ -8,6 +8,7 @@ from app.api.helpers import (
     get_corporate_context,
     CorporateContext,
     parse_oid,
+    ApprovalStatus,
 )
 from app.models.approval import ApprovalRuleCreate, ApprovalRuleUpdate, ApprovalEventCreate, ApprovalPreviewRequest
 import logging
@@ -115,7 +116,7 @@ async def _get_pending_for_me(db, corporate_id: str, firebase_uid: str, document
 
     cursor = db[collection].find({
         "corporate_id": corporate_id,
-        "approval_status": "pending_approval",
+        "approval_status": ApprovalStatus.PENDING,
     })
     all_pending = await cursor.to_list(length=500)
 
@@ -249,7 +250,7 @@ async def record_approval_action(
                 all_approved = True
                 update_result = await ctx.db[collection].update_one(
                     db_query,
-                    {"$set": {"approval_status": "approved"}},
+                    {"$set": {"approval_status": ApprovalStatus.APPROVED}},
                 )
                 if update_result.matched_count == 0:
                     raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")
@@ -274,7 +275,7 @@ async def record_approval_action(
 
             update_result = await ctx.db[collection].update_one(
                 db_query,
-                {"$set": {"approval_status": "rejected"}},
+                {"$set": {"approval_status": ApprovalStatus.REJECTED}},
             )
             if update_result.matched_count == 0:
                 raise HTTPException(status_code=409, detail="同時に別の承認操作が行われたため処理が競合しました。画面を更新して再度お試しください。")

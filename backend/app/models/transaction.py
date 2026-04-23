@@ -20,6 +20,8 @@ class ReceiptCreate(BaseModel):
     receipt_type: Literal["expense", "payment_proof"] = "expense"
     line_items: List[ReceiptLineItem] = []
     attachments: List[str] = []
+    storage_path: Optional[str] = None
+    storage_url: Optional[str] = None
     fiscal_period: str
     ai_extracted: bool = False
     project_id: Optional[str] = None

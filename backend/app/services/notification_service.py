@@ -1,9 +1,19 @@
 """
-Notification service: creates notification records in MongoDB.
-Actual email delivery will be implemented separately (e.g., SendGrid / SMTP).
+Notification service: creates notification records in MongoDB and sends emails.
 """
 from datetime import datetime
 from app.db.mongodb import get_database
+from app.core.config import settings
+
+# アラート系通知のみ alerts_config.email_enabled でメール送否を制御する。
+# 業務系通知（承認依頼・承認結果等）は常に送信。
+ALERT_TYPES = frozenset({
+    "rejected_stale_alert",
+    "no_attachment_alert",
+    "unreconciled_alert",
+    "approval_delay_alert",
+    "tax_advisor_escalation_alert",
+})
 
 
 async def create_notification(
@@ -16,7 +26,11 @@ async def create_notification(
     message: str,
 ) -> None:
     """
-    Persist a notification record to the `notifications` collection.
+    通知を DB に保存し、条件を満たす場合にメールを送信する。
+
+    アラート系（ALERT_TYPES）: alerts_config.email_enabled が True のときのみ送信。
+    業務系（それ以外）: recipient_email があれば常に送信。
+    どちらも SENDGRID_API_KEY が未設定の場合は送信しない。
     """
     db = get_database()
     doc = {
@@ -28,9 +42,24 @@ async def create_notification(
         "related_document_id": related_document_id,
         "message": message,
         "sent_at": datetime.utcnow(),
-        "status": "pending",  # Will be updated to "sent" or "failed" by the email sender
+        "status": "pending",
     }
     await db["notifications"].insert_one(doc)
+
+    if not (recipient_email and settings.SENDGRID_API_KEY):
+        return
+
+    should_send: bool
+    if notification_type in ALERT_TYPES:
+        config = await db["alerts_config"].find_one({"corporate_id": corporate_id})
+        email_enabled = config.get("email_enabled", {}) if config else {}
+        should_send = bool(email_enabled.get(notification_type, False))
+    else:
+        should_send = True
+
+    if should_send:
+        subject = f"【Tax-Agent】{message[:30]}..."
+        await send_email_notification(recipient_email, subject, message)
 
 
 async def notify_next_approver(
@@ -96,22 +125,11 @@ async def send_email_notification(
     subject: str,
     body: str,
 ) -> bool:
-    """
-    メール送信のプレースホルダー。
-    実際の送信は Task#47（SendGrid / Resend 等のインフラ選定後）に差し替える。
-    現時点ではログ出力のみ。戻り値は常に True（送信試行成功扱い）。
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-
+    """メール送信。SendGrid が未設定の場合はスキップして False を返す。"""
     if not recipient_email:
         return False
-
-    logger.info(
-        f"[EMAIL PLACEHOLDER] To: {recipient_email} | Subject: {subject}"
-    )
-    # TODO: Task#47 で SendGrid / Resend 等に差し替える
-    return True
+    from app.services.email_service import _send
+    return await _send(recipient_email, subject, f"<p>{body}</p>")
 
 
 async def create_notification_with_email(
@@ -123,14 +141,7 @@ async def create_notification_with_email(
     related_document_id: str,
     message: str,
 ) -> None:
-    """
-    通知を DB に記録し、メール送信プレースホルダーも呼ぶ。
-    アラートバッチから将来この関数に差し替えることで
-    メール送信を一括で有効化できる。
-
-    現状: create_notification（DB記録） + send_email_notification（ログのみ）
-    将来: send_email_notification 内を実メール送信に差し替えるだけで完了。
-    """
+    """DB 通知記録とメール送信を同時に行う便利関数。"""
     await create_notification(
         corporate_id=corporate_id,
         notification_type=notification_type,
@@ -140,12 +151,14 @@ async def create_notification_with_email(
         related_document_id=related_document_id,
         message=message,
     )
-    subject = f"【Tax-Agent】{message[:30]}..."
-    await send_email_notification(
-        recipient_email=recipient_email,
-        subject=subject,
-        body=message,
-    )
+    if recipient_email:
+        subject = f"【Tax-Agent】{message[:30]}..."
+        await send_email_notification(
+            recipient_email=recipient_email,
+            subject=subject,
+            body=message,
+        )
+
 
 
 async def notify_submitter(

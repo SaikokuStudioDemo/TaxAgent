@@ -29,6 +29,18 @@ DEFAULT_AI_CREDIT_LIMITS: Dict[str, int] = {
 }
 
 
+async def get_law_agent_url() -> str:
+    """
+    LAW_AGENT_URL を system_settings から取得する。
+    未設定の場合は .env の値にフォールバックする。
+    """
+    db = get_database()
+    setting = await db["system_settings"].find_one({"key": "law_agent_url"})
+    if setting and setting.get("value"):
+        return setting["value"]
+    return settings.LAW_AGENT_URL
+
+
 async def get_ai_credit_limit(plan_id: str) -> int:
     """
     system_settings から ai_credit_limits を取得する。
@@ -194,7 +206,7 @@ class ChatService:
         Call the external Law Agent API for legal/tax FAQ questions.
         Returns the response text, or None if it cannot answer.
         """
-        url = f"{settings.LAW_AGENT_URL}/api/chat"
+        url = f"{await get_law_agent_url()}/api/chat"
         payload = {
             "message": query,
             "agent_id": LAW_AGENT_ID,

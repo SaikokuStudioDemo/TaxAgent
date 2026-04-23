@@ -319,7 +319,7 @@ async def test_tax_firm_cannot_update_other_clients_config():
 @pytest.mark.asyncio
 async def test_corporate_alerts_returns_all_clients():
     """GET /admin/corporate-alerts が配下の全法人の件数を返すこと。"""
-    from app.api.routes.admin import get_corporate_alerts
+    from app.api.routes.alerts_config import get_corporate_alerts
 
     client1 = {"_id": ObjectId(), "name": "顧客1株式会社", "corporateType": "corporate",
                "advising_tax_firm_id": TAX_FIRM_B_UID}
@@ -338,7 +338,7 @@ async def test_corporate_alerts_returns_all_clients():
     })
     current_user = {"uid": TAX_FIRM_B_UID}
 
-    with patch("app.db.mongodb.get_database", return_value=mock_db):
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
         result = await get_corporate_alerts(current_user)
 
     assert "data" in result
@@ -359,7 +359,7 @@ async def test_corporate_alerts_returns_all_clients():
 @pytest.mark.asyncio
 async def test_corporate_alerts_sorted_by_alert_count():
     """アラートが多い法人が先頭に来ること。"""
-    from app.api.routes.admin import get_corporate_alerts
+    from app.api.routes.alerts_config import get_corporate_alerts
 
     corp_low  = {"_id": ObjectId(), "name": "アラート少ない", "corporateType": "corporate",
                  "advising_tax_firm_id": TAX_FIRM_B_UID}
@@ -400,7 +400,7 @@ async def test_corporate_alerts_sorted_by_alert_count():
     })
     current_user = {"uid": TAX_FIRM_B_UID}
 
-    with patch("app.db.mongodb.get_database", return_value=mock_db):
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
         result = await get_corporate_alerts(current_user)
 
     data = result["data"]
@@ -670,7 +670,7 @@ async def test_put_partial_update_does_not_reset_others():
 @pytest.mark.asyncio
 async def test_corporate_alerts_includes_all_clients():
     """配下に3法人ある場合に3件返ること。"""
-    from app.api.routes.admin import get_corporate_alerts
+    from app.api.routes.alerts_config import get_corporate_alerts
 
     clients = [
         {"_id": ObjectId(), "name": f"顧客{i}", "corporateType": "corporate",
@@ -685,7 +685,7 @@ async def test_corporate_alerts_includes_all_clients():
         "transactions": make_col(count=0),
     })
 
-    with patch("app.db.mongodb.get_database", return_value=mock_db):
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
         result = await get_corporate_alerts({"uid": TAX_FIRM_B_UID})
 
     assert len(result["data"]) == 3
@@ -694,7 +694,7 @@ async def test_corporate_alerts_includes_all_clients():
 @pytest.mark.asyncio
 async def test_corporate_alerts_sorted_by_total_alerts():
     """アラート件数の多い順に並んでいること（rejected_stale + approval_delay 合計）。"""
-    from app.api.routes.admin import get_corporate_alerts
+    from app.api.routes.alerts_config import get_corporate_alerts
 
     corp_a = {"_id": ObjectId(), "name": "アラート0", "corporateType": "corporate",
               "advising_tax_firm_id": TAX_FIRM_B_UID}
@@ -723,7 +723,7 @@ async def test_corporate_alerts_sorted_by_total_alerts():
         "transactions": make_col(count=0),
     })
 
-    with patch("app.db.mongodb.get_database", return_value=mock_db):
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
         result = await get_corporate_alerts({"uid": TAX_FIRM_B_UID})
 
     data = result["data"]
@@ -733,7 +733,7 @@ async def test_corporate_alerts_sorted_by_total_alerts():
 @pytest.mark.asyncio
 async def test_corporate_alerts_zero_when_no_alerts():
     """全法人でアラートなしの場合に has_alerts=False・total_alerts=0 であること。"""
-    from app.api.routes.admin import get_corporate_alerts
+    from app.api.routes.alerts_config import get_corporate_alerts
 
     client = {"_id": ObjectId(), "name": "正常法人", "corporateType": "corporate",
               "advising_tax_firm_id": TAX_FIRM_B_UID}
@@ -744,7 +744,7 @@ async def test_corporate_alerts_zero_when_no_alerts():
         "transactions": make_col(count=0),
     })
 
-    with patch("app.db.mongodb.get_database", return_value=mock_db):
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
         result = await get_corporate_alerts({"uid": TAX_FIRM_B_UID})
 
     assert len(result["data"]) == 1
@@ -757,7 +757,7 @@ async def test_corporate_alerts_zero_when_no_alerts():
 async def test_corporate_cannot_call_corporate_alerts():
     """一般法人が GET /admin/corporate-alerts を呼ぶと 403 が返ること。"""
     from fastapi import HTTPException
-    from app.api.routes.admin import get_corporate_alerts
+    from app.api.routes.alerts_config import get_corporate_alerts
 
     corp_doc = {
         "_id": ObjectId(),
@@ -766,7 +766,7 @@ async def test_corporate_cannot_call_corporate_alerts():
     }
     mock_db = build_mock_db({"corporates": make_col(find_one=corp_doc)})
 
-    with patch("app.db.mongodb.get_database", return_value=mock_db):
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
         with pytest.raises(HTTPException) as exc:
             await get_corporate_alerts({"uid": "corp_uid"})
 
@@ -820,3 +820,668 @@ async def test_verify_helper_raises_on_nonexistent_corporate():
 
     assert exc.value.status_code == 404
     assert "法人が見つかりません" in exc.value.detail
+
+
+# =============================================================================
+# Task#47 追加テスト：email_enabled / /self エンドポイント / 通知メール制御
+# =============================================================================
+
+CORP_C_FIREBASE_UID = CORP_C_DOC["firebase_uid"]  # "corp_c_uid"
+EMPLOYEE_UID = "corp_employee_uid"
+EMPLOYEE_DOC = {
+    "_id": ObjectId(),
+    "firebase_uid": EMPLOYEE_UID,
+    "corporate_id": CORP_C_ID,
+    "role": "accounting",
+    "email": "employee@example.com",
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# test_email_enabled_default_is_false
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_email_enabled_default_is_false():
+    """alerts_config 未設定時に email_enabled が全て False で返ること。"""
+    from app.api.routes.alerts_config import get_alerts_config, DEFAULT_EMAIL_ENABLED
+
+    corporates_col = make_multi_find_col([TAX_FIRM_B_DOC, CORP_C_DOC])
+    mock_db = build_mock_db({
+        "corporates": corporates_col,
+        "alerts_config": make_col(find_one=None),
+    })
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        result = await get_alerts_config(CORP_C_ID, {"uid": TAX_FIRM_B_UID})
+
+    assert "email_enabled" in result
+    for k, default_val in DEFAULT_EMAIL_ENABLED.items():
+        assert result["email_enabled"][k] == default_val, f"{k} のデフォルトは False であること"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# test_update_email_enabled
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_update_email_enabled():
+    """PUT で email_enabled を更新できること（閾値と同時更新も可）。"""
+    from app.api.routes.alerts_config import update_alerts_config
+
+    corporates_col = make_multi_find_col([TAX_FIRM_B_DOC, CORP_C_DOC])
+    alerts_config_col = make_col()
+    mock_db = build_mock_db({
+        "corporates": corporates_col,
+        "alerts_config": alerts_config_col,
+    })
+
+    payload = {
+        "rejected_stale_days": 5,
+        "email_enabled": {
+            "rejected_stale_alert": True,
+            "no_attachment_alert": False,
+        },
+    }
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        result = await update_alerts_config(CORP_C_ID, payload, {"uid": TAX_FIRM_B_UID})
+
+    assert result["status"] == "updated"
+    # update_one が呼ばれていること
+    alerts_config_col.update_one.assert_called_once()
+    call_args = alerts_config_col.update_one.call_args
+    set_data = call_args[0][1]["$set"]
+    assert set_data["rejected_stale_days"] == 5
+    assert set_data["email_enabled.rejected_stale_alert"] is True
+    assert set_data["email_enabled.no_attachment_alert"] is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# test_invalid_email_key_ignored
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_invalid_email_key_ignored():
+    """VALID_EMAIL_KEYS 以外のキーは無視され、400 にならないこと。"""
+    from app.api.routes.alerts_config import update_alerts_config
+
+    corporates_col = make_multi_find_col([TAX_FIRM_B_DOC, CORP_C_DOC])
+    alerts_config_col = make_col()
+    mock_db = build_mock_db({
+        "corporates": corporates_col,
+        "alerts_config": alerts_config_col,
+    })
+
+    payload = {
+        "rejected_stale_days": 3,
+        "email_enabled": {
+            "rejected_stale_alert": True,
+            "completely_unknown_alert_key": True,  # 無視されるべき
+        },
+    }
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        result = await update_alerts_config(CORP_C_ID, payload, {"uid": TAX_FIRM_B_UID})
+
+    assert result["status"] == "updated"
+    set_data = alerts_config_col.update_one.call_args[0][1]["$set"]
+    assert "email_enabled.rejected_stale_alert" in set_data
+    assert "email_enabled.completely_unknown_alert_key" not in set_data
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# test_non_bool_email_enabled_rejected
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_non_bool_email_enabled_rejected():
+    """email_enabled の値が bool 以外（文字列・数値）の場合に 400 が返ること。"""
+    from fastapi import HTTPException
+    from app.api.routes.alerts_config import update_alerts_config
+
+    corporates_col = make_multi_find_col([TAX_FIRM_B_DOC, CORP_C_DOC])
+    mock_db = build_mock_db({
+        "corporates": corporates_col,
+        "alerts_config": make_col(),
+    })
+
+    for bad_val in ["true", 1, 0, None]:
+        with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+            with pytest.raises(HTTPException) as exc:
+                await update_alerts_config(
+                    CORP_C_ID,
+                    {"email_enabled": {"rejected_stale_alert": bad_val}},
+                    {"uid": TAX_FIRM_B_UID},
+                )
+        assert exc.value.status_code == 400, f"value={bad_val!r} で 400 が返ること"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# test_alert_notification_email_sent_when_enabled
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _make_notif_col():
+    """insert_one を AsyncMock にした通知コレクションモック。"""
+    col = make_col()
+    col.insert_one = AsyncMock(return_value=MagicMock())
+    return col
+
+
+def _make_notif_db(alerts_config_find_one):
+    """通知テスト用 mock_db（notifications + alerts_config）。"""
+    return build_mock_db({
+        "notifications": _make_notif_col(),
+        "alerts_config": make_col(find_one=alerts_config_find_one),
+    })
+
+
+@pytest.mark.asyncio
+async def test_alert_notification_email_sent_when_enabled():
+    """email_enabled=True かつ SENDGRID_API_KEY 設定済みの場合にメールが送信されること。"""
+    from app.services.notification_service import create_notification
+    from app.core.config import settings
+
+    original_key = settings.SENDGRID_API_KEY
+    settings.SENDGRID_API_KEY = "SG.test_key"
+    alerts_config_doc = {"corporate_id": CORP_C_ID, "email_enabled": {"rejected_stale_alert": True}}
+    send_mock = AsyncMock(return_value=True)
+
+    try:
+        with patch("app.services.notification_service.get_database", return_value=_make_notif_db(alerts_config_doc)):
+            with patch("app.services.notification_service.send_email_notification", send_mock):
+                await create_notification(
+                    corporate_id=CORP_C_ID, notification_type="rejected_stale_alert",
+                    recipient_employee_id="emp_id", recipient_email="employee@example.com",
+                    related_document_type="receipt", related_document_id="doc_id",
+                    message="差し戻しされた領収書が3日以上放置されています。",
+                )
+        send_mock.assert_called_once()
+    finally:
+        settings.SENDGRID_API_KEY = original_key
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# test_alert_notification_email_not_sent_when_disabled
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_alert_notification_email_not_sent_when_disabled():
+    """email_enabled=False の場合にメールが送信されないこと。"""
+    from app.services.notification_service import create_notification
+    from app.core.config import settings
+
+    original_key = settings.SENDGRID_API_KEY
+    settings.SENDGRID_API_KEY = "SG.test_key"
+    alerts_config_doc = {"corporate_id": CORP_C_ID, "email_enabled": {"rejected_stale_alert": False}}
+    send_mock = AsyncMock(return_value=True)
+
+    try:
+        with patch("app.services.notification_service.get_database", return_value=_make_notif_db(alerts_config_doc)):
+            with patch("app.services.notification_service.send_email_notification", send_mock):
+                await create_notification(
+                    corporate_id=CORP_C_ID, notification_type="rejected_stale_alert",
+                    recipient_employee_id="emp_id", recipient_email="employee@example.com",
+                    related_document_type="receipt", related_document_id="doc_id",
+                    message="差し戻しされた領収書が3日以上放置されています。",
+                )
+        send_mock.assert_not_called()
+    finally:
+        settings.SENDGRID_API_KEY = original_key
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# test_business_notification_always_sends_email
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_business_notification_always_sends_email():
+    """approval_request など業務系通知は email_enabled に関係なく送信されること。"""
+    from app.services.notification_service import create_notification
+    from app.core.config import settings
+
+    original_key = settings.SENDGRID_API_KEY
+    settings.SENDGRID_API_KEY = "SG.test_key"
+    # alerts_config が全て空でも業務系は送信される
+    send_mock = AsyncMock(return_value=True)
+
+    try:
+        with patch("app.services.notification_service.get_database", return_value=_make_notif_db(None)):
+            with patch("app.services.notification_service.send_email_notification", send_mock):
+                await create_notification(
+                    corporate_id=CORP_C_ID, notification_type="approval_request",
+                    recipient_employee_id="emp_id", recipient_email="approver@example.com",
+                    related_document_type="receipt", related_document_id="doc_id",
+                    message="承認依頼が届きました。",
+                )
+        send_mock.assert_called_once()
+    finally:
+        settings.SENDGRID_API_KEY = original_key
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# test_no_double_send_after_merge
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_no_double_send_after_merge():
+    """create_notification_with_email 削除後、メールが1回だけ送信されること。"""
+    from app.services.notification_service import create_notification
+    from app.core.config import settings
+
+    original_key = settings.SENDGRID_API_KEY
+    settings.SENDGRID_API_KEY = "SG.test_key"
+    send_mock = AsyncMock(return_value=True)
+
+    try:
+        with patch("app.services.notification_service.get_database", return_value=_make_notif_db(None)):
+            with patch("app.services.notification_service.send_email_notification", send_mock):
+                await create_notification(
+                    corporate_id=CORP_C_ID, notification_type="approved_notification",
+                    recipient_employee_id="emp_id", recipient_email="submitter@example.com",
+                    related_document_type="invoice", related_document_id="inv_id",
+                    message="請求書が承認されました。",
+                )
+        assert send_mock.call_count == 1, f"1回のみ呼ばれること（実際: {send_mock.call_count}回）"
+    finally:
+        settings.SENDGRID_API_KEY = original_key
+
+
+# =============================================================================
+# 意地悪テスト（Task#47）
+# =============================================================================
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ① email_enabled の境界値テスト
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_email_enabled_partial_update():
+    """rejected_stale_alert のみ True に更新した場合に他のキーは変更されないこと。"""
+    from app.api.routes.alerts_config import update_alerts_config
+
+    corporates_col = make_multi_find_col([TAX_FIRM_B_DOC, CORP_C_DOC])
+    alerts_config_col = make_col()
+    mock_db = build_mock_db({"corporates": corporates_col, "alerts_config": alerts_config_col})
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        result = await update_alerts_config(
+            CORP_C_ID,
+            {"email_enabled": {"rejected_stale_alert": True}},
+            {"uid": TAX_FIRM_B_UID},
+        )
+
+    assert result["status"] == "updated"
+    set_data = alerts_config_col.update_one.call_args[0][1]["$set"]
+    # 更新したキーのみ $set に含まれること（他のキーは含まれない）
+    assert set_data["email_enabled.rejected_stale_alert"] is True
+    assert "email_enabled.no_attachment_alert" not in set_data
+    assert "email_enabled.unreconciled_alert" not in set_data
+    assert "email_enabled.approval_delay_alert" not in set_data
+    assert "email_enabled.tax_advisor_escalation_alert" not in set_data
+
+
+@pytest.mark.asyncio
+async def test_email_enabled_unknown_key_ignored():
+    """VALID_EMAIL_KEYS にない unknown_alert を送っても 400 にならず無視されること。"""
+    from app.api.routes.alerts_config import update_alerts_config, VALID_EMAIL_KEYS
+
+    unknown_key = "unknown_alert"
+    assert unknown_key not in VALID_EMAIL_KEYS
+
+    corporates_col = make_multi_find_col([TAX_FIRM_B_DOC, CORP_C_DOC])
+    alerts_config_col = make_col()
+    mock_db = build_mock_db({"corporates": corporates_col, "alerts_config": alerts_config_col})
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        result = await update_alerts_config(
+            CORP_C_ID,
+            {
+                "rejected_stale_days": 3,
+                "email_enabled": {
+                    "rejected_stale_alert": True,
+                    unknown_key: True,  # 無視されるべき
+                },
+            },
+            {"uid": TAX_FIRM_B_UID},
+        )
+
+    assert result["status"] == "updated"
+    set_data = alerts_config_col.update_one.call_args[0][1]["$set"]
+    assert f"email_enabled.{unknown_key}" not in set_data
+    assert "email_enabled.rejected_stale_alert" in set_data
+
+
+@pytest.mark.asyncio
+async def test_email_enabled_non_bool_string_rejected():
+    """email_enabled の値に文字列 "true" を送ると 400 が返ること。"""
+    from fastapi import HTTPException
+    from app.api.routes.alerts_config import update_alerts_config
+
+    corporates_col = make_multi_find_col([TAX_FIRM_B_DOC, CORP_C_DOC])
+    mock_db = build_mock_db({"corporates": corporates_col, "alerts_config": make_col()})
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        with pytest.raises(HTTPException) as exc:
+            await update_alerts_config(
+                CORP_C_ID,
+                {"email_enabled": {"rejected_stale_alert": "true"}},
+                {"uid": TAX_FIRM_B_UID},
+            )
+    assert exc.value.status_code == 400
+    assert "true/false" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_email_enabled_non_bool_int_rejected():
+    """email_enabled の値に整数 1 を送ると 400 が返ること（Python の bool は int の部分型なので注意）。"""
+    from fastapi import HTTPException
+    from app.api.routes.alerts_config import update_alerts_config
+
+    # Python では bool は int のサブクラスだが、isinstance(True, int) == True。
+    # 整数 1 は bool ではないので 400 になること。
+    corporates_col = make_multi_find_col([TAX_FIRM_B_DOC, CORP_C_DOC])
+    mock_db = build_mock_db({"corporates": corporates_col, "alerts_config": make_col()})
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        with pytest.raises(HTTPException) as exc:
+            await update_alerts_config(
+                CORP_C_ID,
+                {"email_enabled": {"rejected_stale_alert": 1}},
+                {"uid": TAX_FIRM_B_UID},
+            )
+    assert exc.value.status_code == 400
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ② /self エンドポイントのテスト
+# ─────────────────────────────────────────────────────────────────────────────
+
+STAFF_UID = "corp_staff_uid"
+STAFF_DOC = {
+    "_id": ObjectId(),
+    "firebase_uid": STAFF_UID,
+    "corporate_id": CORP_C_ID,
+    "role": "staff",
+}
+ACCOUNTING_UID = "corp_accounting_uid"
+ACCOUNTING_DOC = {
+    "_id": ObjectId(),
+    "firebase_uid": ACCOUNTING_UID,
+    "corporate_id": CORP_C_ID,
+    "role": "accounting",
+}
+
+
+@pytest.mark.asyncio
+async def test_self_endpoint_staff_cannot_update():
+    """staff ロールが PUT /alerts-config/self を叩くと 403 が返ること。"""
+    from fastapi import HTTPException
+    from app.api.routes.alerts_config import update_alerts_config_self
+
+    def _find_one_side_effect(query, *args, **kwargs):
+        uid = query.get("firebase_uid")
+        if uid == STAFF_UID:
+            if "corporateType" in str(query) or "_id" not in query:
+                return None  # corporates に存在しない
+        return None
+
+    employees_col = MagicMock()
+    employees_col.find_one = AsyncMock(return_value=STAFF_DOC)
+    corporates_col = make_col(find_one=None)  # employee なので corporates には見つからない
+    mock_db = build_mock_db({
+        "corporates": corporates_col,
+        "employees": employees_col,
+    })
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        with pytest.raises(HTTPException) as exc:
+            await update_alerts_config_self(
+                {"email_enabled": {"rejected_stale_alert": True}},
+                {"uid": STAFF_UID},
+            )
+    assert exc.value.status_code == 403
+    assert "経理担当者以上" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_self_endpoint_accounting_can_update():
+    """accounting ロールが PUT /alerts-config/self を叩くと更新できること。"""
+    from app.api.routes.alerts_config import update_alerts_config_self
+
+    employees_col = MagicMock()
+    employees_col.find_one = AsyncMock(return_value=ACCOUNTING_DOC)
+    alerts_config_col = make_col()
+    mock_db = build_mock_db({
+        "corporates": make_col(find_one=None),
+        "employees": employees_col,
+        "alerts_config": alerts_config_col,
+    })
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        result = await update_alerts_config_self(
+            {"email_enabled": {"rejected_stale_alert": True}},
+            {"uid": ACCOUNTING_UID},
+        )
+
+    assert result["status"] == "updated"
+    alerts_config_col.update_one.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_self_endpoint_cannot_update_threshold():
+    """PUT /alerts-config/self で rejected_stale_days=5 を送っても閾値は変わらないこと。"""
+    from app.api.routes.alerts_config import update_alerts_config_self
+
+    employees_col = MagicMock()
+    employees_col.find_one = AsyncMock(return_value=ACCOUNTING_DOC)
+    alerts_config_col = make_col()
+    mock_db = build_mock_db({
+        "corporates": make_col(find_one=None),
+        "employees": employees_col,
+        "alerts_config": alerts_config_col,
+    })
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        result = await update_alerts_config_self(
+            {
+                "rejected_stale_days": 5,  # 無視されるべき
+                "email_enabled": {"no_attachment_alert": True},
+            },
+            {"uid": ACCOUNTING_UID},
+        )
+
+    assert result["status"] == "updated"
+    set_data = alerts_config_col.update_one.call_args[0][1]["$set"]
+    # 閾値キーは $set に含まれない
+    assert "rejected_stale_days" not in set_data
+    # email_enabled のみ含まれる
+    assert "email_enabled.no_attachment_alert" in set_data
+
+
+@pytest.mark.asyncio
+async def test_self_endpoint_returns_defaults_when_empty():
+    """alerts_config 未設定の法人が GET /alerts-config/self を叩くとデフォルト値が返ること。"""
+    from app.api.routes.alerts_config import get_alerts_config_self, DEFAULT_EMAIL_ENABLED
+
+    employees_col = MagicMock()
+    employees_col.find_one = AsyncMock(return_value=ACCOUNTING_DOC)
+    mock_db = build_mock_db({
+        "corporates": make_col(find_one=None),
+        "employees": employees_col,
+        "alerts_config": make_col(find_one=None),  # 未設定
+    })
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        result = await get_alerts_config_self({"uid": ACCOUNTING_UID})
+
+    assert "email_enabled" in result
+    for k, default_val in DEFAULT_EMAIL_ENABLED.items():
+        assert result["email_enabled"][k] == default_val
+        assert result["email_enabled"][k] is False, f"{k} のデフォルトは False であること"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ③ 通知メール送信ロジックのテスト
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_alert_type_checks_email_enabled():
+    """rejected_stale_alert で email_enabled=False の場合に send_email_notification が呼ばれないこと。"""
+    from app.services.notification_service import create_notification
+    from app.core.config import settings
+
+    original_key = settings.SENDGRID_API_KEY
+    settings.SENDGRID_API_KEY = "SG.test_key"
+    alerts_config_doc = {"corporate_id": CORP_C_ID, "email_enabled": {"rejected_stale_alert": False}}
+    send_mock = AsyncMock()
+
+    try:
+        with patch("app.services.notification_service.get_database", return_value=_make_notif_db(alerts_config_doc)):
+            with patch("app.services.notification_service.send_email_notification", send_mock):
+                await create_notification(
+                    corporate_id=CORP_C_ID, notification_type="rejected_stale_alert",
+                    recipient_employee_id="e", recipient_email="e@example.com",
+                    related_document_type="receipt", related_document_id="d",
+                    message="アラートメッセージ",
+                )
+        send_mock.assert_not_called()
+    finally:
+        settings.SENDGRID_API_KEY = original_key
+
+
+@pytest.mark.asyncio
+async def test_business_type_ignores_email_enabled():
+    """approval_request は email_enabled が空でも send_email_notification が呼ばれること。"""
+    from app.services.notification_service import create_notification
+    from app.core.config import settings
+
+    original_key = settings.SENDGRID_API_KEY
+    settings.SENDGRID_API_KEY = "SG.test_key"
+    # alerts_config が存在しない（email_enabled も存在しない）
+    send_mock = AsyncMock()
+
+    try:
+        with patch("app.services.notification_service.get_database", return_value=_make_notif_db(None)):
+            with patch("app.services.notification_service.send_email_notification", send_mock):
+                await create_notification(
+                    corporate_id=CORP_C_ID, notification_type="approval_request",
+                    recipient_employee_id="e", recipient_email="approver@example.com",
+                    related_document_type="invoice", related_document_id="d",
+                    message="承認依頼が届きました。",
+                )
+        send_mock.assert_called_once()
+    finally:
+        settings.SENDGRID_API_KEY = original_key
+
+
+@pytest.mark.asyncio
+async def test_no_api_key_blocks_all_emails():
+    """SENDGRID_API_KEY 未設定の場合は email_enabled=True でもメールが送信されないこと。"""
+    from app.services.notification_service import create_notification
+    from app.core.config import settings
+
+    original_key = settings.SENDGRID_API_KEY
+    settings.SENDGRID_API_KEY = ""  # 未設定
+    alerts_config_doc = {"corporate_id": CORP_C_ID, "email_enabled": {"rejected_stale_alert": True}}
+    send_mock = AsyncMock()
+
+    try:
+        with patch("app.services.notification_service.get_database", return_value=_make_notif_db(alerts_config_doc)):
+            with patch("app.services.notification_service.send_email_notification", send_mock):
+                await create_notification(
+                    corporate_id=CORP_C_ID, notification_type="rejected_stale_alert",
+                    recipient_employee_id="e", recipient_email="e@example.com",
+                    related_document_type="receipt", related_document_id="d",
+                    message="アラートメッセージ",
+                )
+        send_mock.assert_not_called()
+    finally:
+        settings.SENDGRID_API_KEY = original_key
+
+
+@pytest.mark.asyncio
+async def test_alert_config_not_found_defaults_to_false():
+    """alerts_config が DB に存在しない場合はデフォルト False となりメールが送信されないこと。"""
+    from app.services.notification_service import create_notification
+    from app.core.config import settings
+
+    original_key = settings.SENDGRID_API_KEY
+    settings.SENDGRID_API_KEY = "SG.test_key"
+    send_mock = AsyncMock()
+
+    try:
+        # alerts_config = None（DB に存在しない）
+        with patch("app.services.notification_service.get_database", return_value=_make_notif_db(None)):
+            with patch("app.services.notification_service.send_email_notification", send_mock):
+                await create_notification(
+                    corporate_id=CORP_C_ID, notification_type="no_attachment_alert",
+                    recipient_employee_id="e", recipient_email="e@example.com",
+                    related_document_type="receipt", related_document_id="d",
+                    message="証憑未提出アラート",
+                )
+        send_mock.assert_not_called()
+    finally:
+        settings.SENDGRID_API_KEY = original_key
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ④ スコープテスト
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_self_endpoint_cross_corporate_impossible():
+    """PUT /alerts-config/self は常に自分の法人のみ更新されること。
+    payload に別の corporate_id を含めても自分の corporate_id で upsert されること。"""
+    from app.api.routes.alerts_config import update_alerts_config_self
+
+    other_corporate_id = str(ObjectId())  # 別法人の ID
+
+    employees_col = MagicMock()
+    employees_col.find_one = AsyncMock(return_value=ACCOUNTING_DOC)
+    alerts_config_col = make_col()
+    mock_db = build_mock_db({
+        "corporates": make_col(find_one=None),
+        "employees": employees_col,
+        "alerts_config": alerts_config_col,
+    })
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        result = await update_alerts_config_self(
+            {
+                "corporate_id": other_corporate_id,  # 別法人 ID を混入（無視されるべき）
+                "email_enabled": {"rejected_stale_alert": True},
+            },
+            {"uid": ACCOUNTING_UID},
+        )
+
+    assert result["status"] == "updated"
+    # upsert フィルタが自分の corporate_id（CORP_C_ID）であること
+    call_filter = alerts_config_col.update_one.call_args[0][0]
+    assert call_filter["corporate_id"] == CORP_C_ID
+    assert call_filter["corporate_id"] != other_corporate_id
+
+
+@pytest.mark.asyncio
+async def test_tax_firm_endpoint_still_blocked_for_corporate():
+    """一般法人ユーザーが PUT /{corporate_id}（税理士法人専用）を叩くと 403 が返ること。"""
+    from fastapi import HTTPException
+    from app.api.routes.alerts_config import update_alerts_config
+
+    # 一般法人ユーザーのドキュメント
+    corp_user_doc = {
+        "_id": ObjectId(),
+        "firebase_uid": CORP_C_FIREBASE_UID,
+        "corporateType": "corporate",
+    }
+    corporates_col = make_col(find_one=corp_user_doc)
+    mock_db = build_mock_db({"corporates": corporates_col})
+
+    with patch("app.api.routes.alerts_config.get_database", return_value=mock_db):
+        with pytest.raises(HTTPException) as exc:
+            await update_alerts_config(
+                CORP_C_ID,
+                {"rejected_stale_days": 3},
+                {"uid": CORP_C_FIREBASE_UID},
+            )
+    assert exc.value.status_code == 403

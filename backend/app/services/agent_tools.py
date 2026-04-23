@@ -20,6 +20,8 @@ from bson import ObjectId
 from app.api.helpers import enrich_with_approval_history
 from app.db.mongodb import get_database
 from app.services.matching_score_service import calculate_match_score
+from app.core.config import DEFAULT_TAX_RATE
+from app.utils.tax_utils import calc_tax_from_exclusive
 
 
 # ── JOURNAL_MAP（モジュールロード時に一度だけ読み込む） ───────────────────────
@@ -682,7 +684,7 @@ async def draft_invoice(
     amount: int,
     description: str,
     due_date: Optional[str] = None,
-    tax_rate: int = 10,
+    tax_rate: int = DEFAULT_TAX_RATE,
 ) -> dict:
     """
     請求書の下書き作成（DB への書き込みなし）。
@@ -707,7 +709,7 @@ async def draft_invoice(
         issue_date_str = today.strftime("%Y-%m-%d")
         resolved_due_date = due_date or (today + timedelta(days=30)).strftime("%Y-%m-%d")
 
-        tax_amount = int(amount * tax_rate / 100)
+        tax_amount = calc_tax_from_exclusive(amount, tax_rate)
         total_amount = amount + tax_amount
 
         draft = {
@@ -753,7 +755,7 @@ async def exec_submit_expense_claim(
     payee: str,
     category: str,
     payment_method: str,
-    tax_rate: int = 10,
+    tax_rate: int = DEFAULT_TAX_RATE,
     file_url: Optional[str] = None,
     fiscal_period: str = "",
     confirmed: bool = False,
@@ -1108,6 +1110,19 @@ async def exec_notify_tax_advisor(
             "read": False,
             "sent_at": datetime.utcnow(),
         })
+
+        # 税理士にメール通知
+        try:
+            from firebase_admin import auth as firebase_auth
+            from app.services.email_service import send_tax_advisor_notification_email
+            tf_user = firebase_auth.get_user(tax_firm_uid)
+            tf_email = tf_user.email or ""
+            corp_name = corp.get("companyName", corporate_id)
+            if tf_email:
+                await send_tax_advisor_notification_email(tf_email, message, corp_name)
+        except Exception as email_err:
+            logger.warning(f"exec_notify_tax_advisor email error: {email_err}")
+
         return {"success": True, "message": "税理士に送信しました。"}
     except Exception as e:
         logger.error(f"exec_notify_tax_advisor error: {e}")

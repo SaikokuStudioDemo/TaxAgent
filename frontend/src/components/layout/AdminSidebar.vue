@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { 
-  Building2, 
-  Users, 
-  Settings, 
-  Activity, 
+import {
+  Building2,
+  Users,
+  Settings,
+  Activity,
   ShieldAlert,
   BarChart3,
-  LogOut
+  LogOut,
+  BookText
 } from 'lucide-vue-next';
 import { useAuth } from '@/composables/useAuth';
 
@@ -18,8 +19,8 @@ const companyName = ref('Tax-Agent 運営局');
 const role = ref('特権管理者');
 
 const isActive = (path: string) => {
-    if (path === '/dashboard/admin' && route.path === '/dashboard/admin') return true;
-    if (path !== '/dashboard/admin' && route.path.startsWith(path)) return true;
+    if (path === '/admin' && route.path === '/admin') return true;
+    if (path !== '/admin' && route.path.startsWith(path)) return true;
     return false;
 };
 </script>
@@ -33,11 +34,11 @@ const isActive = (path: string) => {
 
     <nav class="flex-1 p-4 space-y-1">
       <RouterLink 
-        to="/dashboard/admin" 
+        to="/admin" 
         class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors"
-        :class="isActive('/dashboard/admin') ? 'bg-slate-800 text-white font-bold' : 'hover:bg-slate-800 hover:text-white'"
+        :class="isActive('/admin') ? 'bg-slate-800 text-white font-bold' : 'hover:bg-slate-800 hover:text-white'"
       >
-        <Activity :size="20" :class="isActive('/dashboard/admin') ? 'text-sky-400' : 'text-slate-500'" />
+        <Activity :size="20" :class="isActive('/admin') ? 'text-sky-400' : 'text-slate-500'" />
         プラットフォーム全体
       </RouterLink>
       
@@ -67,14 +68,30 @@ const isActive = (path: string) => {
 
       <div class="mt-8 pt-6 border-t border-slate-800">
         <h3 class="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">システム管理</h3>
-        <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white font-medium transition-colors">
-          <Settings :size="20" class="text-slate-500" />
-          プラン・料金設定
-        </a>
-        <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white font-medium transition-colors">
-          <ShieldAlert :size="20" class="text-slate-500" />
-          監査ログ
-        </a>
+        <RouterLink
+          to="/admin/plans"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors"
+          :class="isActive('/admin/plans') ? 'bg-slate-800 text-white font-bold' : 'hover:bg-slate-800 hover:text-white'"
+        >
+          <Settings :size="20" :class="isActive('/admin/plans') ? 'text-sky-400' : 'text-slate-500'" />
+          プラン管理
+        </RouterLink>
+        <RouterLink
+          to="/admin/settings"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors"
+          :class="isActive('/admin/settings') ? 'bg-slate-800 text-white font-bold' : 'hover:bg-slate-800 hover:text-white'"
+        >
+          <ShieldAlert :size="20" :class="isActive('/admin/settings') ? 'text-sky-400' : 'text-slate-500'" />
+          システム設定
+        </RouterLink>
+        <RouterLink
+          to="/admin/journal-map"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-colors"
+          :class="isActive('/admin/journal-map') ? 'bg-slate-800 text-white font-bold' : 'hover:bg-slate-800 hover:text-white'"
+        >
+          <BookText :size="20" :class="isActive('/admin/journal-map') ? 'text-sky-400' : 'text-slate-500'" />
+          勘定科目マスター
+        </RouterLink>
         <button @click="signOut" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-red-400 font-medium transition-colors mt-2">
           <LogOut :size="20" class="text-slate-500 group-hover:text-red-400" />
           ログアウト

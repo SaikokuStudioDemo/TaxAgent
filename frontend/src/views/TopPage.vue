@@ -76,8 +76,7 @@ watch(userProfile, (newVal) => {
 });
 
 onMounted(() => {
-  // isLoading の状態に関わらず initAuth() を呼ぶ
-  // 内部フラグで二重登録を防止しているため安全
+  // main.ts で initAuth() 済みだが、_authListenerInitialized フラグで二重登録を防止しているため安全
   initAuth();
 });
 </script>

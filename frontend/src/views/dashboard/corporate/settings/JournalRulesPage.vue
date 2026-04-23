@@ -11,6 +11,7 @@ import {
 } from 'lucide-vue-next';
 import { useJournalRules, type JournalRule } from '@/composables/useJournalRules';
 import { API_BASE } from '@/lib/api';
+import { corporateType } from '@/composables/useAuth';
 
 interface AutoExpenseRule {
   key: string
@@ -134,7 +135,10 @@ const editRule = (rule: JournalRule) => {
 };
 
 const handleDeleteRule = async (id: string) => {
-    if (!confirm('この仕訳ルールを削除してもよろしいですか？')) return;
+    const msg = corporateType.value === 'tax_firm'
+        ? 'このルールを削除します。配下法人への自動仕訳提案に影響が出る可能性があります。続けますか？'
+        : 'このルールを削除します。自動仕訳の提案が変わる場合があります。続けますか？';
+    if (!confirm(msg)) return;
     const success = await deleteRule(id);
     if (!success) alert('削除に失敗しました。');
 };

@@ -3,6 +3,7 @@ Shared dependency helpers for resolving corporate context from Firebase UID.
 """
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from bson import ObjectId
 from fastapi import HTTPException, Depends
 from typing import Set, Optional, List
@@ -205,6 +206,34 @@ async def verify_tax_firm(firebase_uid: str, db) -> dict:
     return corporate
 
 
+def extract_fiscal_period(date_str: Optional[str] = None) -> str:
+    """
+    日付文字列（YYYY-MM-DD）から fiscal_period（YYYY-MM）を生成する。
+    date_str が None の場合は現在月を返す。
+    """
+    if date_str:
+        return date_str[:7]
+    return datetime.utcnow().strftime("%Y-%m")
+
+
+class ApprovalStatus:
+    DRAFT = "draft"
+    PENDING = "pending_approval"
+    APPROVED = "approved"
+    AUTO_APPROVED = "auto_approved"
+    REJECTED = "rejected"
+
+
+APPROVED_STATUSES = frozenset([
+    ApprovalStatus.APPROVED,
+    ApprovalStatus.AUTO_APPROVED,
+])
+
+
+def is_approved(status: str) -> bool:
+    return status in APPROVED_STATUSES
+
+
 def build_pending_approval_query(corporate_id: str, extra: dict = None) -> dict:
     """approval_status='pending_approval' + is_deleted フィルタの共通クエリを返す。"""
     query: dict = {
@@ -235,10 +264,14 @@ async def get_doc_or_404(
     doc_id: str,
     corporate_id: str,
     label: str = "document",
+    extra_filter: Optional[dict] = None,
 ) -> dict:
     """Fetch a document by ID scoped to corporate_id, raising 400/404 as needed."""
     oid = parse_oid(doc_id, label)
-    doc = await db[collection].find_one({"_id": oid, "corporate_id": corporate_id})
+    query: dict = {"_id": oid, "corporate_id": corporate_id}
+    if extra_filter:
+        query.update(extra_filter)
+    doc = await db[collection].find_one(query)
     if not doc:
         raise HTTPException(status_code=404, detail=f"{label.capitalize()} not found")
     return doc
